@@ -5,6 +5,8 @@ use App\Models\Message;
 use App\Models\Reaction;
 use App\Models\User;
 use Database\Seeders\DefaultWorkspaceSeeder;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Testing\TestResponse;
 
@@ -167,6 +169,20 @@ test('a reply can be reacted to', function () {
 
     react($bob, $reply, '✅')->assertOk()->assertJsonPath('parent_id', $message->id);
     asUser($alice)->getJson("/api/v1/messages/{$message->id}/replies")->assertJsonPath('data.0.reactions.0.emoji', '✅');
+});
+
+test('a removal committed while reacting wins over the reaction', function () {
+    [, $bob, , $message] = reactionScene();
+
+    // The removal lands between the policy check and the message lock.
+    DB::listen(function (QueryExecuted $query) use ($message, $bob) {
+        if (str_contains($query->sql, 'for update') && str_contains($query->sql, '"messages"')) {
+            $message->channel->members()->detach($bob->id);
+        }
+    });
+
+    react($bob, $message, '👍')->assertForbidden();
+    expect(Reaction::count())->toBe(0);
 });
 
 test('a member who left cannot react any more', function () {

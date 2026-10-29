@@ -18,6 +18,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // API routes share the SPA's session cookie (Sanctum "stateful" requests).
         $middleware->statefulApi();
         $middleware->alias(['not-banned' => EnsureNotBanned::class]);
+        // Message bodies keep their edge bidi marks (RLM, LRM, ALM), which TrimStrings would strip;
+        // MessageController trims plain whitespace itself.
+        $middleware->trimStrings(except: ['body']);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

@@ -10,7 +10,6 @@ use App\Models\Channel;
 use App\Models\Message;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -52,11 +51,13 @@ class MessageController extends Controller
         Gate::authorize('view', $channel);
         Gate::authorize('post', $channel);
 
+        $this->trimBody($request);
         $data = $request->validate([
             'body' => $this->bodyRules(),
             'client_id' => ['required', 'uuid'],
             'parent_id' => ['nullable', 'integer'],
         ]);
+        $body = $data['body'];
         $user = $request->user();
         $clientId = Str::lower($data['client_id']);
         $parentId = $data['parent_id'] ?? null;
@@ -70,36 +71,48 @@ class MessageController extends Controller
             throw ValidationException::withMessages(['parent_id' => 'The parent must be a top-level message of this channel.']);
         }
 
-        try {
-            $message = DB::transaction(function () use ($channel, $user, $data, $clientId, $parentId) {
-                // Posts to one channel commit one at a time, so ids become visible in increasing
-                // order and an `after` cursor cannot skip a message that committed late.
-                Channel::whereKey($channel->id)->lockForUpdate()->first();
+        $message = DB::transaction(function () use ($channel, $user, $body, $clientId, $parentId): ?Message {
+            // Posts to one channel commit one at a time, so ids become visible in increasing
+            // order and an `after` cursor cannot skip a message that committed late.
+            Channel::whereKey($channel->id)->lockForUpdate()->first();
+            // Membership again, under the lock: a removal committed since the check above wins.
+            Gate::authorize('post', $channel);
 
-                $message = Message::create([
-                    'channel_id' => $channel->id,
-                    'user_id' => $user->id,
-                    'parent_id' => $parentId,
-                    'body' => $data['body'],
-                    'client_id' => $clientId,
-                ]);
-                MessageCreated::dispatch($message);
+            // A concurrent request with the same client_id may have inserted it since replay():
+            // no row then (and no aborted transaction), and the replay below answers.
+            $id = DB::scalar(
+                'INSERT INTO messages (channel_id, user_id, parent_id, body, client_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (user_id, client_id) DO NOTHING
+                 RETURNING id',
+                [$channel->id, $user->id, $parentId, $body, $clientId, $now = now(), $now],
+                useReadPdo: false,
+            );
+            if ($id === null) {
+                return null;
+            }
 
-                return $message;
-            });
-        } catch (UniqueConstraintViolationException) {
-            // A concurrent request with the same client_id won the race.
+            $message = Message::findOrFail($id);
+            MessageCreated::dispatch($message);
+
+            return $message;
+        });
+
+        if ($message === null) {
             return $this->replay($user, $clientId, $channel) ?? abort(409);
         }
 
         return (new MessageResource($message->refreshForDisplay()))->response()->setStatusCode(201);
     }
 
+    /** Author only, and only while still allowed to post there (deleting stays possible after leaving). */
     public function update(Request $request, Message $message): MessageResource
     {
         Gate::authorize('view', $message->channel);
+        Gate::authorize('post', $message->channel);
         Gate::authorize('update', $message);
 
+        $this->trimBody($request);
         $body = $request->validate(['body' => $this->bodyRules()])['body'];
 
         $message = DB::transaction(function () use ($message, $body) {
@@ -137,10 +150,22 @@ class MessageController extends Controller
         return new MessageResource($message->refreshForDisplay());
     }
 
+    /**
+     * The body, trimmed of plain whitespace only: TrimStrings skips `body` (bootstrap/app.php)
+     * because it would also strip the bidi marks (RLM, LRM, ALM) a Hebrew message may start
+     * or end with.
+     */
+    private function trimBody(Request $request): void
+    {
+        if (is_string($body = $request->input('body'))) {
+            $request->merge(['body' => trim($body, " \t\n\r\v\f")]);
+        }
+    }
+
     /** @return list<string> */
     private function bodyRules(): array
     {
-        // Input is trimmed (and blank turned into null) by the global middleware; max counts characters.
+        // `max` counts characters, not bytes.
         return ['required', 'string', 'max:'.Message::MAX_BODY];
     }
 

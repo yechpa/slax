@@ -60,6 +60,8 @@ class ReactionController extends Controller
         $message = DB::transaction(function () use ($request, $message, $emoji, $apply) {
             $message = Message::lockForUpdate()->findOrFail($message->id);
             abort_if($message->isDeleted(), 404);
+            // Membership again, inside the transaction: a removal committed since the check above wins.
+            Gate::authorize('post', $message->channel);
 
             if ($apply($message, $request->user()->id, $emoji)) {
                 ReactionChanged::dispatch($message);

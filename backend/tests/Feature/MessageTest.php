@@ -7,6 +7,7 @@ use App\Models\Channel;
 use App\Models\Message;
 use App\Models\User;
 use Database\Seeders\DefaultWorkspaceSeeder;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
@@ -109,6 +110,10 @@ test('body_over_4000_chars_rejected', function () {
 
     // Characters are counted, not bytes: 4000 Hebrew letters are 8000 bytes.
     sendMessage($user, $channel, ['body' => str_repeat('א', 4000)])->assertCreated();
+    sendMessage($user, $channel, ['body' => str_repeat('א', 4001)])
+        ->assertUnprocessable()->assertJsonValidationErrors('body');
+    sendMessage($user, $channel, ['body' => str_repeat('😀', 4001)])
+        ->assertUnprocessable()->assertJsonValidationErrors('body');
 
     // Surrounding whitespace does not count.
     sendMessage($user, $channel, ['body' => '  '.str_repeat('b', 4000)."\n"])
@@ -126,6 +131,91 @@ test('hebrew, english and emoji bodies round-trip unchanged', function () {
 
     expect(Message::findOrFail($id)->body)->toBe($body);
     expect(asUser($user)->getJson("/api/v1/channels/{$channel->id}/messages")->json('data.0.body'))->toBe($body);
+});
+
+test('bidi marks at the edges of a body are kept, surrounding whitespace is not', function () {
+    $user = User::factory()->create();
+    $channel = publicChannel($user);
+    $rlm = "\u{200F}";
+    $body = "{$rlm}שלום, ok?{$rlm}";
+
+    $id = sendMessage($user, $channel, ['body' => " \t{$body}\n "])->assertCreated()->assertJson(['body' => $body])->json('id');
+    expect(Message::findOrFail($id)->body)->toBe($body);
+
+    $edited = "\u{200E}hello\u{061C}";
+    asUser($user)->patchJson("/api/v1/messages/{$id}", ['body' => "  {$edited}\r\n"])->assertOk()->assertJson(['body' => $edited]);
+    expect(Message::findOrFail($id)->body)->toBe($edited);
+
+    // Other inputs are still trimmed by the global middleware.
+    sendMessage($user, $channel, ['client_id' => ' '.Str::uuid().' '])->assertCreated();
+});
+
+test('a post racing the same client_id answers with the winner (200)', function () {
+    Event::fake([MessageCreated::class]);
+    $user = User::factory()->create();
+    $channel = publicChannel($user);
+    $clientId = (string) Str::uuid();
+
+    // The concurrent request inserts its row after our replay check, right when we take the channel lock.
+    $raced = false;
+    DB::listen(function (QueryExecuted $query) use (&$raced, $user, $channel, $clientId) {
+        if (! $raced && str_contains($query->sql, 'for update') && str_contains($query->sql, '"channels"')) {
+            $raced = true;
+            message($user, $channel, 'the winner')->forceFill(['client_id' => $clientId])->save();
+        }
+    });
+
+    $winner = sendMessage($user, $channel, ['body' => 'the loser', 'client_id' => $clientId])
+        ->assertOk()->assertJson(['body' => 'the winner', 'client_id' => $clientId])->json('id');
+
+    expect($raced)->toBeTrue()
+        ->and(Message::pluck('id')->all())->toBe([$winner]);
+    Event::assertNotDispatched(MessageCreated::class);
+});
+
+test('a removal committed while posting wins over the post', function () {
+    $owner = User::factory()->create();
+    $member = User::factory()->create();
+    $channel = privateChannel($owner);
+    $channel->members()->attach($member->id);
+
+    // The removal lands between the policy check and the channel lock.
+    DB::listen(function (QueryExecuted $query) use ($channel, $member) {
+        if (str_contains($query->sql, 'for update') && str_contains($query->sql, '"channels"')) {
+            $channel->members()->detach($member->id);
+        }
+    });
+
+    sendMessage($member, $channel)->assertForbidden();
+    expect(Message::count())->toBe(0);
+});
+
+test('removed_author_cannot_edit_but_can_delete_own_message', function () {
+    Event::fake([MessageUpdated::class, MessageDeleted::class]);
+    $owner = User::factory()->create();
+    $author = User::factory()->create();
+    $channel = publicChannel($owner);
+    $channel->members()->attach($author->id);
+    $message = message($author, $channel, 'said while a member');
+
+    asUser($owner)->deleteJson("/api/v1/channels/{$channel->id}/members/{$author->id}")->assertNoContent();
+
+    // Public channel: still readable, but no longer writable, edits included.
+    asUser($author)->patchJson("/api/v1/messages/{$message->id}", ['body' => 'rewritten after leaving'])->assertForbidden();
+    expect($message->fresh())->body->toBe('said while a member')->edited_at->toBeNull();
+    Event::assertNotDispatched(MessageUpdated::class);
+
+    // Authors can always take their own words back.
+    asUser($author)->deleteJson("/api/v1/messages/{$message->id}")->assertOk()->assertJson(['deleted' => true]);
+    Event::assertDispatchedTimes(MessageDeleted::class, 1);
+
+    // In a private channel, a former member sees nothing at all.
+    $private = privateChannel($owner, 'secret');
+    $private->members()->attach($author->id);
+    $hidden = message($author, $private);
+    $private->members()->detach($author->id);
+    asUser($author)->patchJson("/api/v1/messages/{$hidden->id}", ['body' => 'x'])->assertNotFound();
+    asUser($author)->deleteJson("/api/v1/messages/{$hidden->id}")->assertNotFound();
 });
 
 test('only_author_can_edit_or_delete', function () {
