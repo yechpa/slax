@@ -1,0 +1,6 @@
+# gitleaks configuration: the default ruleset, no allowlist.
+# Placeholder values in .env.example are chosen so they do not match any rule.
+title = "Slax gitleaks config"
+
+[extend]
+useDefault = true
