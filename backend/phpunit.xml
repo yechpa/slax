@@ -12,6 +12,12 @@
             <directory>tests/Feature</directory>
         </testsuite>
     </testsuites>
+    <groups>
+        <!-- Needs the dev Reverb server: `make test-reverb`. -->
+        <exclude>
+            <group>reverb-e2e</group>
+        </exclude>
+    </groups>
     <source>
         <include>
             <directory>app</directory>

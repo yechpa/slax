@@ -2,14 +2,17 @@
 
 namespace App\Providers;
 
+use App\Broadcasting\ReverbBroadcaster;
 use App\Contracts\IdentityProvider;
 use App\Services\FakeTurnstile;
 use App\Services\Identity\FakeIdentityProvider;
 use App\Services\Identity\GoogleIdentityProvider;
 use App\Services\Turnstile;
+use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -37,5 +40,8 @@ class AppServiceProvider extends ServiceProvider
         // Ids are bigints: anything else is a 404, not a database error.
         Route::pattern('channel', '[0-9]+');
         Route::pattern('message', '[0-9]+');
+
+        // Reverb speaks the Pusher protocol; this subclass adds what channel revocation needs.
+        Broadcast::extend('reverb', fn ($app, array $config) => new ReverbBroadcaster($app->make(BroadcastManager::class)->pusher($config)));
     }
 }

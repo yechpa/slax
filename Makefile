@@ -10,7 +10,7 @@ DC  := docker compose --progress quiet
 RUN := $(DC) run --rm -T
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test lint fmt
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-8s %s\n", $$1, $$2}'
@@ -61,6 +61,12 @@ test: env deps ## Run Pest, Vitest and pytest
 	echo '==> Pest (backend)'; $(RUN) app vendor/bin/pest
 	echo '==> Vitest (frontend)'; $(RUN) --no-deps frontend npm test --silent
 	echo '==> pytest (scanner)'; $(RUN) python-tools pytest -q
+
+test-reverb: env deps ## Run the end-to-end WebSocket tests against the dev Reverb server
+	$(DC) up -d --wait postgres redis
+	$(DC) up -d reverb
+	$(DC) exec -T postgres sh -c 'psql -U "$$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '"'"'slax_test'"'"'" | grep -q 1 || createdb -U "$$POSTGRES_USER" slax_test'
+	$(RUN) -e REVERB_E2E=1 app vendor/bin/pest --group=reverb-e2e
 
 lint: env deps ## Run Pint, ESLint and Ruff (checks only)
 	echo '==> Pint (backend)'; $(RUN) --no-deps app vendor/bin/pint --test
