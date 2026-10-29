@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -13,19 +14,23 @@ return new class extends Migration
     {
         Schema::create('users', function (Blueprint $table) {
             $table->id();
+            // Identity is the stable Google subject; there is no password at all.
+            $table->string('google_sub')->unique();
+            $table->string('email');
             $table->string('name');
-            $table->string('email')->unique();
-            $table->timestamp('email_verified_at')->nullable();
-            $table->string('password');
-            $table->rememberToken();
+            $table->text('avatar_url')->nullable();
+            $table->string('locale', 2)->default('en');
+            $table->string('theme', 16)->default('console');
+            $table->timestamp('last_seen_at')->nullable();
+            $table->boolean('is_admin')->default(false);
+            $table->timestamp('banned_at')->nullable();
             $table->timestamps();
+
+            $table->index('email');
         });
 
-        Schema::create('password_reset_tokens', function (Blueprint $table) {
-            $table->string('email')->primary();
-            $table->string('token');
-            $table->timestamp('created_at')->nullable();
-        });
+        DB::statement("ALTER TABLE users ADD CONSTRAINT users_locale_check CHECK (locale IN ('en', 'he', 'fr'))");
+        DB::statement("ALTER TABLE users ADD CONSTRAINT users_theme_check CHECK (theme IN ('console', 'listing'))");
 
         Schema::create('sessions', function (Blueprint $table) {
             $table->string('id')->primary();
@@ -43,7 +48,6 @@ return new class extends Migration
     public function down(): void
     {
         Schema::dropIfExists('users');
-        Schema::dropIfExists('password_reset_tokens');
         Schema::dropIfExists('sessions');
     }
 };
