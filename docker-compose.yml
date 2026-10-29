@@ -7,6 +7,9 @@ x-php: &php
   image: slax-php-dev
   user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
   env_file: .env
+  environment:
+    # Also for .env files created before this setting existed (see .env.example).
+    REVERB_MAX_REQUEST_SIZE: "${REVERB_MAX_REQUEST_SIZE:-131072}"
   working_dir: /var/www/html
   volumes:
     - ./backend:/var/www/html

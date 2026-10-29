@@ -24,7 +24,7 @@ class TerminateUserConnections implements ShouldQueue
         $broadcaster = Broadcast::connection();
 
         if ($broadcaster instanceof ReverbBroadcaster) {
-            $broadcaster->terminateUserConnections($this->userId);
+            $broadcaster->terminateUserConnections($this->userId, timeoutSeconds: 10);
         }
     }
 }

@@ -15,6 +15,12 @@ use Illuminate\Http\Resources\Json\JsonResource;
  */
 class MessageResource extends JsonResource
 {
+    /**
+     * Reactors listed per emoji (in order of reaction); `count` stays the true total.
+     * Keeps payloads, broadcasts included, well under Reverb's request size limit.
+     */
+    public const MAX_REACTION_USER_IDS = 50;
+
     /** Broadcast payloads go to every member alike: nobody is "me". */
     private bool $forEveryone = false;
 
@@ -63,7 +69,7 @@ class MessageResource extends JsonResource
     }
 
     /**
-     * One entry per emoji, in order of first use; reactors in order of reaction.
+     * One entry per emoji, in order of first use; the first MAX_REACTION_USER_IDS reactors.
      *
      * @return list<array{emoji: string, count: int, reacted_by_me: bool, user_ids: list<int>}>
      */
@@ -76,7 +82,7 @@ class MessageResource extends JsonResource
                 'emoji' => (string) $emoji,
                 'count' => $group->count(),
                 'reacted_by_me' => $viewerId !== null && $group->contains('user_id', $viewerId),
-                'user_ids' => $group->pluck('user_id')->values()->all(),
+                'user_ids' => $group->pluck('user_id')->take(self::MAX_REACTION_USER_IDS)->values()->all(),
             ])
             ->values()
             ->all();

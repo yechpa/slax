@@ -29,7 +29,8 @@ class TerminateRevokedConnections implements ShouldHandleEventsAfterCommit
         }
 
         try {
-            $broadcaster->terminateUserConnections($event->user->id);
+            // Short timeout: this runs inside the leave/remove request.
+            $broadcaster->terminateUserConnections($event->user->id, timeoutSeconds: 2);
         } catch (Throwable $e) {
             // The membership change stands either way; keep trying in the background.
             report($e);

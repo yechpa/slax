@@ -3,7 +3,11 @@
 namespace App\Broadcasting;
 
 use Illuminate\Broadcasting\Broadcasters\PusherBroadcaster;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+use Pusher\Pusher;
 
 /**
  * The stock Pusher-protocol broadcaster, plus what revocation needs.
@@ -38,9 +42,26 @@ class ReverbBroadcaster extends PusherBroadcaster
         );
     }
 
-    /** Closes every socket the user has open on Reverb; clients reconnect and must re-authorize each channel. */
-    public function terminateUserConnections(int|string $userId): void
+    /**
+     * Closes every socket the user has open on Reverb; clients reconnect and must re-authorize
+     * each channel. A signed call to the Pusher HTTP API like the SDK's terminateUserConnections(),
+     * but with its own (short) timeouts: it runs inside user requests.
+     *
+     * @throws RequestException|ConnectionException when Reverb refused or could not be reached
+     */
+    public function terminateUserConnections(int|string $userId, int $timeoutSeconds = 2): void
     {
-        $this->getPusher()->terminateUserConnections((string) $userId);
+        $settings = $this->getPusher()->getSettings();
+        $path = "{$settings['base_path']}/users/{$userId}/terminate_connections";
+        $body = '{}';
+        $query = Pusher::build_auth_query_params(
+            $settings['auth_key'], $settings['secret'], 'POST', $path, ['body_md5' => md5($body)],
+        );
+
+        Http::connectTimeout($timeoutSeconds)
+            ->timeout($timeoutSeconds)
+            ->withBody($body, 'application/json')
+            ->post("{$settings['scheme']}://{$settings['host']}:{$settings['port']}{$settings['path']}{$path}?".http_build_query($query))
+            ->throw();
     }
 }
