@@ -32,6 +32,7 @@ deps: backend/vendor/autoload.php frontend/node_modules/.package-lock.json ## In
 up: env deps ## Start the whole stack on http://localhost:8080
 	$(DC) up -d --build
 	$(RUN) app php artisan migrate --force
+	$(RUN) app php artisan db:seed --class=DefaultWorkspaceSeeder --force
 	printf 'Waiting for the app'; \
 	for i in $$(seq 1 60); do \
 		curl -fsS -o /dev/null http://localhost:$${WEB_PORT:-8080}/api/v1/health 2>/dev/null && break; \
