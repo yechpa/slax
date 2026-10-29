@@ -11,6 +11,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -31,5 +32,10 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('auth-start', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
         RateLimiter::for('auth-callback', fn (Request $request) => Limit::perMinute(20)->by($request->ip()));
+        RateLimiter::for('messages', fn (Request $request) => Limit::perMinute(30)->by('user:'.$request->user()->id));
+
+        // Ids are bigints: anything else is a 404, not a database error.
+        Route::pattern('channel', '[0-9]+');
+        Route::pattern('message', '[0-9]+');
     }
 }

@@ -3,6 +3,8 @@
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\MeController;
+use App\Http\Controllers\MessageController;
+use App\Http\Controllers\ReactionController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -22,5 +24,13 @@ Route::prefix('v1')->group(function () {
         Route::post('/channels/{channel}/leave', [ChannelController::class, 'leave']);
         Route::post('/channels/{channel}/members', [ChannelController::class, 'addMember']);
         Route::delete('/channels/{channel}/members/{user}', [ChannelController::class, 'removeMemberRoute']);
+
+        Route::get('/channels/{channel}/messages', [MessageController::class, 'index']);
+        Route::post('/channels/{channel}/messages', [MessageController::class, 'store'])->middleware('throttle:messages');
+        Route::get('/messages/{message}/replies', [MessageController::class, 'replies']);
+        Route::patch('/messages/{message}', [MessageController::class, 'update']);
+        Route::delete('/messages/{message}', [MessageController::class, 'destroy']);
+        Route::put('/messages/{message}/reactions/{emoji}', [ReactionController::class, 'store']);
+        Route::delete('/messages/{message}/reactions/{emoji}', [ReactionController::class, 'destroy']);
     });
 });
