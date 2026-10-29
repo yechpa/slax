@@ -1,0 +1,72 @@
+# Slax developer entry points. Everything runs in Docker; the host only needs
+# docker (with the compose plugin), make and openssl.
+
+export DOCKER_UID := $(shell id -u)
+export DOCKER_GID := $(shell id -g)
+
+DC  := docker compose --progress quiet
+
+.SILENT:
+RUN := $(DC) run --rm -T
+
+.DEFAULT_GOAL := help
+.PHONY: help env deps up down logs ps migrate shell test lint fmt
+
+help: ## Show this help
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-8s %s\n", $$1, $$2}'
+
+env: ## Create .env from .env.example (with a generated APP_KEY) if missing
+	@test -f .env || { \
+		cp .env.example .env && \
+		sed -i "s|^APP_KEY=.*|APP_KEY=base64:$$(openssl rand -base64 32)|" .env && \
+		echo "Created .env"; }
+
+backend/vendor/autoload.php: backend/composer.lock | env
+	$(RUN) --no-deps app composer install --no-interaction --no-progress --quiet
+
+frontend/node_modules/.package-lock.json: frontend/package-lock.json | env
+	$(RUN) --no-deps frontend npm ci --no-audit --no-fund --silent
+
+deps: backend/vendor/autoload.php frontend/node_modules/.package-lock.json ## Install PHP and JS dependencies
+
+up: env deps ## Start the whole stack on http://localhost:8080
+	$(DC) up -d --build
+	$(RUN) app php artisan migrate --force
+	printf 'Waiting for the app'; \
+	for i in $$(seq 1 60); do \
+		curl -fsS -o /dev/null http://localhost:$${WEB_PORT:-8080}/api/v1/health 2>/dev/null && break; \
+		printf '.'; sleep 1; \
+	done; echo
+	@echo "Slax is up: http://localhost:$${WEB_PORT:-8080} (health: /api/v1/health)"
+
+down: ## Stop the stack (data volumes are kept)
+	$(DC) --profile tools down
+
+logs: ## Follow the logs of all services
+	docker compose logs -f --tail=50
+
+ps: ## List running services
+	docker compose ps
+
+migrate: ## Run database migrations
+	$(RUN) app php artisan migrate --force
+
+shell: ## Open a shell in the app container
+	docker compose exec app sh
+
+test: env deps ## Run Pest, Vitest and pytest
+	$(DC) up -d --wait postgres redis
+	$(DC) exec -T postgres sh -c 'psql -U "$$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '"'"'slax_test'"'"'" | grep -q 1 || createdb -U "$$POSTGRES_USER" slax_test'
+	echo '==> Pest (backend)'; $(RUN) app vendor/bin/pest
+	echo '==> Vitest (frontend)'; $(RUN) --no-deps frontend npm test --silent
+	echo '==> pytest (scanner)'; $(RUN) python-tools pytest -q
+
+lint: env deps ## Run Pint, ESLint and Ruff (checks only)
+	echo '==> Pint (backend)'; $(RUN) --no-deps app vendor/bin/pint --test
+	echo '==> ESLint (frontend)'; $(RUN) --no-deps frontend npm run lint --silent
+	echo '==> Ruff (scanner)'; $(RUN) python-tools ruff check . && $(RUN) python-tools ruff format --check .
+
+fmt: env deps ## Fix formatting with Pint and Ruff
+	$(RUN) --no-deps app vendor/bin/pint
+	$(RUN) python-tools ruff check --fix .
+	$(RUN) python-tools ruff format .
