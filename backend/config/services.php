@@ -14,6 +14,17 @@ return [
     |
     */
 
+    // Google sign-in (OpenID Connect). Credentials come from the environment only.
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI'),
+    ],
+
+    'turnstile' => [
+        'secret' => env('TURNSTILE_SECRET'),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

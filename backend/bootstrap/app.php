@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureNotBanned;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -13,7 +14,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // API routes share the SPA's session cookie (Sanctum "stateful" requests).
+        $middleware->statefulApi();
+        $middleware->alias(['not-banned' => EnsureNotBanned::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
