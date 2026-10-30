@@ -30,6 +30,9 @@
 	# No e-mail address: Let's Encrypt does not require one.
 	admin localhost:2019
 	servers {
+		# HTTP/1.1 and HTTP/2 over TCP only: the security group opens TCP 80/443, not UDP 443,
+		# so no HTTP/3 is advertised (browsers would try QUIC first and wait for it to fail).
+		protocols h1 h2
 		timeouts {
 			read_header 10s
 			idle 2m
