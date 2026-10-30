@@ -64,3 +64,26 @@ receives the channel's events until it disconnects.
   with more, whether I am one of them is kept from what the client knew (a REST answer, or my own toggle), never
   guessed from the broadcast.
 
+
+## Administration, alerts and the demo reset
+
+**Where:** `backend/app/Services/Moderation.php`, `backend/app/Services/UserSessions.php`,
+`backend/app/Services/Alerts/TelegramNotifier.php`, `backend/app/Console/Commands/DemoReset.php`,
+`backend/app/Services/AuditLogger.php`.
+
+- **Audit IP behind a proxy.** `audit_logs.ip` is the request IP as Laravel resolves it. Until trusted proxies are
+  configured for the production proxy (deployment task), every row there would carry the proxy's address.
+- **Sessions from before the session index.** A ban destroys the sessions indexed per user at sign-in. A session
+  opened before that index existed is not destroyed, but it is useless: `EnsureNotBanned` refuses every request of a
+  banned user and logs that session out on its next request.
+- **Locks are not pushed.** A lock (or unlock) reaches members at their next channel-list refresh (a minute at
+  most) or when they open the channel; until then their composer still shows, and a post is refused with
+  `channel_locked`, explained in words.
+- **The nightly demo reset is not pushed either.** Clients open at 03:00 keep showing the deleted messages until
+  they reload or reopen the channel.
+- **Conversations with a visitor are demo content.** The reset deletes every conversation that includes a demo
+  account, an administrator's messages in it included.
+- **Alerts lost on a fatal error.** During a request, an alert is sent after the response (deferred); a PHP fatal
+  error (memory, timeout) before that point loses it, the local log keeps the error.
+- **Locked channels and administrators.** Administrators still post in a locked channel they are a member of, so
+  that they can explain the lock; a moderator who is not a member reads a public channel but posts nowhere.
