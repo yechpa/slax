@@ -18,10 +18,12 @@ const ICONS = [
   // "any" icons, shown as they are: the logo with a little margin.
   { file: 'icon-192.png', size: 192, logo: 0.84, background: null },
   { file: 'icon-512.png', size: 512, logo: 0.84, background: null },
-  // Maskable: full bleed, the logo inside the safe zone (the centre circle of 80% diameter).
-  { file: 'icon-maskable-512.png', size: 512, logo: 0.56, background: BACKGROUND },
+  // Maskable: full bleed, the glyph inside the safe zone (the centre circle of 80% diameter):
+  // at 0.72 the mark's farthest glyph corner is 0.30 of the width from the centre (the mark's
+  // own dark square is the background colour, so a mask cutting its corners shows nothing).
+  { file: 'icon-maskable-512.png', size: 512, logo: 0.72, background: BACKGROUND },
   // iOS home screen: opaque (iOS fills transparency with black and rounds the corners itself).
-  { file: 'apple-touch-icon.png', size: 180, logo: 0.7, background: BACKGROUND },
+  { file: 'apple-touch-icon.png', size: 180, logo: 0.84, background: BACKGROUND },
 ]
 
 const svg = await readFile(join(PUBLIC, 'favicon.svg'))

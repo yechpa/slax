@@ -154,8 +154,9 @@ receives the channel's events until it disconnects.
   (sign-out, expiry, ban), then the public shell is fetched again; API responses carry `Cache-Control: no-store`
   (nginx), so the HTTP cache keeps none either. The last open channel is forgotten too; local storage keeps only the
   language and theme chosen on the device (not private), and the browser's own history stays the browser's.
-- **The icons are rendered from `favicon.svg`**, which is still Vite's default lightning logo. Replacing the favicon
-  and running `make icons` regenerates every icon (a test fails while they are out of date).
+- **The icons are rendered from `favicon.svg`** (the `> _` prompt in the console's green on its background). Changing
+  the favicon means running `make icons` (a test fails while the icons are out of date); how the mark looks once a
+  launcher masks it is to be checked on the real phones.
 - **The manifest is in English** (`lang: en`, name "Slax", the same in every language); the app itself follows the
   person's language once opened.
 
