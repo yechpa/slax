@@ -344,5 +344,13 @@
   "admin.lock.unlock": "פתיחה",
   "admin.lock.done": "{channel} ננעל.",
   "admin.lock.lifted": "{channel} פתוח שוב.",
-  "admin.moderation.messagesHint": "כדי למחוק הודעה או קובץ, בחרו „מחיקה כמנהל” בתפריט של ההודעה."
+  "admin.moderation.messagesHint": "כדי למחוק הודעה או קובץ, בחרו „מחיקה כמנהל” בתפריט של ההודעה.",
+  "admin.reason.invalid_state": "תוקף ניסיון ההתחברות פג",
+  "admin.reason.provider_error": "בוטל אצל Google",
+  "admin.reason.invalid_token": "התשובה של Google לא אומתה",
+  "admin.reason.email_unverified": "הכתובת לא אומתה על ידי Google",
+  "admin.reason.banned": "חשבון חסום",
+  "admin.reason.turnstile": "בדיקת האנטי־בוט נכשלה",
+  "admin.reason.other": "סיבה אחרת",
+  "admin.action.other": "פעולה אחרת"
 }

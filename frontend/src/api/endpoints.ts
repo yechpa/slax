@@ -3,6 +3,7 @@ import type { Locale } from '../i18n/index.ts'
 import type { Theme } from '../theme.ts'
 import { apiPath, request, requestWithStatus } from './client.ts'
 import type {
+  AdminChannel,
   AdminStatus,
   AuditPage,
   Channel,
@@ -75,6 +76,7 @@ export const api = {
     /** The tombstone; 503 `storage_unavailable` when a file could not be removed yet (retry). */
     deleteMessage: (id: number) => request<Message>(apiPath(`/admin/messages/${id}`), { method: 'DELETE' }),
     deleteFile: (id: number) => request<void>(apiPath(`/admin/files/${id}`), { method: 'DELETE' }),
+    channels: (signal?: AbortSignal) => request<{ data: AdminChannel[] }>(apiPath('/admin/channels'), { signal }),
     /** Idempotent; `false` unlocks. */
     lock: (channelId: number, locked: boolean) =>
       request<{ id: number; name: string; locked: boolean }>(apiPath(`/admin/channels/${channelId}/lock`), { method: 'POST', body: { locked } }),

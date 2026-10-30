@@ -155,3 +155,12 @@ export interface ModeratedUser extends UserSummary {
   banned: boolean
   banned_at: string | null
 }
+
+/** GET /admin/channels: every public and private channel, members or not. */
+export interface AdminChannel {
+  id: number
+  name: string
+  kind: 'public' | 'private'
+  locked: boolean
+  member_count: number
+}

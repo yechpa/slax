@@ -16,11 +16,11 @@ import type { Ref } from 'preact'
 import { useEffect, useId, useRef, useState } from 'preact/hooks'
 import { isApiError } from '../api/client.ts'
 import { api } from '../api/endpoints.ts'
-import type { AdminStatus, AuditPage, Channel, ModeratedUser, UserSummary } from '../api/types.ts'
+import type { AdminChannel, AdminStatus, AuditPage, ModeratedUser, UserSummary } from '../api/types.ts'
 import { formatDay, formatTime } from '../i18n/format.ts'
 import { t } from '../i18n/index.ts'
 import { useLocale } from '../i18n/useLocale.ts'
-import { rooms, upsertChannel } from '../store/channels.ts'
+import { channelById, upsertChannel } from '../store/channels.ts'
 import { me } from '../store/session.ts'
 import { showToast } from '../store/ui.ts'
 import { Button } from './ui/Button.tsx'
@@ -102,7 +102,8 @@ function AdminTabs() {
             id={tabId(name)}
             class="admin__tab"
             aria-selected={tab === name}
-            aria-controls={panelId(name)}
+            // Only the selected tab's panel is rendered.
+            aria-controls={tab === name ? panelId(name) : undefined}
             tabIndex={tab === name ? 0 : -1}
             onClick={() => setTab(name)}
           >
@@ -201,13 +202,16 @@ function StatusPanel() {
   )
 }
 
-/** "user.banned" → its sentence; a failed sign-in keeps its reason. */
+/** "user.banned" → its sentence; a failed sign-in says why in words, never as a code. */
 function actionLabel(action: string): string {
   const key = `admin.action.${action}`
   if (t(key) !== key) return t(key)
   const failed = 'auth.sign_in_failed.'
-  if (action.startsWith(failed)) return t('admin.action.auth.sign_in_failed', { reason: action.slice(failed.length) })
-  return action
+  if (action.startsWith(failed)) {
+    const reasonKey = `admin.reason.${action.slice(failed.length)}`
+    return t('admin.action.auth.sign_in_failed', { reason: t(reasonKey) === reasonKey ? t('admin.reason.other') : t(reasonKey) })
+  }
+  return t('admin.action.other')
 }
 
 function AuditPanel() {
@@ -299,6 +303,7 @@ function BanSection() {
   const [error, setError] = useState<unknown>(null)
   const [banned, reload] = useLoad<{ data: ModeratedUser[] }>((signal) => api.admin.banned(signal), [])
   const [list, setList] = useState<ModeratedUser[] | null>(null)
+  const [lifting, setLifting] = useState<number | null>(null)
   const people = list ?? (banned.status === 'ready' ? banned.data.data : [])
 
   useEffect(() => {
@@ -324,12 +329,15 @@ function BanSection() {
 
   const lift = async (person: ModeratedUser) => {
     setError(null)
+    setLifting(person.id)
     try {
       await api.admin.ban(person.id, false)
       setList(people.filter((p) => p.id !== person.id))
       showToast({ tone: 'success', text: t('admin.ban.lifted', { name: person.name }), key: 'admin-ban' })
     } catch (failure) {
       if (!isApiError(failure, 'rate_limited')) setError(failure)
+    } finally {
+      setLifting(null)
     }
   }
 
@@ -371,7 +379,7 @@ function BanSection() {
             <li key={person.id} class="admin-list__row">
               <bdi class="admin-list__name">{person.name}</bdi>
               {person.banned_at && <span class="admin__muted">{t('admin.ban.since', { time: when(person.banned_at) })}</span>}
-              <Button variant="secondary" size="sm" onClick={() => void lift(person)}>
+              <Button variant="secondary" size="sm" onClick={() => void lift(person)} disabled={lifting === person.id}>
                 {t('admin.ban.lift')}
               </Button>
             </li>
@@ -405,15 +413,23 @@ function LockSection() {
   useLocale()
   const [busy, setBusy] = useState<number | null>(null)
   const [error, setError] = useState<unknown>(null)
-  const list = rooms.value
+  // Every room, from the admin API: private ones the administrator is not in included.
+  const [loaded, reload] = useLoad<{ data: AdminChannel[] }>((signal) => api.admin.channels(signal), [])
+  const [list, setList] = useState<AdminChannel[]>([])
 
-  const toggle = async (channel: Channel) => {
-    const locked = !channel.locked
+  useEffect(() => {
+    if (loaded.status === 'ready') setList(loaded.data.data)
+  }, [loaded])
+
+  const toggle = async (channel: AdminChannel) => {
     setBusy(channel.id)
     setError(null)
     try {
-      const result = await api.admin.lock(channel.id, locked)
-      upsertChannel({ ...channel, locked: result.locked })
+      const result = await api.admin.lock(channel.id, !channel.locked)
+      setList((current) => current.map((c) => (c.id === channel.id ? { ...c, locked: result.locked } : c)))
+      // The sidebar's copy, when the administrator has this channel there.
+      const known = channelById.peek().get(channel.id)
+      if (known) upsertChannel({ ...known, locked: result.locked })
       showToast({ tone: 'success', text: t(result.locked ? 'admin.lock.done' : 'admin.lock.lifted', { channel: `#${channel.name}` }), key: 'admin-lock' })
     } catch (failure) {
       if (!isApiError(failure, 'rate_limited')) setError(failure)
@@ -433,10 +449,13 @@ function LockSection() {
           {adminError(error)}
         </p>
       )}
+      {loaded.status === 'loading' && <p class="admin__note" aria-busy="true">{t('admin.loading')}</p>}
+      {loaded.status === 'error' && <Failure error={loaded.error} onRetry={reload} />}
       <ul class="admin-list">
         {list.map((channel) => (
           <li key={channel.id} class="admin-list__row">
-            <ChannelName name={channel.name ?? ''} />
+            <ChannelName name={channel.name} />
+            {channel.kind === 'private' && <span class="admin__muted">{t('channel.private')}</span>}
             <span class={channel.locked ? 'admin__badge admin__badge--locked' : 'admin__badge'}>
               {t(channel.locked ? 'admin.lock.locked' : 'admin.lock.open')}
             </span>

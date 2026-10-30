@@ -344,5 +344,13 @@
   "admin.lock.unlock": "Déverrouiller",
   "admin.lock.done": "{channel} est verrouillé.",
   "admin.lock.lifted": "{channel} est de nouveau ouvert.",
-  "admin.moderation.messagesHint": "Pour supprimer un message ou un fichier, utilisez « Supprimer (modération) » dans le menu du message."
+  "admin.moderation.messagesHint": "Pour supprimer un message ou un fichier, utilisez « Supprimer (modération) » dans le menu du message.",
+  "admin.reason.invalid_state": "tentative expirée",
+  "admin.reason.provider_error": "annulée chez Google",
+  "admin.reason.invalid_token": "réponse de Google non vérifiée",
+  "admin.reason.email_unverified": "adresse non vérifiée par Google",
+  "admin.reason.banned": "compte banni",
+  "admin.reason.turnstile": "contrôle anti-robot échoué",
+  "admin.reason.other": "autre raison",
+  "admin.action.other": "Autre action"
 }

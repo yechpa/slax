@@ -176,6 +176,10 @@ export function installFixtureServer({ signedIn, admin = false }: { signedIn: bo
     if (path === '/api/v1/me') return signedIn ? json({ ...ME, is_admin: admin }) : json({ message: 'Unauthenticated.' }, 401)
     if (path === '/api/v1/admin/status') return admin ? json(ADMIN_STATUS) : json({ message: 'Forbidden' }, 403)
     if (path === '/api/v1/admin/audit') return admin ? json(AUDIT) : json({ message: 'Forbidden' }, 403)
+    if (path === '/api/v1/admin/channels')
+      return admin
+        ? json({ data: channels.filter((c) => c.kind === 'public' || c.kind === 'private').map((c) => ({ id: c.id, name: c.name, kind: c.kind, locked: c.locked ?? false, member_count: c.member_count })) })
+        : json({ message: 'Forbidden' }, 403)
     if (path === '/api/v1/admin/users/banned') return admin ? json({ data: BANNED }) : json({ message: 'Forbidden' }, 403)
     if (path === '/api/v1/channels') return json(channels)
     if (path === '/api/v1/users') {

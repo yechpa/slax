@@ -344,5 +344,13 @@
   "admin.lock.unlock": "Unlock",
   "admin.lock.done": "{channel} is locked.",
   "admin.lock.lifted": "{channel} is open again.",
-  "admin.moderation.messagesHint": "To delete a message or a file, use “Delete as moderator” in that message's menu."
+  "admin.moderation.messagesHint": "To delete a message or a file, use “Delete as moderator” in that message's menu.",
+  "admin.reason.invalid_state": "sign-in attempt expired",
+  "admin.reason.provider_error": "cancelled at Google",
+  "admin.reason.invalid_token": "Google answer not verified",
+  "admin.reason.email_unverified": "address not verified by Google",
+  "admin.reason.banned": "banned account",
+  "admin.reason.turnstile": "anti-bot check failed",
+  "admin.reason.other": "other reason",
+  "admin.action.other": "Other action"
 }

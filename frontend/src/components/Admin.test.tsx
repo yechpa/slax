@@ -4,7 +4,7 @@ import { setLocale } from '../i18n/index.ts'
 import { SEARCH_DELAY_MS } from '../lib/search.ts'
 import { route } from '../router.ts'
 import { DANA, ME, channel, live } from '../test/fixtures.ts'
-import type { FakeHandler } from '../test/fakes.ts'
+import { deferred, type FakeHandler, type FakeReply } from '../test/fakes.ts'
 import { key, mountApp, plain, settle, typeInto, type Mounted } from '../test/mountApp.tsx'
 
 let app: Mounted | null = null
@@ -49,6 +49,15 @@ function routes(me: Me, extra: Record<string, FakeHandler> = {}): Record<string,
     'GET /api/v1/admin/status': () => ({ body: STATUS }),
     'GET /api/v1/admin/audit': ({ query }) => ({ body: { ...AUDIT, page: Number(query.get('page')), has_more: query.get('page') === '1' } }),
     'GET /api/v1/admin/users/banned': () => ({ body: { data: [] } }),
+    'GET /api/v1/admin/channels': () => ({
+      body: {
+        data: [
+          { id: 7, name: 'general', kind: 'public', locked: false, member_count: 3 },
+          { id: 12, name: 'hr-private', kind: 'private', locked: false, member_count: 2 },
+          { id: 8, name: 'random', kind: 'public', locked: true, member_count: 3 },
+        ],
+      },
+    }),
     ...extra,
   }
 }
@@ -117,6 +126,9 @@ describe('administration', () => {
     // Tabs: arrows move between them.
     const status = tab(app.host, 'Status')
     expect(status.getAttribute('aria-selected')).toBe('true')
+    // Only the selected tab points at a panel that exists.
+    expect(status.getAttribute('aria-controls')).toBe(app.host.querySelector('[role="tabpanel"]')!.id)
+    expect(tab(app.host, 'Audit log').hasAttribute('aria-controls')).toBe(false)
     status.focus()
     key(status, { key: 'ArrowRight' })
     await settle()
@@ -127,7 +139,9 @@ describe('administration', () => {
     expect(lines[0]).toContain('Banned')
     expect(lines[0]).toContain('Mallory')
     expect(lines[0]).toContain('Alice')
-    expect(lines[1]).toContain('Failed sign-in (invalid_state)')
+    // Reasons in words, never as codes.
+    expect(lines[1]).toContain('Failed sign-in (sign-in attempt expired)')
+    expect(lines[1]).not.toContain('invalid_state')
     expect(lines[1]).toContain('system')
 
     // Paged, newest first.
@@ -139,13 +153,14 @@ describe('administration', () => {
 
   it('bans someone picked from the directory, after a confirmation, and can lift it', async () => {
     const bans: unknown[] = []
+    const lifting = deferred<FakeReply>()
     app = await mountApp(
       routes(ADMIN, {
         'GET /api/v1/users': () => ({ body: [DANA] }),
         'POST /api/v1/admin/users/2/ban': ({ body }) => {
           bans.push(body)
           const banned = (body as { banned: boolean }).banned
-          return { body: { ...DANA, banned, banned_at: banned ? '2026-10-30T10:00:00.000Z' : null } }
+          return banned ? { body: { ...DANA, banned, banned_at: '2026-10-30T10:00:00.000Z' } } : lifting.promise
         },
       }),
       '/admin',
@@ -175,13 +190,18 @@ describe('administration', () => {
     expect(plain(app.host.querySelector('.toast--success .toast__text')?.textContent)).toBe('dana is banned.')
     expect([...app.host.querySelectorAll('.admin-list__name')].map((n) => plain(n.textContent))).toContain('dana')
 
-    ;[...app.host.querySelectorAll<HTMLButtonElement>('.admin-list__row button')].find((b) => b.textContent === 'Lift the ban')!.click()
+    const lift = () => [...app!.host.querySelectorAll<HTMLButtonElement>('.admin-list__row button')].find((b) => b.textContent === 'Lift the ban')!
+    lift().click()
+    await settle()
+    // Busy while the request runs: a second click cannot send it twice.
+    expect(lift().disabled).toBe(true)
+    lifting.resolve({ body: { ...DANA, banned: false, banned_at: null } })
     await settle()
     expect(bans).toEqual([{ banned: true }, { banned: false }])
     expect(plain(app.host.textContent)).toContain('dana can sign in again.')
   })
 
-  it('locks and unlocks a channel from the list', async () => {
+  it('locks and unlocks any channel, private ones the administrator is not in included', async () => {
     const locks: unknown[] = []
     app = await mountApp(
       routes(ADMIN, {
@@ -201,6 +221,9 @@ describe('administration', () => {
     expect(locks).toEqual([{ locked: true }])
     expect(plain(row().textContent)).toContain('locked')
     expect(row().querySelector('button')?.textContent).toBe('Unlock')
+    // Listed by the admin API, not by the sidebar's channels.
+    expect([...app.host.querySelectorAll('.admin-list__row .channel-name')].map((n) => plain(n.textContent))).toEqual(['#general', '#hr-private', '#random'])
+    expect(app.host.querySelector('.sidebar')?.textContent ?? '').not.toContain('hr-private')
   })
 
   it('shows errors translated, never as codes', async () => {
