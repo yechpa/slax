@@ -73,6 +73,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The state file's fixed size: room for ~40 entries; a bigger state is written whole.
 STATE_SIZE=2048
+# Seconds a disk read (df) may take, at most.
+DISK_READ_TIMEOUT=5
 
 config_error() {
     log "configuration error: $*"
@@ -292,15 +294,15 @@ declare -A filesystems=()
 disk() {
     local name="$1" path="$2" fs total used avail percent alerted last k sent=0
     k="disk.$name"
-    # df may take its full 5 s: not started when that would end past the budget (a run late
-    # already, e.g. after slow probes and alerts). Its previous state stays as it is.
-    if [ $((SECONDS + 5)) -gt "$MONITOR_BUDGET_SECONDS" ]; then
+    # df may take its full DISK_READ_TIMEOUT: not started when that would end past the budget
+    # (a run late already, e.g. after slow probes and alerts). Its previous state stays as it is.
+    if [ $((SECONDS + DISK_READ_TIMEOUT)) -gt "$MONITOR_BUDGET_SECONDS" ]; then
         summary+=("disk:$name=skipped")
         log "WARNING: no time left to read disk \"$name\" in this run: skipped."
         return 0
     fi
     # (Unreadable: its previous state stays as it is, copied into `next` at the start.)
-    if ! read -r fs total used avail < <(timeout 5 df -Pk "$path" 2> /dev/null | awk 'NR == 2 { print $1, $2, $3, $4 }') ||
+    if ! read -r fs total used avail < <(timeout "$DISK_READ_TIMEOUT" df -Pk "$path" 2> /dev/null | awk 'NR == 2 { print $1, $2, $3, $4 }') ||
         ! is_count "$total" || ! is_count "$used" || ! is_count "$avail" || [ $((used + avail)) -eq 0 ]; then
         summary+=("disk:$name=unknown")
         log "WARNING: cannot read the usage of disk \"$name\"."
