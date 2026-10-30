@@ -35,7 +35,9 @@ finish() {
         psql --no-psqlrc -q -d postgres -c "DROP DATABASE IF EXISTS \"$RESTORE_DB\"" >/dev/null 2>&1 || true
     fi
     [ -z "$work" ] || rm -rf "$work"
-    if [ "$status" -ne 0 ]; then
+    if [ -n "$terminated" ]; then
+        alert "Restore check TERMINATED at step \"${step}\" (SIGTERM: deadline or eviction): the backups were not verified this week."
+    elif [ "$status" -ne 0 ]; then
         log "restore check FAILED at step: $step (exit $status)"
         alert "Restore check FAILED at step \"${step}\" (exit ${status}). The latest backup may not be restorable: docs/runbook.md, \"Backups\"."
     fi
@@ -59,10 +61,19 @@ unset PGDATABASE PGPASSWORD
 
 work="$(mktemp -d)"
 
+step="list the backups"
+# A listing error is not "no backup": the alert names its class (AccessDenied, NoSuchBucket,
+# network, ...).
+if ! run aws s3api list-objects-v2 --bucket "$BACKUP_BUCKET" --prefix "$prefix/" --query 'Contents[].Key' --output text \
+    > "$work/list" 2> "$work/list.err"; then
+    step="list the backups ($(aws_error_class "$work/list.err"))"
+    exit 1
+fi
+listing="$(cat "$work/list")"
+
 step="find the latest backup"
 key_re="^${prefix//./\\.}/[0-9]{4}/[0-9]{2}/[0-9]{2}/slax-[0-9]{8}T[0-9]{6}Z\\.dump$"
-key="$(aws s3api list-objects-v2 --bucket "$BACKUP_BUCKET" --prefix "$prefix/" --query 'Contents[].Key' --output text |
-    tr '\t' '\n' | grep -E "$key_re" | sort | tail -n 1 || true)"
+key="$(printf '%s\n' "$listing" | tr '\t' '\n' | grep -E "$key_re" | sort | tail -n 1 || true)"
 [ -n "$key" ] || { log "no backup under s3://$BACKUP_BUCKET/$prefix/"; exit 1; }
 log "latest backup: s3://$BACKUP_BUCKET/$key"
 
@@ -75,17 +86,20 @@ age_hours=$((($(date -u +%s) - taken) / 3600))
 
 step="download"
 dump="$work/latest.dump"
-aws s3 cp --only-show-errors --no-progress "s3://$BACKUP_BUCKET/$key" "$dump"
+if ! run aws s3 cp --only-show-errors --no-progress "s3://$BACKUP_BUCKET/$key" "$dump" 2> "$work/download.err"; then
+    step="download ($(aws_error_class "$work/download.err"))"
+    exit 1
+fi
 size="$(stat -c %s "$dump")"
 [ "$size" -gt 0 ] || { log "the backup is empty"; exit 1; }
 
 step="pg_restore --list"
-pg_restore --list "$dump" > /dev/null
+run pg_restore --list "$dump" > /dev/null
 
 step="throwaway server"
 for _ in $(seq 1 60); do
     pg_isready -q -d postgres && break
-    sleep 1
+    run sleep 1
 done
 pg_isready -q -d postgres
 
@@ -95,7 +109,7 @@ created=1
 
 step="pg_restore"
 restore_started="$(date +%s)"
-pg_restore --no-owner --no-acl --exit-on-error --dbname="$RESTORE_DB" "$dump"
+run pg_restore --no-owner --no-acl --exit-on-error --dbname="$RESTORE_DB" "$dump"
 restore_seconds=$(($(date +%s) - restore_started))
 
 step="users > 0"

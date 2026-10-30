@@ -33,7 +33,9 @@ started="$(date +%s)"
 finish() {
     local status=$?
     [ -z "$work" ] || rm -rf "$work"
-    if [ "$status" -ne 0 ]; then
+    if [ -n "$terminated" ]; then
+        alert "Backup TERMINATED at step \"${step}\" (SIGTERM: deadline or eviction). Today's database backup is missing: kubectl -n slax logs -l app.kubernetes.io/component=backup"
+    elif [ "$status" -ne 0 ]; then
         log "backup FAILED at step: $step (exit $status)"
         alert "Backup FAILED at step \"${step}\" (exit ${status}). Today's database backup is missing: kubectl -n slax logs -l app.kubernetes.io/component=backup"
     fi
@@ -54,7 +56,7 @@ dump="$work/slax-$stamp.dump"
 
 step="pg_dump"
 log "dumping $PGDATABASE from $PGHOST"
-pg_dump --format=custom --compress=6 --no-password --lock-wait-timeout=60s --file="$dump"
+run pg_dump --format=custom --compress=6 --no-password --lock-wait-timeout=60s --file="$dump"
 
 step="dump size"
 size="$(stat -c %s "$dump")"
@@ -62,14 +64,17 @@ size="$(stat -c %s "$dump")"
 
 step="pg_restore --list"
 toc="$work/toc"
-pg_restore --list "$dump" > "$toc"
+run pg_restore --list "$dump" > "$toc"
 grep -Eq '^[0-9]+; [0-9]+ [0-9]+ TABLE [a-z_]+ users ' "$toc" || { log "the dump has no users table"; exit 1; }
 
 step="upload"
 log "uploading $(human "$size") to s3://$BACKUP_BUCKET/$key"
 upload=(aws s3 cp --only-show-errors --no-progress --content-type application/octet-stream)
 [ -z "$sse" ] || upload+=(--sse "$sse")
-"${upload[@]}" "$dump" "s3://$BACKUP_BUCKET/$key"
+if ! run "${upload[@]}" "$dump" "s3://$BACKUP_BUCKET/$key" 2> "$work/upload.err"; then
+    step="upload ($(aws_error_class "$work/upload.err"))"
+    exit 1
+fi
 
 step="upload check"
 stored="$(aws s3api head-object --bucket "$BACKUP_BUCKET" --key "$key" --query ContentLength --output text)"

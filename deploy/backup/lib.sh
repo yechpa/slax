@@ -51,3 +51,43 @@ require() {
 human() {
     awk -v b="$1" 'BEGIN { split("B KB MB GB", u); i = 1; while (b >= 1024 && i < 4) { b /= 1024; i++ } printf (i == 1 ? "%d %s" : "%.1f %s"), b, u[i] }'
 }
+
+# SIGTERM (the Job's activeDeadlineSeconds, an eviction, a node drain) must not kill a script
+# silently. bash runs as PID 1 in the pod and would only run a trap once the current command
+# ends; so long commands run through `run`, in the background, and the trap fires at once:
+# it stops the child, records the termination (the scripts' EXIT trap alerts) and exits 143.
+child=""
+# shellcheck disable=SC2034 # read by the scripts' EXIT traps
+terminated=""
+on_term() {
+    trap - TERM INT
+    # shellcheck disable=SC2034 # read by the scripts' EXIT traps
+    terminated=1
+    [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true
+    log "terminated by a signal"
+    exit 143
+}
+trap on_term TERM INT
+
+# run COMMAND...: COMMAND in the background, waited for (interruptible by SIGTERM).
+run() {
+    local status
+    "$@" &
+    child=$!
+    if wait "$child"; then status=0; else status=$?; fi
+    child=""
+    return "$status"
+}
+
+# aws_error_class FILE: the class of an AWS CLI error (never its message): AccessDenied,
+# NoSuchBucket, network, credentials, ... or "error".
+aws_error_class() {
+    local class
+    class="$(grep -oE 'AccessDenied|NoSuchBucket|NoSuchKey|InvalidAccessKeyId|ExpiredToken|SignatureDoesNotMatch|SlowDown|InternalError|Could not connect|Connect timeout|Read timeout|Unable to locate credentials' "$1" 2>/dev/null | head -n 1 || true)"
+    case "$class" in
+        "Could not connect" | "Connect timeout" | "Read timeout") echo network ;;
+        "Unable to locate credentials") echo no-credentials ;;
+        "") echo error ;;
+        *) echo "$class" ;;
+    esac
+}

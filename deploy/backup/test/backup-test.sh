@@ -158,7 +158,37 @@ check "pg-backup.sh fails when pg_dump fails" test "$status" != 0
 check "... with a [Prod] alert naming pg_dump" starts "$(last_alert)" '[Prod] Backup FAILED at step "pg_dump"'
 run -e BACKUP_BUCKET=slax-no-such-bucket -- pg-backup.sh >/dev/null 2>&1 && status=0 || status=$?
 check "pg-backup.sh fails when the upload fails" test "$status" != 0
-check "... with a [Prod] alert naming the upload" starts "$(last_alert)" '[Prod] Backup FAILED at step "upload"'
+check "... with a [Prod] alert naming the upload and the error class" starts "$(last_alert)" '[Prod] Backup FAILED at step "upload (NoSuchBucket)"'
+
+echo "== listing errors are not \"no backup\""
+run -e BACKUP_BUCKET=slax-no-such-bucket -- restore-check.sh >/dev/null 2>&1 && status=0 || status=$?
+check "the restore check fails when the bucket cannot be listed" test "$status" != 0
+check "... naming the listing and the error class" starts "$(last_alert)" '[Prod] Restore check FAILED at step "list the backups (NoSuchBucket)"'
+run -e AWS_SECRET_ACCESS_KEY=wrong-secret -- restore-check.sh >/dev/null 2>&1 && status=0 || status=$?
+check "... and when the credentials are refused" starts "$(last_alert)" '[Prod] Restore check FAILED at step "list the backups (SignatureDoesNotMatch)"'
+
+echo "== SIGTERM (deadline, eviction): alerted at once, not lost"
+# terminate NAME ARGS...: start a script in the background, SIGTERM it after 3 s as Kubernetes
+# would (docker stop), print "<exit code> <seconds from the signal to the end>".
+terminate() {
+    local cname="$name-term-$1" started
+    shift
+    docker run -d --name "$cname" --network "$name" --env-file "$dir/env" -u 70:70 --read-only --tmpfs /tmp:mode=1777 \
+        --cap-drop ALL --security-opt no-new-privileges "$@" >/dev/null
+    sleep 3
+    started="$(date +%s)"
+    docker stop -t 30 "$cname" >/dev/null
+    echo "$(docker wait "$cname") $(($(date +%s) - started))"
+    docker rm "$cname" >/dev/null
+}
+# pg_dump stuck connecting to an address that never answers.
+read -r code seconds <<< "$(terminate dump -e PGHOST=10.255.255.1 -e PGCONNECT_TIMEOUT=60 "$image" pg-backup.sh)"
+check "pg-backup.sh exits 143 on SIGTERM, within seconds (not killed after the grace period)" test "$code $((seconds < 10))" = "143 1"
+check "... with a [Prod] alert saying it was terminated, and where" starts "$(last_alert)" '[Prod] Backup TERMINATED at step "pg_dump" (SIGTERM'
+# S3 at an address that never answers: the listing hangs.
+read -r code seconds <<< "$(terminate restore -e AWS_ENDPOINT_URL=http://10.255.255.1:9000 "$image" restore-check.sh)"
+check "restore-check.sh exits 143 on SIGTERM, within seconds" test "$code $((seconds < 10))" = "143 1"
+check "... with a [Prod] alert" starts "$(last_alert)" '[Prod] Restore check TERMINATED at step "list the backups" (SIGTERM'
 
 echo "== every alert"
 check "every message starts with [Prod]" test -z "$(grep -v '^\[Prod\] ' "$dir/out/texts")"
