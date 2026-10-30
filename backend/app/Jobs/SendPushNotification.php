@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Message;
 use App\Models\PushSubscription;
 use App\Services\Push\Push;
 use App\Services\Push\PushOutcome;
@@ -16,7 +17,11 @@ use Illuminate\Support\Facades\Log;
  *
  * Checked again when it runs, since the queue may lag: the device still exists and was made
  * with the current VAPID key (otherwise deleted: the push service would refuse it), the person
- * is not banned and, for a message, still a member of the channel.
+ * is not banned and, for a message, the message still exists, is not deleted, and the person
+ * is still a member of its channel.
+ *
+ * On the `push` queue: the worker drains `default` (broadcasts, revocations) first
+ * (`queue:work --queue=default,push`), so a slow push service never delays realtime events.
  *
  * Gone (404/410): the device is deleted. No answer, 429 or 5xx: tried again after BACKOFF, then
  * dropped with a warning. Other refusals: dropped with a warning (the device is kept). Nothing
@@ -30,13 +35,19 @@ class SendPushNotification implements ShouldQueue
     /** Seconds before the 2nd, 3rd and 4th tries. */
     public const BACKOFF = [30, 120, 600];
 
+    public const QUEUE = 'push';
+
     public int $tries = 4;
 
     /**
      * @param  int|null  $channelId  the message's channel (null: the test button)
+     * @param  int|null  $messageId  the message (null: the test button)
      * @param  array{type: string, title: string, body: string, url: string, tag: string}  $payload
      */
-    public function __construct(public int $subscriptionId, public ?int $channelId, public array $payload) {}
+    public function __construct(public int $subscriptionId, public ?int $channelId, public ?int $messageId, public array $payload)
+    {
+        $this->onQueue(self::QUEUE);
+    }
 
     public function handle(WebPushSender $sender): void
     {
@@ -50,6 +61,9 @@ class SendPushNotification implements ShouldQueue
             return;
         }
         if ($device->user->isBanned()) {
+            return;
+        }
+        if ($this->messageId !== null && ! Message::whereKey($this->messageId)->whereNull('deleted_at')->exists()) {
             return;
         }
         if ($this->channelId !== null

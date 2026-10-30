@@ -2,6 +2,7 @@
 
 namespace App\Services\Push;
 
+use App\Enums\PresenceState;
 use App\Jobs\SendPushNotification;
 use App\Models\Channel;
 use App\Models\Message;
@@ -18,10 +19,11 @@ use App\Services\PresenceService;
  *  - dm: everyone in a direct or group conversation.
  * One notification per person, the first reason that applies in that order.
  *
- * Never: the author; a banned account; someone not (or no longer) a member; anyone "using Slax
- * right now". The server does not know whether a tab is visible, so that means a presence
- * heartbeat in the last 60 s (PresenceService: open tabs ping every 25 s, hidden ones every
- * 50 s), whatever the device.
+ * Never: the author; a banned account; someone not (or no longer) a member; anyone online right
+ * now. The server does not know whether a tab is visible, so that is the presence state
+ * `online` (PresenceService): a heartbeat in the last 60 s and an interaction with Slax in the
+ * last 5 minutes, on any device. `away` (a tab open without interaction for 5 minutes, e.g. in
+ * the background) and `offline` are notified.
  */
 class PushNotifier
 {
@@ -70,8 +72,8 @@ class PushNotifier
             return 0;
         }
 
-        // Connected in the last minute: they see it in the app.
-        $away = array_keys(array_filter($this->presence->statesOf(array_keys($reasons)), fn (string $state) => $state === 'offline'));
+        // Online (connected and active): they see it in the app.
+        $away = array_keys(array_filter($this->presence->statesOf(array_keys($reasons)), fn (string $state) => $state !== PresenceState::Online->value));
         if ($away === []) {
             return 0;
         }
@@ -79,7 +81,7 @@ class PushNotifier
         $queued = 0;
         foreach (PushSubscription::whereIn('user_id', $away)->orderBy('id')->get() as $device) {
             $payload = PushPayload::forMessage($reasons[$device->user_id], $author, $channel, $message->parent_id, $device->locale);
-            SendPushNotification::dispatch($device->id, $channel->id, $payload);
+            SendPushNotification::dispatch($device->id, $channel->id, $message->id, $payload);
             $queued++;
         }
 
@@ -91,7 +93,7 @@ class PushNotifier
     {
         $devices = PushSubscription::where('user_id', $user->id)->orderBy('id')->get();
         foreach ($devices as $device) {
-            SendPushNotification::dispatch($device->id, null, PushPayload::test($device->locale));
+            SendPushNotification::dispatch($device->id, null, null, PushPayload::test($device->locale));
         }
 
         return $devices->count();

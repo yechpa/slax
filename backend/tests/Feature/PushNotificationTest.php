@@ -101,8 +101,12 @@ test('a direct message: one job per device of the other person, none for the aut
     postIn($alice, $dm, 'see you at 8')->assertCreated();
 
     expect(pushedTo())->toBe([$phone->id, $laptop->id]);
+    // Their own queue, after the broadcasts' (the worker drains default first).
+    Queue::assertPushedOn('push', SendPushNotification::class);
+    expect(Queue::pushed(SendPushNotification::class)->every(fn (SendPushNotification $job) => $job->queue === 'push'))->toBeTrue();
     $job = onlyJobFor($phone);
     expect($job->channelId)->toBe($dm->id)
+        ->and($job->messageId)->toBe(Message::where('channel_id', $dm->id)->sole()->id)
         ->and($job->payload)->toBe([
             'type' => 'dm',
             'title' => 'Alice Martin (direct message)',
@@ -237,19 +241,47 @@ test('banned members and non-members get nothing', function () {
     Queue::assertNotPushed(SendPushNotification::class);
 });
 
-test('someone using Slax right now (a presence heartbeat in the last 60 s) gets no push', function () {
+test('someone online right now (connected, and active in the last 5 minutes) gets no push', function () {
     Queue::fake();
     [$alice, $bob] = User::factory()->count(2)->create();
     $dm = conversation($alice, $bob);
     $bobs = device($bob);
 
-    // A tab that pings, active or in the background, counts as connected.
-    app(PresenceService::class)->heartbeat($bob->id, false);
+    app(PresenceService::class)->heartbeat($bob->id, true);
+    expect(app(PresenceService::class)->stateOf($bob->id))->toBe('online');
     postIn($alice, $dm)->assertCreated();
     Queue::assertNotPushed(SendPushNotification::class);
 
+    // The tab stopped pinging: offline once 60 s have passed, and notified again.
     $this->travel(61)->seconds();
+    expect(app(PresenceService::class)->stateOf($bob->id))->toBe('offline');
     postIn($alice, $dm)->assertCreated();
+    expect(pushedTo())->toBe([$bobs->id]);
+});
+
+test('someone away (connected, no interaction for 5 minutes) is notified', function () {
+    Queue::fake();
+    [$alice, $bob] = User::factory()->count(2)->create();
+    $dm = conversation($alice, $bob);
+    $bobs = device($bob);
+
+    // A tab open in the background, pinging without interaction.
+    app(PresenceService::class)->heartbeat($bob->id, false);
+    expect(app(PresenceService::class)->stateOf($bob->id))->toBe('away');
+    postIn($alice, $dm)->assertCreated();
+
+    expect(pushedTo())->toBe([$bobs->id]);
+});
+
+test('someone offline (no heartbeat at all) is notified', function () {
+    Queue::fake();
+    [$alice, $bob] = User::factory()->count(2)->create();
+    $dm = conversation($alice, $bob);
+    $bobs = device($bob);
+
+    expect(app(PresenceService::class)->stateOf($bob->id))->toBe('offline');
+    postIn($alice, $dm)->assertCreated();
+
     expect(pushedTo())->toBe([$bobs->id]);
 });
 
@@ -270,6 +302,31 @@ test('the payload never carries the text, an address or a file name: exactly typ
         ->and($json)->not->toContain('secret')
         ->and($json)->not->toContain('medical')
         ->and($json)->not->toContain('@example.test');
+});
+
+test('a sender whose name is an e-mail address shows as "Someone": the address never leaves', function () {
+    Queue::fake();
+    // Google accounts without a name are named by their address (GoogleIdentityProvider).
+    $alice = User::factory()->create(['name' => 'bob@gmail.com', 'email' => 'bob@gmail.com']);
+    $bob = User::factory()->create(['name' => 'Bob']);
+    $dm = conversation($alice, $bob);
+    $room = room('family', $alice, $bob);
+    $english = device($bob);
+    $hebrew = device($bob, 'he');
+    $french = device($bob, 'fr');
+
+    postIn($alice, $dm)->assertCreated();
+    postIn($alice, $room, '@bob look')->assertCreated();
+
+    $jobs = Queue::pushed(SendPushNotification::class);
+    expect($jobs)->toHaveCount(6);
+    foreach ($jobs as $job) {
+        $json = json_encode($job->payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        expect($json)->not->toContain('bob@')->and($json)->not->toContain('gmail.com');
+    }
+    $titles = $jobs->map(fn (SendPushNotification $job) => $job->payload['title'])->sort()->values()->all();
+    expect($titles)->toContain('Someone (direct message)', 'Someone in #family', "Quelqu'un dans #family", 'Quelqu\'un (message direct)')
+        ->and($titles)->toContain("\u{2068}מישהו\u{2069} (הודעה ישירה)");
 });
 
 test('notifications are written in each device\'s language', function () {
@@ -352,14 +409,15 @@ test('a temporary failure is retried with a backoff, then dropped', function () 
     $dm = conversation($alice, $bob);
     $bobs = device($bob);
     fakeSender()->results[$bobs->endpoint] = PushResult::retry(503, 'unavailable');
-    $job = new SendPushNotification($bobs->id, $dm->id, ['type' => 'dm', 'title' => 't', 'body' => 'b', 'url' => '/', 'tag' => 'x']);
+    $message = Message::factory()->create(['channel_id' => $dm->id, 'user_id' => $alice->id]);
+    $job = new SendPushNotification($bobs->id, $dm->id, $message->id, ['type' => 'dm', 'title' => 't', 'body' => 'b', 'url' => '/', 'tag' => 'x']);
 
     $job->withFakeQueueInteractions();
     $job->handle(fakeSender());
     $job->assertReleased(SendPushNotification::BACKOFF[0]);
 
     Log::spy();
-    $last = (new SendPushNotification($bobs->id, $dm->id, $job->payload))->withFakeQueueInteractions();
+    $last = (new SendPushNotification($bobs->id, $dm->id, $message->id, $job->payload))->withFakeQueueInteractions();
     $last->job->attempts = $last->tries;
     $last->handle(fakeSender());
     $last->assertNotReleased()->assertNotFailed();
@@ -373,8 +431,9 @@ test('a refusal (400, 403, 413) is not retried and keeps the device', function (
     $dm = conversation($alice, $bob);
     $bobs = device($bob);
     fakeSender()->results[$bobs->endpoint] = PushResult::rejected(403, 'forbidden');
+    $message = Message::factory()->create(['channel_id' => $dm->id, 'user_id' => $alice->id]);
 
-    $job = (new SendPushNotification($bobs->id, $dm->id, ['type' => 'dm', 'title' => 't', 'body' => 'b', 'url' => '/', 'tag' => 'x']))->withFakeQueueInteractions();
+    $job = (new SendPushNotification($bobs->id, $dm->id, $message->id, ['type' => 'dm', 'title' => 't', 'body' => 'b', 'url' => '/', 'tag' => 'x']))->withFakeQueueInteractions();
     $job->handle(fakeSender());
 
     $job->assertNotReleased()->assertNotFailed();
@@ -398,18 +457,39 @@ test('the job checks again when it runs: banned or removed since, nothing is sen
     $room = room('family', $alice, $bob);
     $bobs = device($bob);
     $payload = ['type' => 'mention', 'title' => 't', 'body' => 'b', 'url' => '/', 'tag' => 'x'];
+    $message = Message::factory()->create(['channel_id' => $room->id, 'user_id' => $alice->id]);
 
     DB::table('channel_members')->where('channel_id', $room->id)->where('user_id', $bob->id)->delete();
-    (new SendPushNotification($bobs->id, $room->id, $payload))->handle(fakeSender());
+    (new SendPushNotification($bobs->id, $room->id, $message->id, $payload))->handle(fakeSender());
     expect(fakeSender()->sent)->toBe([]);
 
     $room->addMember($bob);
     $bob->forceFill(['banned_at' => now()])->save();
-    (new SendPushNotification($bobs->id, $room->id, $payload))->handle(fakeSender());
+    (new SendPushNotification($bobs->id, $room->id, $message->id, $payload))->handle(fakeSender());
     expect(fakeSender()->sent)->toBe([]);
 
     // A device removed meanwhile: nothing to do.
     $bobs->delete();
-    (new SendPushNotification($bobs->id, $room->id, $payload))->handle(fakeSender());
+    (new SendPushNotification($bobs->id, $room->id, $message->id, $payload))->handle(fakeSender());
     expect(fakeSender()->sent)->toBe([]);
+});
+
+test('the job checks the message too: deleted (a tombstone) or gone since, nothing is sent', function () {
+    [$alice, $bob] = User::factory()->count(2)->create();
+    $dm = conversation($alice, $bob);
+    $bobs = device($bob);
+    $payload = ['type' => 'dm', 'title' => 't', 'body' => 'b', 'url' => '/', 'tag' => 'x'];
+    $message = Message::factory()->create(['channel_id' => $dm->id, 'user_id' => $alice->id]);
+
+    // Still there: sent (the control).
+    (new SendPushNotification($bobs->id, $dm->id, $message->id, $payload))->handle(fakeSender());
+    expect(fakeSender()->sent)->toHaveCount(1);
+
+    $message->forceFill(['deleted_at' => now()])->save();
+    (new SendPushNotification($bobs->id, $dm->id, $message->id, $payload))->handle(fakeSender());
+    expect(fakeSender()->sent)->toHaveCount(1);
+
+    $message->delete();
+    (new SendPushNotification($bobs->id, $dm->id, $message->id, $payload))->handle(fakeSender());
+    expect(fakeSender()->sent)->toHaveCount(1);
 });

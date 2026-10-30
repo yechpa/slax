@@ -254,18 +254,21 @@ receives the channel's events until it disconnects.
 - **iPhone and iPad: iOS 16.4 or later, installed app only.** Safari has no Web Push in a tab: outside the installed
   app the menu explains to add Slax to the Home Screen first. Older iOS shows nothing. Safari on macOS 13+ supports
   push in a tab (the switch shows); Firefox and Chromium browsers everywhere else.
-- **"Using Slax right now" means a presence heartbeat in the last 60 s.** The server cannot know whether a tab is
-  visible, so nobody is notified while any tab of theirs is open, visible or not (open tabs ping every 25 s, hidden
-  ones every 50 s): a desktop tab left open in the background keeps the phone silent, and after leaving the app it
-  can take up to a minute before pushes start. The rule errs towards fewer notifications.
+- **Only someone shown "online" is not notified.** The server cannot know whether a tab is visible, so it uses the
+  presence state: `online` (a heartbeat in the last 60 s and an interaction with Slax in the last 5 minutes, on any
+  device) gets no push; `away` (a tab still open, no interaction for 5 minutes, e.g. a desktop tab in the background)
+  and `offline` are notified. So for up to 5 minutes after last touching Slax on one device, the person's other
+  devices stay silent too; after closing the app (no heartbeat), pushes resume within a minute at most.
 - **What notifies:** a new message in a DM or group conversation; an @mention, in any channel (the first name,
   "@dana", or the whole name without spaces, "@DanaCohen", case ignored: two people sharing a first name are both
   notified); a reply in a thread the person started or replied in. One notification per person per message. Not:
   ordinary room messages, reactions, edits, being added to a channel. Never the author, a banned account, a
-  non-member (membership is checked again when the job runs), or anyone using Slax right now.
+  non-member (membership is checked again when the job runs), or anyone online right now. A message deleted before
+  its job runs is not pushed.
 - **What a notification says:** the sender and the channel ("Dana in #family", "Dana (direct message)", also for a
   group conversation) and a generic line ("New message", "You were mentioned", "New reply") in the language of the
-  device (the app's language when it subscribed or last opened). Never the text, an e-mail address or a file name.
+  device (the app's language when it subscribed or last opened). Never the text, an e-mail address or a file name: a
+  sender whose name is an e-mail address (a Google account without a name) shows as "Someone".
   The payload is end-to-end encrypted to the browser (RFC 8291); the push service sees the endpoint, the time and the
   size only.
 - **Key rotation invalidates every subscription.** A device subscribed with the old public key is deleted at its next
@@ -285,8 +288,9 @@ receives the channel's events until it disconnects.
   person signs in, that subscription is dropped, never taken over.
 - **The browser renewing a subscription by itself** (`pushsubscriptionchange`) is not handled in the service worker,
   which cannot authenticate (no CSRF token there): the app sends the current subscription again each time it opens.
-- **One queue worker.** Push jobs share it with broadcasts (each push has a 5 s timeout): a burst of notifications to
-  a slow push service could delay realtime events by a few seconds.
+- **One queue worker, two queues.** Push jobs go on the `push` queue; the worker (`--queue=default,push`) takes every
+  waiting broadcast before the next push, so a burst of notifications never queues ahead of realtime events. A
+  broadcast that arrives while a push is being sent still waits for it (5 s at most, the push timeout).
 - **Endpoints are restricted to the push services** (FCM, Mozilla, Apple, WNS; https, port 443): the queue worker
   POSTs to them, so a user cannot aim it at an internal address. A new browser vendor's push service would need its
   host added to `config/slax.php`.

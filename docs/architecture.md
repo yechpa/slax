@@ -59,7 +59,7 @@ flowchart LR
 | nginx | Serves the SPA, sets the CSP and the other headers, routes `/api`, `/auth`, `/sanctum`, `/broadcasting` to PHP-FPM on the pod's loopback (never stored by the browser: `no-store`) and `/app` to Reverb; `/apps` (Reverb's HTTP API) is never public; `/sw.js` always revalidated | `ghcr.io/yechpa/slax-web` |
 | Laravel API | Accounts, channels, messages, threads, reactions, files, presence, moderation, audit log, channel authorization | `ghcr.io/yechpa/slax-app` |
 | Reverb | Laravel's WebSocket server (Pusher protocol); presence channel for the workspace, private channel per conversation | `slax-app` |
-| Queue worker | Broadcasts (after the transaction commits), channel revocations, one worker so their order holds; Web Push notifications to the browsers' push services | `slax-app` |
+| Queue worker | Broadcasts (after the transaction commits), channel revocations, one worker so their order holds; Web Push notifications to the browsers' push services, on their own `push` queue drained after `default` | `slax-app` |
 | Scheduler | Demo reset (prod), audit pruning, orphan files, backup freshness check | `slax-app` |
 | Scanner | Upload validation: type by signature (allowlist), size, hash, zip bombs and unsafe paths; reads nothing and calls nothing | `ghcr.io/yechpa/slax-scanner` |
 | PostgreSQL, Redis | Data; sessions, cache, queue, presence | upstream, pinned by digest |
@@ -140,8 +140,9 @@ on 50 sockets, with nothing lost or doubled ([load-test-results.md](load-test-re
 - A device turns notifications on from the account menu (`POST /api/v1/push/subscriptions`,
   the browser's push endpoint and keys; a push service's host only). After a message commits,
   a listener picks who to notify (DM members, @mentioned members, the thread's people; never
-  the author, a banned account, a non-member or anyone with a heartbeat in the last 60 s)
-  and queues one job per device. The job checks again, encrypts `{type, title, body, url,
+  the author, a banned account, a non-member or anyone `online`; `away` and `offline` are
+  notified) and queues one job per device on the `push` queue (the worker drains `default`
+  first). The job checks again (device, key, ban, membership, the message not deleted), encrypts `{type, title, body, url,
   tag}` (names and a generic line, never the text) for the browser and signs it with the
   VAPID key (minishlink/web-push); 404/410 deletes the device. Without VAPID keys all of it
   is off. The service worker shows every push and opens the conversation on a tap.

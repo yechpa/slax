@@ -191,8 +191,10 @@ test('the test button pushes to the caller\'s own devices only, and is throttled
 
     $mine = PushSubscription::where('user_id', $user->id)->pluck('id')->all();
     Queue::assertPushed(SendPushNotification::class, 2);
+    Queue::assertPushedOn('push', SendPushNotification::class);
     Queue::assertPushed(SendPushNotification::class, fn (SendPushNotification $job) => in_array($job->subscriptionId, $mine, true)
         && $job->channelId === null
+        && $job->messageId === null
         && array_keys($job->payload) === ['type', 'title', 'body', 'url', 'tag']
         && $job->payload['type'] === 'test'
         && $job->payload['url'] === '/');

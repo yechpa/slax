@@ -4,6 +4,8 @@
 return [
     'title_room' => ':sender in #:channel',
     'title_direct' => ':sender (direct message)',
+    // A sender whose name is an e-mail address (never shown in a notification).
+    'someone' => 'Someone',
     'body_dm' => 'New message',
     'body_mention' => 'You were mentioned',
     'body_reply' => 'New reply',

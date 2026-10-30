@@ -27,9 +27,10 @@ final class PushPayload
      */
     public static function forMessage(string $type, User $sender, Channel $channel, ?int $threadId, string $locale): array
     {
+        $name = self::senderName($sender, $locale);
         $title = $channel->isDirect()
-            ? __('push.title_direct', ['sender' => $sender->name], $locale)
-            : __('push.title_room', ['sender' => $sender->name, 'channel' => (string) $channel->name], $locale);
+            ? __('push.title_direct', ['sender' => $name], $locale)
+            : __('push.title_room', ['sender' => $name, 'channel' => (string) $channel->name], $locale);
 
         return [
             'type' => $type,
@@ -50,6 +51,15 @@ final class PushPayload
             'url' => '/',
             'tag' => 'test',
         ];
+    }
+
+    /**
+     * The sender's name, unless it is (or holds) an e-mail address: a Google account without a
+     * name is named by its address (GoogleIdentityProvider), which never goes into a notification.
+     */
+    public static function senderName(User $sender, string $locale): string
+    {
+        return str_contains($sender->name, '@') ? __('push.someone', [], $locale) : $sender->name;
     }
 
     /** One per conversation: a newer notification replaces the one before (and the push service's Topic). */

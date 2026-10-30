@@ -583,7 +583,8 @@ pinger (a free uptime service polling `/api/v1/health`) would cover that; none i
 
 ### 4.11 Push notifications
 
-Web Push (VAPID) from the queue worker to the browsers' push services (FCM for Chrome and
+Web Push (VAPID) from the queue worker (queue `push`, drained after `default`: chart
+`queue:work --queue=default,push`) to the browsers' push services (FCM for Chrome and
 Android, Apple for Safari and iOS, Mozilla, Microsoft). **Real delivery to these services was
 NOT tested here** (no automated run reaches them; see docs/known-limitations.md, "Push
 notifications", for the checklist the family runs on real devices).
@@ -605,6 +606,11 @@ notifications", for the checklist the family runs on real devices).
   (`kubectl -n slax logs deploy/slax-queue | grep -i push`): "refused by the push service"
   with a status (403: the keys or the subject; 400/413: the device's keys or the payload) or
   "dropped after retries" (the push service unreachable).
+- **Who is notified.** DMs and group conversations, @mentions, replies in threads the person
+  started or replied in; never someone shown `online` (connected and active in Slax in the
+  last 5 minutes, on any device): `away` and `offline` people are. So to check real delivery,
+  close the app on every device (or leave it untouched 5 minutes) before someone writes to
+  you. The test button ignores presence.
 - **Rotate.** `sudo bash /tmp/create-secrets.sh vapid`, then
   `kubectl -n slax rollout restart deployment`. Rotation invalidates every subscription: old
   devices are deleted at their next push, the app shows the switch off, and everyone turns

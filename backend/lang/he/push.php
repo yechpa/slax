@@ -6,6 +6,8 @@
 return [
     'title_room' => "\u{2068}:sender\u{2069} בערוץ \u{2068}#:channel\u{2069}",
     'title_direct' => "\u{2068}:sender\u{2069} (הודעה ישירה)",
+    // A sender whose name is an e-mail address (never shown in a notification).
+    'someone' => 'מישהו',
     'body_dm' => 'הודעה חדשה',
     'body_mention' => 'הוזכרת בהודעה',
     'body_reply' => 'תגובה חדשה',
