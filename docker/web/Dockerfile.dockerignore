@@ -1,0 +1,14 @@
+# Build context: the repository root. Only what docker/web/Dockerfile copies goes in.
+*
+!frontend/
+!docker/web/
+
+frontend/node_modules/
+frontend/dist/
+frontend/dist-e2e/
+frontend/dist-design-system/
+frontend/coverage/
+frontend/.env
+frontend/.env.*
+frontend/*.local
+**/.DS_Store

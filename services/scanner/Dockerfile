@@ -1,6 +1,10 @@
 # Upload validation service. Default target (`runtime`): the service itself, as an
-# unprivileged user. `dev` adds pytest and Ruff for the python-tools container.
-FROM python:3.12-slim AS base
+# unprivileged user, and the production image ghcr.io/yechpa/slax-scanner (read-only root
+# filesystem friendly: it only writes to /tmp). `dev` adds pytest and Ruff for the
+# python-tools container. The base image is pinned by version and digest (a multi-architecture
+# index: the same line builds linux/amd64 and linux/arm64).
+ARG PYTHON_IMAGE=python:3.12.16-slim-trixie@sha256:8523d6abeb48ceae0b7240d30c5808fc26cb79c1a635bacdf19cf3baecfbec07
+FROM ${PYTHON_IMAGE} AS base
 
 # libmagic: content sniffing for python-magic.
 RUN apt-get update \

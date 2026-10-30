@@ -1,5 +1,5 @@
 # Dev image for the Laravel services (app, reverb, queue, scheduler).
-# Production images are built separately (see the deployment tasks).
+# Production image: docker/app/Dockerfile (slax-app), with docker/web for nginx (slax-web).
 FROM php:8.4-fpm-alpine
 
 COPY --from=ghcr.io/mlocati/php-extension-installer:2 /usr/bin/install-php-extensions /usr/local/bin/

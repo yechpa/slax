@@ -1,0 +1,93 @@
+# The Slax site, rendered at start by entrypoint.sh (envsubst, only the ${SLAX_*} names it
+# lists; nginx's own $variables are left alone). One origin for everything the browser uses:
+#   /api/ /auth/ /sanctum/ /broadcasting/  Laravel (PHP-FPM, same pod)
+#   /app/                                  Reverb's WebSocket (Pusher protocol)
+#   everything else                        the SPA
+# Reverb's HTTP API (/apps/) is never served here: Laravel calls it inside the cluster.
+
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    client_max_body_size 12m;
+
+    # The client's address from the trusted proxies in front (ingress controller): rate limits
+    # and the audit log see the visitor, not the proxy.
+    include /tmp/nginx/real-ip.conf;
+
+    # On every response. A location that adds its own headers includes this file again
+    # (nginx does not inherit add_header into a location that has any).
+    include /tmp/nginx/security-headers.conf;
+
+    location ~ ^/(api|auth|sanctum|broadcasting)/ {
+        fastcgi_pass ${SLAX_PHP_UPSTREAM};
+        include /etc/nginx/fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/public/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        # TLS ends before this server: tell Laravel the public scheme (secure cookies, URLs).
+        fastcgi_param HTTPS ${SLAX_FASTCGI_HTTPS} if_not_empty;
+        fastcgi_param HTTP_PROXY "";
+        fastcgi_read_timeout 70s;
+    }
+
+    location = /up {
+        fastcgi_pass ${SLAX_PHP_UPSTREAM};
+        include /etc/nginx/fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/public/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param HTTPS ${SLAX_FASTCGI_HTTPS} if_not_empty;
+        fastcgi_param HTTP_PROXY "";
+    }
+
+    # Reverb: WebSocket upgrades only.
+    location ^~ /app/ {
+        if ($http_upgrade !~* ^websocket$) {
+            return 426;
+        }
+        proxy_pass http://${SLAX_REVERB_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # Reverb's HTTP API (publishing events, closing connections): cluster-internal only.
+    location ^~ /apps/ {
+        return 404;
+    }
+
+    # nginx itself (liveness), without PHP.
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Content-hashed bundle files never change.
+    location ^~ /assets/ {
+        include /tmp/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    location ^~ /fonts/ {
+        include /tmp/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=604800" always;
+        try_files $uri =404;
+    }
+
+    # The page, with this deployment's public settings (written at start).
+    location = /index.html {
+        root /tmp/nginx/html;
+        include /tmp/nginx/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # Every other path is one of the SPA's own routes.
+    location / {
+        try_files $uri /index.html;
+    }
+}
