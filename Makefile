@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e chart-lint images
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e chart-lint images web-check
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
@@ -145,3 +145,7 @@ images: ## Build the production images slax-app, slax-web and slax-scanner (tag 
 	docker build -q -f docker/web/Dockerfile -t slax-web:local .
 	docker build -q --target runtime -t slax-scanner:local services/scanner
 	docker image ls --format '{{.Repository}}:{{.Tag}}  {{.Size}}' | grep -E '^slax-(app|web|scanner):local '
+
+web-check: ## Build slax-web and check its routes and security headers (docker/web/check.sh)
+	docker build -q -f docker/web/Dockerfile -t slax-web:local . >/dev/null
+	docker/web/check.sh slax-web:local

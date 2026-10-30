@@ -84,7 +84,8 @@ csp="default-src 'self'; script-src 'self'${turnstile}; style-src 'self'; img-sr
     echo "add_header Content-Security-Policy \"$csp\" always;"
     echo 'add_header X-Content-Type-Options "nosniff" always;'
     echo 'add_header X-Frame-Options "DENY" always;'
-    echo 'add_header Referrer-Policy "strict-origin-when-cross-origin" always;'
+    # Empty (so not added) when the upstream response has its own (nginx.conf's map).
+    echo 'add_header Referrer-Policy $slax_referrer_policy always;'
     echo 'add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()" always;'
     echo 'add_header Cross-Origin-Opener-Policy "same-origin" always;'
     if [ "$SLAX_HSTS_MAX_AGE" -gt 0 ]; then
