@@ -41,6 +41,25 @@ failure traces are left in `e2e/playwright-report/` and `e2e/test-results/`.
 `E2E_SCREENSHOTS=1 make e2e` also rewrites the RTL reference screenshots in
 `docs/design/e2e/`.
 
+## Reproducing CI locally
+
+CI runs the same `make` targets on a fresh checkout, so `.env` is a copy of `.env.example`
+and the runner's Docker Compose is whatever its image ships (2.38 on `ubuntu-24.04` in
+October 2026; the Compose files need at least 2.24.4). To see what CI sees, run them from a
+fresh clone, never from your working copy with its own `.env`:
+
+```sh
+git clone --branch <branch> https://github.com/yechpa/slax.git /tmp/slax-ci
+cd /tmp/slax-ci
+make lint && make test && make e2e
+```
+
+The clone is its own Compose project (named after its directory), so it leaves the
+development stack and its volumes alone; only `make e2e` shares the `slax-e2e` project, so
+do not run it from two checkouts at once. Tests must not depend on `.env`: a setting the
+suite relies on is pinned in `backend/phpunit.xml` (`force="true"`, in both `<env>` and
+`<server>`).
+
 ## Deployment
 
 Development and production run the same production images
