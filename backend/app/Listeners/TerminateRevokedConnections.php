@@ -2,13 +2,10 @@
 
 namespace App\Listeners;
 
-use App\Broadcasting\ReverbBroadcaster;
 use App\Events\MemberRemoved;
 use App\Events\UserBanned;
 use App\Jobs\TerminateUserConnections;
 use Illuminate\Contracts\Events\ShouldHandleEventsAfterCommit;
-use Illuminate\Support\Facades\Broadcast;
-use Throwable;
 
 /**
  * A user who leaves or is removed from a channel, or is banned, must stop receiving its
@@ -23,19 +20,7 @@ class TerminateRevokedConnections implements ShouldHandleEventsAfterCommit
 {
     public function handle(MemberRemoved|UserBanned $event): void
     {
-        $broadcaster = Broadcast::connection();
-
-        if (! $broadcaster instanceof ReverbBroadcaster) {
-            return;
-        }
-
-        try {
-            // Short timeout: this runs inside the leave/remove request.
-            $broadcaster->terminateUserConnections($event->user->id, timeoutSeconds: 2);
-        } catch (Throwable $e) {
-            // The membership change (or the ban) stands either way; keep trying in the background.
-            report($e);
-            TerminateUserConnections::dispatch($event->user->id);
-        }
+        // The membership change (or the ban) stands either way; a failure is retried from the queue.
+        TerminateUserConnections::now($event->user->id);
     }
 }

@@ -9,3 +9,10 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('files:prune-orphans')->hourly()->withoutOverlapping();
+
+// The public demo goes back to its seed every night (DemoReset), at a quiet hour for its audience.
+Schedule::command('slax:demo-reset')
+    ->dailyAt(config('slax.demo.reset_time', '03:00'))
+    ->timezone(config('slax.demo.reset_timezone', 'Asia/Jerusalem'))
+    ->withoutOverlapping()
+    ->onOneServer();
