@@ -400,9 +400,11 @@ Data written since that backup is lost: say so on the site first if anyone uses 
 
 1. Make sure the dump restores: run a restore check now (4.3) on the chosen dump (it takes the
    newest; for an older one, restore it on your machine into a scratch PostgreSQL 16 first).
-2. Stop everything that writes:
+2. Stop everything that writes. The uptime monitor would report the app and Reverb DOWN after
+   three minutes: pause it too (§4.10, "Pause it"):
 
    ```sh
+   kubectl -n slax patch cronjob slax-monitor -p '{"spec":{"suspend":true}}'
    kubectl -n slax scale deployment slax-app slax-queue slax-scheduler slax-reverb --replicas=0
    kubectl -n slax patch cronjob slax-backup -p '{"spec":{"suspend":true}}'
    ```
@@ -448,8 +450,9 @@ Data written since that backup is lost: say so on the site first if anyone uses 
    ```
 
 4. Start again: `kubectl -n slax scale deployment slax-app slax-queue slax-scheduler slax-reverb --replicas=1`,
-   `kubectl -n slax patch cronjob slax-backup -p '{"spec":{"suspend":false}}'`, then the
-   checklist items 2-4 of §7.
+   `kubectl -n slax patch cronjob slax-backup -p '{"spec":{"suspend":false}}'`, the monitor
+   once the app answers again (`kubectl -n slax patch cronjob slax-monitor -p '{"spec":{"suspend":false}}'`),
+   then the checklist items 2-4 of §7.
 
 ### 4.5 Rotate secrets
 
