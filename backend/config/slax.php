@@ -30,6 +30,9 @@ return [
     | deleted after this many days without activity (slax:demo-reset, nightly).
     */
     'demo' => [
+        // The nightly reset deletes visitors' accounts and content: off unless the environment
+        // turns it on (the public showcase only; see docs/known-limitations.md).
+        'reset_enabled' => filter_var(env('SLAX_DEMO_RESET_ENABLED', false), FILTER_VALIDATE_BOOL),
         'inactive_days' => 7,
         'reset_time' => '03:00',
         'reset_timezone' => 'Asia/Jerusalem',

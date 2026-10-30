@@ -1,6 +1,9 @@
 <?php
 
 use App\Contracts\AdminNotifier;
+use App\Contracts\IdentityProvider;
+use App\Services\Identity\GoogleProfile;
+use Tests\Support\FakeIdentityProvider;
 use App\Models\AuditLog;
 use App\Models\Channel;
 use App\Models\File;
@@ -17,6 +20,8 @@ use Illuminate\Support\Facades\Storage;
 use Tests\Support\RecordingNotifier;
 
 beforeEach(function () {
+    // Only the showcase environment turns the reset on (SLAX_DEMO_RESET_ENABLED).
+    config(['slax.demo.reset_enabled' => true]);
     $this->seed(DemoSeeder::class);
     expect((int) config('database.redis.default.database'))->toBe(15);
     Redis::connection()->flushdb();
@@ -231,5 +236,75 @@ test('the reset is scheduled daily at 03:00 Jerusalem time', function () {
     $event = $events->first();
     expect($event->expression)->toBe('0 3 * * *')
         ->and((string) $event->timezone)->toBe('Asia/Jerusalem')
-        ->and($event->withoutOverlapping)->toBeTrue();
+        ->and($event->withoutOverlapping)->toBeTrue()
+        ->and($event->onOneServer)->toBeTrue();
+
+    // Off unless the environment turns it on.
+    config(['slax.demo.reset_enabled' => false]);
+    expect($event->filtersPass(app()))->toBeFalse();
+    config(['slax.demo.reset_enabled' => true]);
+    expect($event->filtersPass(app()))->toBeTrue();
+});
+
+test('a banned demo account is never deleted by the reset, so the ban is never undone', function () {
+    fakeTerminations();
+    $banned = User::factory()->demo(daysAgo: 30)->banned()->create(['google_sub' => 'sub-banned']);
+    $post = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $banned->id]);
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    // Its content goes like any visitor's; the account (and its ban) stays.
+    expect(User::find($banned->id))->not->toBeNull()
+        ->and(User::find($banned->id)->isBanned())->toBeTrue()
+        ->and(Message::find($post->id))->toBeNull();
+
+    // Signing in again with the same Google account is still refused.
+    app()->instance(IdentityProvider::class, (new FakeIdentityProvider)->returns(
+        new GoogleProfile(sub: 'sub-banned', email: 'banned@example.com', emailVerified: true, name: 'Banned', avatar: null),
+    ));
+    $oauth = ['state' => str_repeat('s', 40), 'nonce' => str_repeat('n', 40)];
+    test()->withSession(['google_oauth' => $oauth])
+        ->get('/auth/google/callback?'.http_build_query(['code' => 'c', 'state' => $oauth['state']]))
+        ->assertRedirect('/?auth_error=banned');
+    expect(User::where('google_sub', 'sub-banned')->count())->toBe(1);
+});
+
+test('the reset refuses to run unless the environment turns it on, or --force', function () {
+    fakeTerminations();
+    config(['slax.demo.reset_enabled' => false]);
+    $expired = User::factory()->demo(daysAgo: 30)->create();
+
+    $this->artisan('slax:demo-reset')
+        ->expectsOutputToContain('SLAX_DEMO_RESET_ENABLED')
+        ->assertFailed();
+    expect(User::find($expired->id))->not->toBeNull()
+        ->and(AuditLog::where('action', 'demo.reset')->count())->toBe(0);
+
+    $this->artisan('slax:demo-reset --force')->assertSuccessful();
+    expect(User::find($expired->id))->toBeNull();
+});
+
+test('an expired account whose channel must wait for the next run waits with it', function () {
+    fakeTerminations();
+    $expired = User::factory()->demo(daysAgo: 30)->create();
+    $active = User::factory()->demo()->create();
+    $room = publicChannel($expired, 'expired-room');
+    $room->forceFill(['created_by' => $expired->id])->save();
+    // Someone else's file in that channel cannot be deleted: the channel stays, so does its creator.
+    $file = fileWithObject($active, $room, Message::factory()->create(['channel_id' => $room->id, 'user_id' => $active->id]));
+
+    $disk = Mockery::mock(Storage::disk('s3'))->makePartial();
+    $disk->shouldReceive('delete')->andReturnFalse();
+    Storage::set('s3', $disk);
+    $this->artisan('slax:demo-reset')->assertFailed();
+
+    expect(Channel::find($room->id))->created_by->toBe($expired->id)
+        ->and(User::find($expired->id))->not->toBeNull();
+
+    // Storage back: channel, file and account all go in the same run.
+    Storage::set('s3', Storage::fake('s3'));
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+    expect(Channel::find($room->id))->toBeNull()
+        ->and(File::find($file->id))->toBeNull()
+        ->and(User::find($expired->id))->toBeNull();
 });

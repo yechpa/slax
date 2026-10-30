@@ -14,5 +14,6 @@ Schedule::command('files:prune-orphans')->hourly()->withoutOverlapping();
 Schedule::command('slax:demo-reset')
     ->dailyAt(config('slax.demo.reset_time', '03:00'))
     ->timezone(config('slax.demo.reset_timezone', 'Asia/Jerusalem'))
+    ->when(fn () => (bool) config('slax.demo.reset_enabled'))
     ->withoutOverlapping()
     ->onOneServer();

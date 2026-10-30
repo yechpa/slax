@@ -24,23 +24,27 @@ use Throwable;
 /**
  * The nightly reset of the public demo (scheduled at 03:00 Asia/Jerusalem, routes/console.php).
  *
+ * Off unless SLAX_DEMO_RESET_ENABLED is true (the public showcase only), or with --force.
+ *
  * Demo accounts are the ones visitors signed up with (`account_type = demo`), never an
  * administrator (flag or ADMIN_EMAILS address), a `member` or a `seed` account.
  *
  *  1. Demo content goes: every message and reaction of a demo account, the channels demo
  *     accounts created, and the conversations a demo account is part of.
  *  2. Demo accounts without activity (last seen, or created) for 7 days are deleted;
- *     active ones are kept, with their memberships.
+ *     active ones are kept, with their memberships, and so are banned ones (deleting them
+ *     would undo the ban: the person could sign up again).
  *  3. The starter channels and the seed messages are restored (DemoSeeder).
  *
  * Files are deleted object first, then row (StoredFiles). An object that cannot be deleted
  * keeps its row, and with it the channel and account it belongs to (the foreign keys would
- * refuse anyway) until the next run, which then exits with a failure. Deleted accounts lose
- * their sessions, presence and sockets. Running it twice changes nothing more.
+ * refuse anyway), and the kept channel's creator, until the next run; the command then exits
+ * with a failure. Deleted accounts lose their sessions, presence and sockets, last, after the
+ * seed is restored and the run audited. Running it twice changes nothing more.
  */
 class DemoReset extends Command
 {
-    protected $signature = 'slax:demo-reset';
+    protected $signature = 'slax:demo-reset {--force : Run even where SLAX_DEMO_RESET_ENABLED is off}';
 
     protected $description = 'Reset the public demo: visitors\' content, expired demo accounts, seed content';
 
@@ -51,9 +55,18 @@ class DemoReset extends Command
         AuditLogger $audit,
         AdminNotifier $notifier,
     ): int {
+        if (! config('slax.demo.reset_enabled') && ! $this->option('force')) {
+            $this->error('The demo reset is off here: it deletes visitors\' accounts and content. '
+                .'Set SLAX_DEMO_RESET_ENABLED=true (the public showcase only), or pass --force.');
+
+            return self::FAILURE;
+        }
+
         $demoIds = $this->demoAccountIds();
         $cutoff = now()->subDays((int) config('slax.demo.inactive_days', 7));
+        // A banned account is kept: deleting it would let the person sign up again.
         $expiredIds = User::whereKey($demoIds)
+            ->whereNull('banned_at')
             ->whereRaw('coalesce(last_seen_at, created_at) < ?', [$cutoff])
             ->pluck('id');
 
@@ -69,32 +82,28 @@ class DemoReset extends Command
 
         $failedIds = $files->deleteMany($fileIds);
         $failed = File::whereKey($failedIds)->get(['id', 'user_id', 'channel_id']);
-        $deletableUserIds = $expiredIds->diff($failed->pluck('user_id'))->values();
         $deletableChannelIds = $channelIds->diff($failed->pluck('channel_id'))->values();
-        $doomed = User::whereKey($deletableUserIds)->get();
+        // A channel kept for the next run keeps its creator too: deleted, the creator would leave
+        // it without one, and it would never be recognised as demo content again.
+        $keptCreators = Channel::whereKey($channelIds->diff($deletableChannelIds))->whereNotNull('created_by')->pluck('created_by');
+        $deletableUserIds = $expiredIds->diff($failed->pluck('user_id'))->diff($keptCreators)->values();
 
-        $counts = DB::transaction(function () use ($demoIds, $messageIds, $deletableChannelIds, $deletableUserIds) {
-            return [
+        [$counts, $deletedUsers] = DB::transaction(function () use ($demoIds, $messageIds, $deletableChannelIds, $deletableUserIds) {
+            // Belt and braces: the same guards as above, again at the last moment, under lock.
+            $users = User::whereKey($deletableUserIds)
+                ->where('account_type', User::ACCOUNT_DEMO)
+                ->where('is_admin', false)
+                ->whereNull('banned_at')
+                ->lockForUpdate()
+                ->get();
+
+            return [[
                 'deleted_messages' => Message::whereKey($messageIds)->delete(),
                 'deleted_reactions' => Reaction::whereIn('user_id', $demoIds)->delete(),
                 'deleted_channels' => Channel::whereKey($deletableChannelIds)->delete(),
-                // Belt and braces: the same guards as demoAccountIds(), again at the last moment.
-                'deleted_users' => User::whereKey($deletableUserIds)
-                    ->where('account_type', User::ACCOUNT_DEMO)
-                    ->where('is_admin', false)
-                    ->delete(),
-            ];
+                'deleted_users' => User::whereKey($users->modelKeys())->delete(),
+            ], $users];
         });
-
-        foreach ($doomed as $user) {
-            try {
-                $sessions->destroyAll($user);
-                $presence->forget($user->id);
-            } catch (Throwable $e) {
-                report($e);
-            }
-            TerminateUserConnections::now($user->id);
-        }
 
         (new DemoSeeder)->run();
 
@@ -106,8 +115,18 @@ class DemoReset extends Command
         $audit->record(AuditLogger::DEMO_RESET);
         Log::info('Demo reset.', $summary);
         $this->info('Demo reset: '.collect($summary)->map(fn ($value, $key) => "{$key}={$value}")->implode(', '));
-
         $notifier->notify($failedIds === [] ? 'info' : 'warning', 'Demo reset', $summary);
+
+        // Last, and failure-proof: the accounts actually deleted lose their sessions, presence and sockets.
+        foreach ($deletedUsers as $user) {
+            try {
+                $sessions->destroyAll($user);
+                $presence->forget($user->id);
+            } catch (Throwable $e) {
+                report($e);
+            }
+            TerminateUserConnections::now($user->id);
+        }
 
         if ($failedIds !== []) {
             $this->error(count($failedIds).' object(s) could not be deleted; their rows, channels and accounts wait for the next run.');
