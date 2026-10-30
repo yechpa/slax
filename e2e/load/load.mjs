@@ -35,8 +35,11 @@ const KEY = env('LOAD_REVERB_KEY', 'slax-e2e-key')
 const OUT = env('LOAD_OUT', '/out/results.json')
 const TURNSTILE_TEST_TOKEN = 'XXXX.DUMMY.TOKEN.XXXX'
 const HEARTBEAT_MS = 25_000
-/** Every HTTP request is abandoned after this (a stuck one would otherwise stall the run). */
-const REQUEST_TIMEOUT_MS = 10_000
+/**
+ * Every HTTP request (its answer and its body) is abandoned after this: a stuck one would
+ * otherwise stall the run. LOAD_REQUEST_TIMEOUT_MS: for load.test.mjs only.
+ */
+const REQUEST_TIMEOUT_MS = Number(env('LOAD_REQUEST_TIMEOUT_MS', 10_000))
 
 if (SENDERS > CLIENTS || RATE / SENDERS > 0.5) {
   console.error(`LOAD_RATE/LOAD_SENDERS must be <= 0.5 (the app allows 30 messages a minute per user) and LOAD_SENDERS <= LOAD_CLIENTS`)
@@ -44,6 +47,8 @@ if (SENDERS > CLIENTS || RATE / SENDERS > 0.5) {
 }
 
 const now = () => performance.now()
+/** Why a request (or reading its body) failed, in a few words. */
+const failureReason = (error) => (error.name === 'TimeoutError' ? `no answer within ${REQUEST_TIMEOUT_MS / 1000} s` : (error.cause?.code ?? error.message))
 const round1 = (value) => Math.round(value * 10) / 10
 /** What the test is doing (named when it fails). */
 let phase = 'start'
@@ -108,8 +113,7 @@ class Client {
       })
     } catch (error) {
       record(kind, now() - started, false)
-      const reason = error.name === 'TimeoutError' ? `no answer within ${REQUEST_TIMEOUT_MS / 1000} s` : (error.cause?.code ?? error.message)
-      throw new Error(`[${phase}] ${method} ${path}: ${reason}`)
+      throw new Error(`[${phase}] ${method} ${path}: ${failureReason(error)}`)
     }
     this.jar.store(response)
     const ok = response.status < 400
@@ -120,7 +124,13 @@ class Client {
 
   async json(kind, method, path, body) {
     const response = await this.request(kind, method, path, body)
-    return response.status === 204 ? undefined : response.json()
+    if (response.status === 204) return undefined
+    // The body comes after the headers, under the same timeout: a failure there names its phase too.
+    try {
+      return await response.json()
+    } catch (error) {
+      throw new Error(`[${phase}] ${method} ${path}: ${failureReason(error)}`)
+    }
   }
 
   async signIn() {
@@ -360,6 +370,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`load test failed during ${phase}: ${error.message}`)
+  // A request's error already starts with its phase ("[sign-in] POST ..."): not said twice.
+  const message = error.message.startsWith('[') ? error.message : `[${phase}] ${error.message}`
+  console.error(`load test failed: ${message}`)
   process.exit(1)
 })

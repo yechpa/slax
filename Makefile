@@ -109,6 +109,8 @@ e2e: env deps ## Run the Playwright end-to-end suite and a load smoke on a fresh
 	echo '==> Playwright'; \
 	mkdir -p docs/design/e2e build/load; \
 	$(DCE) run --rm -T playwright; \
+	echo '==> Load test self-check (its failure messages)'; \
+	$(DCE) --profile load run --rm -T --no-deps load node --test --test-reporter=dot /load/load.test.mjs; \
 	echo '==> Load smoke (5 WebSocket clients, 2 messages/s for 10 s: no loss, no error)'; \
 	LOAD_CLIENTS=5 LOAD_SENDERS=5 LOAD_RATE=2 LOAD_SECONDS=10 $(DCE) --profile load run --rm -T load
 
