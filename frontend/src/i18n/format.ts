@@ -1,4 +1,4 @@
-import { getLocale } from './index.ts'
+import { getLocale, t } from './index.ts'
 
 /** 24-hour clock in every language: terminals do not say "AM". */
 export function formatTime(date: Date): string {
@@ -21,4 +21,22 @@ export function formatBytes(bytes: number): string {
     unitDisplay: 'short',
     maximumFractionDigits: unit === 0 || value >= 100 ? 0 : 1,
   }).format(value)
+}
+
+const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+
+/** Same calendar day in the user's time zone. */
+export const sameDay = (a: Date, b: Date) => dayKey(a) === dayKey(b)
+
+/** Day divider label: "today", "yesterday", else "Thursday 29 October" (with the year when it is not this one). */
+export function formatDay(date: Date, now: Date = new Date()): string {
+  if (sameDay(date, now)) return t('time.today')
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+  if (sameDay(date, yesterday)) return t('time.yesterday')
+  return new Intl.DateTimeFormat(getLocale(), {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric',
+  }).format(date)
 }

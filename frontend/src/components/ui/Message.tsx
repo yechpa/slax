@@ -20,29 +20,47 @@ type Props = {
   footer?: ComponentChildren
   /** Hover / focus toolbar. */
   actions?: ComponentChildren
+  /**
+   * A follow-up by the same author a moment later: no avatar and no visible header (the
+   * time shows in the gutter on hover). Author and time stay readable by screen readers.
+   */
+  compact?: boolean
+  /** Extra classes, e.g. message--pending, message--failed. */
+  class?: string
+  /** Still being sent. */
+  busy?: boolean
 }
 
 /**
  * One message, presentation only. The author is isolated in <bdi> (a Hebrew
  * name next to Latin digits stays in order) and the body is dir="auto".
  */
-export function Message({ author, authorLang, hue, time, edited = false, mentioned = false, lang, children, footer, actions }: Props) {
+export function Message(props: Props) {
+  const { author, authorLang, hue, time, edited = false, mentioned = false, lang, children, footer, actions, compact = false, busy } = props
+  const classes = ['message', mentioned && 'message--mentioned', compact && 'message--compact', props.class]
   return (
-    <article class={mentioned ? 'message message--mentioned' : 'message'} style={hueStyle(hue)}>
-      <Avatar name={author} hue={hue} />
+    <article class={classes.filter(Boolean).join(' ')} style={hueStyle(hue)} aria-busy={busy || undefined}>
+      {compact ? (
+        <time class="message__gutter" dateTime={time.iso} aria-hidden="true">
+          {time.label}
+        </time>
+      ) : (
+        <Avatar name={author} hue={hue} />
+      )}
       <div class="message__main">
-        <header class="message__meta">
+        <header class={compact ? 'message__meta sr-only' : 'message__meta'}>
           <bdi class="message__author" lang={authorLang}>
             {author}
           </bdi>
           <time class="message__time" dateTime={time.iso}>
             {time.label}
           </time>
-          {edited && <span class="message__edited">{t('message.edited')}</span>}
+          {edited && !compact && <span class="message__edited">{t('message.edited')}</span>}
         </header>
         <div class="message__body" dir="auto" lang={lang}>
           {children}
         </div>
+        {edited && compact && <span class="message__edited">{t('message.edited')}</span>}
         {footer && <div class="message__footer">{footer}</div>}
       </div>
       {actions && (

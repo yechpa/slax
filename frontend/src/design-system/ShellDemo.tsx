@@ -139,7 +139,7 @@ export function ShellDemo() {
         <footer class="shell__footer">
           {/* t() wraps each name in Unicode isolates (FSI…PDI), the plain-text <bdi>. */}
           <TypingIndicator names={[noam.name]} />
-          <Composer channel="#general" value={draft} onInput={setDraft} onSend={() => setDraft('')} />
+          <Composer channel="#general" value={draft} onInput={setDraft} onSend={() => setDraft('')} onAttach={() => undefined} />
         </footer>
       </section>
     </div>

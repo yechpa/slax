@@ -234,11 +234,12 @@ export function KitchenSink() {
 
           <Section id="ds-composer" title={t('ds.composer')}>
             <div class="ds-rows">
-              <Composer channel="#engineering" value={draft} onInput={setDraft} onSend={() => setDraft('')} />
+              <Composer channel="#engineering" value={draft} onInput={setDraft} onSend={() => setDraft('')} onAttach={() => undefined} maxLength={4000} />
               <Composer
                 channel="#עיצוב"
                 value="מצרפת את הקבצים של ה־mockups"
                 onInput={() => undefined}
+                onAttach={() => undefined}
                 files={
                   <>
                     <FileChip name="mockup-listing.pdf" bytes={1_240_000} onRemove={() => undefined} />

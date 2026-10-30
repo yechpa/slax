@@ -104,6 +104,50 @@ describe('Composer', () => {
   })
 })
 
+describe('Composer input methods and limits', () => {
+  it('composer_ignores_enter_during_ime_composition', () => {
+    const onSend = vi.fn()
+    render(<Composer channel="#general" value="にほんご" onInput={() => undefined} onSend={onSend} />, host)
+    const textarea = host.querySelector('textarea')!
+    const enter = (init: KeyboardEventInit) => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init })
+      textarea.dispatchEvent(event)
+      return event
+    }
+
+    // The Enter that confirms a candidate: no send, and the IME keeps the key.
+    expect(enter({ isComposing: true }).defaultPrevented).toBe(false)
+    // Safari reports that Enter as keyCode 229 after compositionend.
+    expect(enter({ keyCode: 229 }).defaultPrevented).toBe(false)
+    // Between compositionstart and compositionend, whatever the event says.
+    textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+    enter({})
+    expect(onSend).not.toHaveBeenCalled()
+    textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))
+
+    // Once the composition is over, Enter sends.
+    expect(enter({}).defaultPrevented).toBe(true)
+    expect(onSend).toHaveBeenCalledOnce()
+  })
+
+  it('counts code points near the limit and refuses to send over it', () => {
+    const onSend = vi.fn()
+    const near = 'a'.repeat(3990)
+    render(<Composer channel="#general" value={near} onInput={() => undefined} onSend={onSend} maxLength={4000} />, host)
+    expect(host.querySelector('.composer__counter')?.textContent).toBe('10 characters left')
+
+    // 4001 emoji are 4001 characters for the server (not 8002 UTF-16 units).
+    render(<Composer channel="#general" value={'🚀'.repeat(4001)} onInput={() => undefined} onSend={onSend} maxLength={4000} />, host)
+    expect(host.querySelector('.composer__counter')?.textContent).toBe('1 character too many')
+    expect(host.querySelector<HTMLButtonElement>('.btn--primary')!.disabled).toBe(true)
+    host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    expect(onSend).not.toHaveBeenCalled()
+
+    render(<Composer channel="#general" value="short" onInput={() => undefined} maxLength={4000} />, host)
+    expect(host.querySelector('.composer__counter')).toBeNull()
+  })
+})
+
 describe('ChannelName and Mention', () => {
   it('keep the sigil and the name together in one <bdi>', () => {
     render(
