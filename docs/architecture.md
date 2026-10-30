@@ -178,6 +178,8 @@ sequenceDiagram
   each sign-in.
 - The SPA uses Laravel Sanctum's cookie session (`SameSite`, `Secure`, `HttpOnly`) with the
   `XSRF-TOKEN` double-submit cookie.
+- A session lasts 14 days without a request, renewed by every request (decision 15); sign-out
+  and a ban end it at once.
 - Rate limits per IP on the start and the callback; Turnstile in front of the start.
 - In the end-to-end stack only (`APP_ENV=e2e`), Google is replaced by a local account
   chooser; the binding is by environment, tested, and the cluster chart refuses any
@@ -290,6 +292,17 @@ Short records: the choice, why, and what it costs.
     own push services, a maintained library (minishlink/web-push), keys in the Secret; no
     Firebase project, no new service, no cost. Payloads name the sender and the channel only.
     Cost: iPhones need iOS 16.4+ and the installed app; real delivery is checked by hand.
+15. **Sessions last 14 days, rolling** (`session.lifetimeMinutes`, was Laravel's 2 hours), because a
+    notification tap must not land on a sign-in (on iOS the installed app keeps its own cookies,
+    and Google sign-in from there is a chore). Sign-out and an administrator's ban end sessions
+    at once whatever the lifetime: the session id is tombstoned in Redis, and the client stops
+    presence and holds every request before it sends the logout. Cost: a lost, unlocked device
+    stays signed in until someone signs out there or an administrator bans the account; idle
+    visitors' sessions sit in Redis longer.
+16. **Family accounts by an administrator's click, not an allowlist.** Everyone signs up as a
+    `demo` account; Administration → Accounts makes a relative a `member`, whose content the
+    nightly demo reset keeps. No e-mail address in configuration or the repository. Cost: one
+    click per relative, the same day they first sign in.
 
 ## 7. Cost
 

@@ -482,11 +482,33 @@ In the app, as an administrator (`ADMIN_EMAILS`): Administration → a person �
 "Banned" list lifts a ban. Every action lands in the audit log (Administration → Audit), with
 the visitor's real address. An administrator listed in `ADMIN_EMAILS` cannot be banned.
 
+**Family accounts (members).** Everyone who signs up with Google is a `demo` account, like
+any visitor of the public demo: in production the nightly reset (4.7) deletes what they
+write, and the account after 7 days without activity. To keep a relative's messages:
+Administration → Accounts (most recently seen first; ask them to sign in once, then look at
+the top) → **Make member** → confirm. It is audited (`user.made_member`) and sent to Telegram;
+**Make demo account** undoes it (`user.made_demo`, a warning: their content goes at the next
+reset). An administrator (`ADMIN_EMAILS`) is always a member and has no button. No e-mail
+address is configured anywhere for this (decision: the click, not an allowlist in env). Do it
+the same day they sign up: whatever they wrote before the promotion and the next 03:00 reset
+is deleted with the demo content. In production the public channels are the demo's, readable
+by every visitor: create a **private** channel for the family (New channel → private) and add
+each member to it. The family guide for them: [family-guide.md](family-guide.md).
+
 ### 4.7 Demo reset
 
 Every night at 03:00 Asia/Jerusalem the scheduler resets the demo (`SLAX_DEMO_RESET_ENABLED=true`
 in production only): visitors' accounts and content go, the seed comes back; banned accounts
 are kept. By hand: `kubectl -n slax exec deploy/slax-scheduler -- php artisan slax:demo-reset`.
+
+Members (4.6) and administrators are kept with their content, **except** where it belongs to
+demo content (Ruling P, tested in `DemoResetTest`): a conversation or group conversation with
+a demo account in it is deleted whole, the members' messages included; so is a channel a demo
+account created, and a thread a demo account started (the members' replies go with it). The
+demo's sample messages get exactly their sample reactions back, so a member's reaction on one
+of them goes too. A conversation between members only, their own channels, threads and
+reactions on members' messages stay. Tell the family to talk in their own channels and
+conversations, not with the demo's visitors.
 
 ### 4.8 Logs and state
 
@@ -500,6 +522,19 @@ are kept. By hand: `kubectl -n slax exec deploy/slax-scheduler -- php artisan sl
 | Caddy (TLS, proxy errors) | `journalctl -u caddy --since -1h` (no access log by design) |
 | k3s, the node | `journalctl -u k3s --since -1h`; `free -m`; `df -h /`; `vmstat 5` |
 | First boot | `/var/log/slax-bootstrap.log`, `cloud-init status --long` |
+
+**Sessions** (Redis, `SESSION_LIFETIME` from the chart's `session.lifetimeMinutes`, default
+20160 = 14 days, rolling: every request starts the count again). A tapped notification after a
+quiet week opens the conversation, not Google sign-in. Sign-out and a ban end a session at once
+whatever the lifetime (the id is tombstoned in Redis for that long, so a late request cannot
+bring it back). To change it: `--set session.lifetimeMinutes=<minutes>` (a whole number, at
+least 1; `config.extraEnv` cannot set it), the pods restart on the config checksum; existing
+sessions keep the expiry they were last given until their next request. Every session (also a
+visitor's without an account, from the app's first call) stays in Redis that long, a few
+hundred bytes each, under the `noeviction` limit (96 MB in production): check with `kubectl -n
+slax exec statefulset/slax-redis -- redis-cli info memory | grep used_memory_human` and `...
+redis-cli info keyspace` (sessions are in the cache database). Should it fill up, lower
+`session.lifetimeMinutes` first.
 
 ### 4.9 Scale
 

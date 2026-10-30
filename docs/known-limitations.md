@@ -164,7 +164,20 @@ receives the channel's events until it disconnects.
   every request, so a presence poll that left the page during `POST /auth/logout` wrote the old, signed-in session
   back after the logout destroyed it (seen in e2e runs). The logout now marks the session id as ended in Redis for
   the session's lifetime, and every authenticated request (`not-banned` middleware) refuses an ended session with a
-  401. Other tabs' requests are covered the same way.
+  401. Other tabs' requests are covered the same way; a ban marks every session of the account the same way. On the
+  page itself, the sign-out first pauses presence and holds every other request (those already out are waited for,
+  3 s at most, then cut), so none even reaches the server after the logout. File uploads (XMLHttpRequest, for their
+  progress) are not held: one still running is stopped when the screen closes, and the server-side mark covers it.
+- **Signing out needs the server.** Offline, the logout cannot reach it: the person stays signed in, the app says
+  "Could not sign out. Please try again." and works on. Clearing only this device would be false comfort: the
+  session cookie (HttpOnly) is the server's to end, and the next start online would sign the previous person in
+  again.
+- **Sessions last 14 days without use, renewed by every request** (`session.lifetimeMinutes`, was 2 hours), so a
+  notification tapped after a quiet week opens the conversation, not Google sign-in. The cost: a lost or shared
+  device that nobody signs out of stays signed in that long after its last use (indefinitely while used); sign-out
+  there, or a ban by an administrator, ends it at once. Every session, a visitor's without an account too, stays
+  in Redis that long (runbook 4.8, memory). There is no "sign out everywhere" for oneself yet; an administrator's
+  ban, then lifting it, does it (and also removes the account's notification devices).
 - **After a deploy, a sign-out can leave no offline shell for a while.** The refill after a sign-out is all or
   nothing: the old worker still in control refills its own list, whose hashed files the deploy removed, so it gets
   404s and stores nothing (never a mixed cache). A new version already waiting refills its own cache at once; one not
@@ -279,7 +292,7 @@ receives the channel's events until it disconnects.
   most, an eleventh replaces the one that went longest without a push.
 - **Sign-out removes this device** (DELETE, then the browser's unsubscribe, three seconds at most even offline). A ban
   deletes all of the account's devices on the server and unsubscribes the browser. A session that merely **expired**
-  (Laravel's two-hour idle timeout, typically a phone app left in the background) keeps its notifications: the person
+  (14 days without any request, typically a phone left unused) keeps its notifications: the person
   did not sign out, and losing them at every expiry would make them useless. The cost, on a shared device: until
   someone signs in there again, the previous person's notifications (sender and channel names) keep arriving. The
   browser remembers which account turned them on (`slax.pushOwner`, an account id, in local storage): when another
@@ -328,7 +341,13 @@ receives the channel's events until it disconnects.
 - **The nightly demo reset is not pushed either.** Clients open at 03:00 keep showing the deleted messages until
   they reload or reopen the channel.
 - **Conversations with a visitor are demo content.** The reset deletes every conversation that includes a demo
-  account, an administrator's messages in it included.
+  account, an administrator's or a member's messages in it included (Ruling P, pinned by `DemoResetTest`); so are a
+  channel a demo account created and a thread a demo account started, with the members' messages and replies in
+  them. The demo's sample messages get exactly their sample reactions back each night, anyone's others go.
+- **Family accounts are promoted by hand.** A relative signs up as a demo account like any visitor and becomes a
+  `member` when an administrator clicks "Make member" (Administration → Accounts). Until then, what they write is
+  demo content: it goes at the next nightly reset on the public showcase. No e-mail allowlist exists (addresses
+  stay out of configuration). The accounts list shows the 200 most recently seen accounts, without search.
 - **Alerts lost on a fatal error.** During a request, an alert is sent after the response (deferred); a PHP fatal
   error (memory, timeout) before that point loses it, the local log keeps the error.
 - **Locked channels and administrators.** Administrators still post in a locked channel they are a member of, so
