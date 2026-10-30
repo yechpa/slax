@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\File;
 use App\Models\Message;
 use App\Models\Reaction;
 use Illuminate\Http\Request;
@@ -9,7 +10,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * Expects a message loaded with Message::scopeForDisplay().
- * A deleted message renders as a tombstone: no author, body or reactions.
+ * A deleted message renders as a tombstone: no author, body, reactions or files.
  *
  * @mixin Message
  */
@@ -65,6 +66,7 @@ class MessageResource extends JsonResource
             'edited_at' => $this->edited_at?->toISOString(),
             'deleted' => false,
             'reactions' => $this->reactionSummary($this->forEveryone ? null : $request->user()?->id),
+            'files' => $this->files->map(fn (File $file) => (new FileResource($file))->resolve($request))->all(),
         ] + $thread;
     }
 

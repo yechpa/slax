@@ -7,6 +7,7 @@ use App\Events\MessageDeleted;
 use App\Events\MessageUpdated;
 use App\Http\Resources\MessageResource;
 use App\Models\Channel;
+use App\Models\File;
 use App\Models\Message;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -21,6 +22,8 @@ use Illuminate\Validation\ValidationException;
  * Channel timelines, threads, posting, editing and (soft) deleting.
  * Reading needs ChannelPolicy::view (404 otherwise), posting ChannelPolicy::post
  * (403 for non-members), editing and deleting authorship (MessagePolicy).
+ * A new message may carry up to 10 of the poster's recent uploads to the channel
+ * (`file_ids`), in which case its body may be empty.
  */
 class MessageController extends Controller
 {
@@ -53,14 +56,17 @@ class MessageController extends Controller
 
         $this->trimBody($request);
         $data = $request->validate([
-            'body' => $this->bodyRules(),
+            'body' => ['required_without:file_ids', 'nullable', 'string', 'max:'.Message::MAX_BODY],
             'client_id' => ['required', 'uuid'],
             'parent_id' => ['nullable', 'integer'],
+            'file_ids' => ['sometimes', 'array', 'list', 'max:'.Message::MAX_FILES],
+            'file_ids.*' => ['integer', 'distinct'],
         ]);
-        $body = $data['body'];
+        $body = $data['body'] ?? '';
         $user = $request->user();
         $clientId = Str::lower($data['client_id']);
         $parentId = $data['parent_id'] ?? null;
+        $fileIds = array_map(intval(...), $data['file_ids'] ?? []);
 
         if ($replay = $this->replay($user, $clientId, $channel)) {
             return $replay;
@@ -70,8 +76,12 @@ class MessageController extends Controller
         if ($parentId !== null && ! Message::whereKey($parentId)->where('channel_id', $channel->id)->whereNull('parent_id')->exists()) {
             throw ValidationException::withMessages(['parent_id' => 'The parent must be a top-level message of this channel.']);
         }
+        // Checked again, atomically, when attaching (a concurrent message may take a file meanwhile).
+        if ($fileIds !== [] && File::attachableBy($user, $channel)->whereKey($fileIds)->count() !== count($fileIds)) {
+            throw $this->unattachableFiles();
+        }
 
-        $message = DB::transaction(function () use ($channel, $user, $body, $clientId, $parentId): ?Message {
+        $message = DB::transaction(function () use ($channel, $user, $body, $clientId, $parentId, $fileIds): ?Message {
             // Posts to one channel commit one at a time, so ids become visible in increasing
             // order and an `after` cursor cannot skip a message that committed late.
             Channel::whereKey($channel->id)->lockForUpdate()->first();
@@ -90,6 +100,12 @@ class MessageController extends Controller
             );
             if ($id === null) {
                 return null;
+            }
+
+            // Before the event below renders its payload. A file attached elsewhere since the
+            // check above fails the whole post (and rolls the message back).
+            if ($fileIds !== [] && File::attachableBy($user, $channel)->whereKey($fileIds)->update(['message_id' => $id]) !== count($fileIds)) {
+                throw $this->unattachableFiles();
             }
 
             $message = Message::findOrFail($id);
@@ -162,7 +178,18 @@ class MessageController extends Controller
         }
     }
 
-    /** @return list<string> */
+    private function unattachableFiles(): ValidationException
+    {
+        return ValidationException::withMessages([
+            'file_ids' => 'Each file must be your own upload to this channel from the last 24 hours, not attached to another message.',
+        ]);
+    }
+
+    /**
+     * Editing: a body is required, on messages that carry files too.
+     *
+     * @return list<string>
+     */
     private function bodyRules(): array
     {
         // `max` counts characters, not bytes.

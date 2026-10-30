@@ -4,8 +4,10 @@ use App\Events\MemberRemoved;
 use App\Events\ReactionChanged;
 use App\Http\Resources\MessageResource;
 use App\Jobs\TerminateUserConnections;
+use App\Models\File;
 use App\Models\Message;
 use App\Models\User;
+use App\Services\FileNames;
 use Database\Seeders\DefaultWorkspaceSeeder;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -268,9 +270,16 @@ test('the largest message broadcasts fit in a Reverb request', function (string 
     // The Pusher SDK JSON-encodes the payload twice: א becomes \\u05d0 (7 bytes for a
     // 2-byte Hebrew letter), an astral emoji 14 bytes, so 4000 characters reach ~56 KB.
     $body = str_repeat($character, Message::MAX_BODY);
+    // Plus the most files a message carries, with the longest names.
+    $files = File::factory()->count(Message::MAX_FILES)->create([
+        'user_id' => $author->id,
+        'channel_id' => $channel->id,
+        'display_name' => str_repeat($character, FileNames::MAX_LENGTH - 4).'.txt',
+        'size' => File::MAX_BYTES,
+    ]);
     $id = asUser($author)->postJson("/api/v1/channels/{$channel->id}/messages", [
-        'body' => $body, 'client_id' => (string) Str::uuid(),
-    ])->assertCreated()->json('id');
+        'body' => $body, 'client_id' => (string) Str::uuid(), 'file_ids' => $files->modelKeys(),
+    ])->assertCreated()->assertJsonCount(Message::MAX_FILES, 'files')->json('id');
     $created = lastBroadcastRequestSize($history, 'message.created');
 
     $emoji = ['😀', '😁', '😂', '🤣', '😃', '😄', '😅', '😆', '😉', '😊', '😋', '😎', '😍', '😘', '🥰', '😗', '😙', '😚', '🙂', '🤗'];
