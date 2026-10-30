@@ -96,6 +96,10 @@ receives the channel's events until it disconnects.
   nothing to merge into): if it arrives while the page holding that message (an older page of a channel or a
   thread) is on its way, the page's older copy shows until that message changes again. The window is the
   duration of one request, scrolled into history at that moment.
+- **A private channel's name is not secret.** Channel names are unique across public and private channels (one
+  index), so creating a channel under a private channel's name answers "taken": someone outside can learn that
+  the name exists (not its content or members). Same trade-off as Slack; *intended fix if it matters:* names
+  unique per kind, or private names hashed for the check.
 - **"Name taken" is recognized by its message.** The API refuses a channel name in use with a validation
   message, and the client says "taken" in the reader's language only when it reads exactly
   `ChannelController::NAME_TAKEN` (pinned by tests on both sides). *Intended fix:* a stable error code.
