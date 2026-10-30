@@ -7,8 +7,10 @@ use App\Models\File;
 use App\Models\Message;
 use App\Models\User;
 use Database\Seeders\DefaultWorkspaceSeeder;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Storage;
@@ -387,3 +389,52 @@ test('the download redirects to a 60 second presigned URL with the disposition a
     'image: inline' => ['image/png', 'pixel.png', "inline; filename*=UTF-8''pixel.png"],
     'pdf: inline' => ['application/pdf', 'רפורט.pdf', "inline; filename*=UTF-8''%D7%A8%D7%A4%D7%95%D7%A8%D7%98.pdf"],
 ]);
+
+// --- Orphans --------------------------------------------------------------------------
+
+test('files:prune-orphans deletes uploads left unattached for 24 hours, object and row', function () {
+    $user = User::factory()->create();
+    $channel = publicChannel($user);
+    $orphan = storedFile($user, $channel);
+    $unfinished = storedFile($user, $channel, ['scan_status' => File::STATUS_PENDING]);
+    $attached = storedFile($user, $channel, ['message_id' => postedMessage($user, $channel)->id]);
+    foreach ([$orphan, $unfinished, $attached] as $file) {
+        Storage::disk('s3')->put($file->storage_key, 'x');
+    }
+
+    $this->travel(23)->hours();
+    $recent = storedFile($user, $channel);
+    Storage::disk('s3')->put($recent->storage_key, 'x');
+    $this->artisan('files:prune-orphans')->assertSuccessful();
+    expect(File::count())->toBe(4);
+
+    $this->travel(1)->hours();
+    $this->travel(1)->seconds();
+    $this->artisan('files:prune-orphans')->assertSuccessful();
+
+    expect(File::pluck('id')->sort()->values()->all())->toBe([$attached->id, $recent->id]);
+    Storage::disk('s3')->assertMissing($orphan->storage_key);
+    Storage::disk('s3')->assertMissing($unfinished->storage_key);
+    Storage::disk('s3')->assertExists($attached->storage_key);
+    Storage::disk('s3')->assertExists($recent->storage_key);
+});
+
+test('an orphan whose object cannot be deleted keeps its row for the next run', function () {
+    $user = User::factory()->create();
+    $file = storedFile($user, publicChannel($user), ['created_at' => now()->subDays(2)]);
+    $disk = Mockery::mock(Filesystem::class);
+    $disk->shouldReceive('delete')->once()->with($file->storage_key)->andReturn(false);
+    Storage::set('s3', $disk);
+
+    $this->artisan('files:prune-orphans')->assertFailed();
+
+    expect(File::whereKey($file->id)->exists())->toBeTrue();
+});
+
+test('files:prune-orphans is scheduled hourly', function () {
+    Artisan::call('schedule:list');
+    $event = collect(app(Schedule::class)->events())
+        ->first(fn ($event) => str_contains((string) $event->command, 'files:prune-orphans'));
+
+    expect($event)->not->toBeNull()->and($event->expression)->toBe('0 * * * *');
+});
