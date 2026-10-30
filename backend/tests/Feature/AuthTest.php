@@ -7,6 +7,8 @@ use App\Services\Identity\GoogleProfile;
 use App\Services\Identity\IdentityProviderException;
 use App\Services\Turnstile;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\FakeIdentityProvider;
 use Tests\TestCase;
@@ -289,4 +291,37 @@ test('logout ends the session', function () {
     spa()->actingAs($user)->postJson('/api/v1/auth/logout')->assertNoContent();
 
     test()->assertGuest('web');
+});
+
+test('a request still in flight during sign-out cannot bring the session back', function () {
+    // phpunit.xml points Redis at database 15; never flush anything else.
+    expect((int) config('database.redis.default.database'))->toBe(15);
+    Redis::connection()->flushdb();
+    $user = User::factory()->create();
+    $store = app('session')->driver();
+    $id = Str::random(40);
+    // The signed-in session, as the session store holds it.
+    $signedIn = function () use ($store, $id, $user) {
+        $store->setId($id);
+        $store->start();
+        $store->put(Auth::guard('web')->getName(), $user->id);
+        $store->save();
+    };
+    $call = function (string $method, string $uri) use ($id) {
+        app('auth')->forgetGuards();
+
+        // withCredentials: JSON calls send cookies only when asked to.
+        return spa()->withCredentials()->withCookie(config('session.cookie'), $id)->json($method, $uri);
+    };
+    $signedIn();
+    $call('GET', '/api/v1/me')->assertOk();
+
+    $call('POST', '/api/v1/auth/logout')->assertNoContent();
+    $call('GET', '/api/v1/me')->assertUnauthorized();
+
+    // A presence poll that read the session before the logout writes it back after (Laravel saves
+    // the session at the end of every request): the ended session stays ended.
+    $signedIn();
+    $call('GET', '/api/v1/me')->assertUnauthorized();
+    $call('POST', '/api/v1/presence/heartbeat')->assertUnauthorized();
 });

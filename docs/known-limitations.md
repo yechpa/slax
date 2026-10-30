@@ -160,13 +160,11 @@ receives the channel's events until it disconnects.
   finds no session; local storage keeps only the language and theme chosen on the device (not private) and, with
   notifications on, the id of the account that turned them on (see "Push notifications"); the browser's own
   history stays the browser's.
-- **A request in flight during sign-out can bring the session back (not fixed).** Seen once in an e2e run: a presence
-  poll that left the page a millisecond after `POST /auth/logout` was answered 200 and, Laravel saving the session at
-  the end of every request, wrote the old (signed-in) session back to Redis after the logout had destroyed it; the
-  browser kept that cookie, and the next start-up was signed in again. It predates push (any background request can
-  race a sign-out); sign-out does nothing more before the logout when push is off. A fix belongs in the session layer
-  (Laravel's session blocking on the stateful API routes, or a tombstone of ended session ids checked on each
-  request) and needs its own review.
+- **A request in flight during sign-out cannot bring the session back.** Laravel saves the session at the end of
+  every request, so a presence poll that left the page during `POST /auth/logout` wrote the old, signed-in session
+  back after the logout destroyed it (seen in e2e runs). The logout now marks the session id as ended in Redis for
+  the session's lifetime, and every authenticated request (`not-banned` middleware) refuses an ended session with a
+  401. Other tabs' requests are covered the same way.
 - **After a deploy, a sign-out can leave no offline shell for a while.** The refill after a sign-out is all or
   nothing: the old worker still in control refills its own list, whose hashed files the deploy removed, so it gets
   404s and stores nothing (never a mixed cache). A new version already waiting refills its own cache at once; one not

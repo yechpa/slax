@@ -63,6 +63,38 @@ class UserSessions
         return count($ids);
     }
 
+    /**
+     * A signed-out session stays ended. Laravel saves the session at the end of every request,
+     * so a request that was in flight during the sign-out (a presence poll) writes the old,
+     * signed-in session back after the logout destroyed it; EnsureNotBanned refuses any session
+     * marked here. Kept for a session's lifetime (it could not outlive it anyway).
+     */
+    public function end(string $sessionId): void
+    {
+        try {
+            $this->redis->connection()->setex(self::endedKey($sessionId), max(1, (int) config('session.lifetime', 120)) * 60, '1');
+        } catch (Throwable $e) {
+            report($e);
+        }
+    }
+
+    public function ended(string $sessionId): bool
+    {
+        try {
+            return (bool) $this->redis->connection()->exists(self::endedKey($sessionId));
+        } catch (Throwable $e) {
+            // Redis down: sessions (stored there too) are gone anyway.
+            report($e);
+
+            return false;
+        }
+    }
+
+    private static function endedKey(string $sessionId): string
+    {
+        return 'session-ended:'.hash('sha256', $sessionId);
+    }
+
     private static function key(int $userId): string
     {
         return "user-sessions:{$userId}";
