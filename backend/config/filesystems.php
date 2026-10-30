@@ -60,6 +60,21 @@ return [
             'report' => false,
         ],
 
+        // The database backups bucket (deploy/backup/pg-backup.sh writes it), read only by
+        // backups:check-freshness: listing errors must surface, so `throw` is on. Production
+        // gives no static key (the EC2 instance role); SLAX_BACKUP_BUCKET unset: unused.
+        'backups' => [
+            'driver' => 's3',
+            'key' => env('AWS_ACCESS_KEY_ID'),
+            'secret' => env('AWS_SECRET_ACCESS_KEY'),
+            'region' => env('AWS_DEFAULT_REGION'),
+            'bucket' => env('SLAX_BACKUP_BUCKET'),
+            'endpoint' => env('AWS_ENDPOINT'),
+            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'throw' => true,
+            'report' => false,
+        ],
+
         // Same bucket and credentials, at the endpoint browsers reach (MinIO is `minio:9000`
         // for the app but `localhost:9000` for the browser). Only signs download URLs, which
         // needs no request: the host is part of the signature, hence a disk of its own.

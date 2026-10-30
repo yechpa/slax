@@ -25,6 +25,18 @@ return [
         'failed_sign_in_window_minutes' => (int) env('SLAX_FAILED_SIGN_IN_WINDOW_MINUTES', 10),
     ],
 
+    /*
+    | Database backups (production: the slax-backup CronJob writes
+    | <prefix>/YYYY/MM/DD/slax-<UTC time>.dump to SLAX_BACKUP_BUCKET). backups:check-freshness
+    | raises a critical alert when the newest dump is older than max_age_hours, from outside the
+    | backup pod: a backup that stopped running cannot report itself. Off without a bucket.
+    */
+    'backups' => [
+        'bucket' => env('SLAX_BACKUP_BUCKET') ?: null,
+        'prefix' => env('SLAX_BACKUP_PREFIX', 'pg'),
+        'max_age_hours' => (int) env('SLAX_BACKUP_MAX_AGE_HOURS', 30),
+    ],
+
     /* Audit log entries are kept this long (audit:prune, daily). */
     'audit' => [
         'retention_days' => (int) env('SLAX_AUDIT_RETENTION_DAYS', 180),

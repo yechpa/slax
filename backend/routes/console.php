@@ -20,3 +20,12 @@ Schedule::command('slax:demo-reset')
 
 // The audit log keeps slax.audit.retention_days (180 by default).
 Schedule::command('audit:prune')->dailyAt('04:30')->withoutOverlapping()->onOneServer();
+
+// Production's database backups must keep coming (BackupFreshness): checked from here, outside
+// the backup pod, every morning. Off where no backups bucket is configured.
+Schedule::command('backups:check-freshness')
+    ->dailyAt('09:00')
+    ->timezone('Asia/Jerusalem')
+    ->when(fn () => filled(config('slax.backups.bucket')))
+    ->withoutOverlapping()
+    ->onOneServer();
