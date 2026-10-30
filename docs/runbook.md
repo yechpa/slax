@@ -31,6 +31,7 @@ Contents: [1. Architecture](#1-architecture) · [2. Sizing and cost](#2-sizing-a
  │   └──────────────────────────────────┘                                                  │
  │   slax-queue, slax-scheduler ── slax-postgres (PVC, local-path) ── slax-redis (PVC)     │
  │   CronJobs: slax-backup 02:30 daily, slax-restore-check Sun 03:30 (Asia/Jerusalem)      │
+ │   slax-monitor every minute: health, Reverb, PostgreSQL, Redis, disks → Telegram        │
  │  Tailscale (tag:slax-prod): Tailscale SSH for you, :6443 for CI (tag:ci). No sshd.      │
  └───────────────┬─────────────────────────────────────────────────────────────────────────┘
                  │ instance role slax-prod-instance (IMDSv2, hop limit 2), no static keys
@@ -51,33 +52,47 @@ What runs where, and why:
 | Host firewall | Besides the security group (TCP 80/443 only), `slax-edge-guard` drops TCP 22/6443/10250/10256 and UDP 8472 arriving on the public interface (k3s requires it); 80/443, `tailscale0` and the pod network are untouched. |
 | TLS for the cluster API | k3s's own certificate, `tls-san` = the Tailscale address and names. Port 6443 is closed to the Internet; CI and you reach it over the tailnet. |
 | Backups | `pg_dump -Fc` daily to S3 (SSE-S3), weekly full restore into a throwaway PostgreSQL inside the check's pod (never the production server). Telegram: failures, and the weekly "restore check OK". |
+| Monitoring | Outside the app: the CronJob `slax-monitor` (`deploy/monitoring/uptime.sh`) checks every minute the web pod's health, Reverb, PostgreSQL, Redis and the public URL through Caddy, and the disks; Telegram `[Prod] DOWN` after 3 failures in a row, `RECOVERED` once, `DISK` above 80 % (§4.10). Inside the app: errors and warnings go to Telegram through Laravel's log, and Administration → Status shows the database, Redis, Reverb, the scanner and S3. No metrics stack (Prometheus, Grafana): not worth its memory on 2 GiB. |
 | Releases | A `vX.Y.Z` tag on a commit of `main` → check → approval in GitHub → `helm upgrade --atomic` with the `<sha>` images already tested on dev → public checks → explicit `helm rollback` if they fail. |
 
 ## 2. Sizing and cost
 
-### Memory on t4g.small (2 vCPU, 2 GiB)
+### Memory on t4g.small (2 vCPU, 2 GiB): measured, and the decision
 
-| Consumer | Typical use | Kubernetes request (values-prod.yaml) |
-|---|---|---|
-| Ubuntu (systemd, journald, snapd/SSM agent), Tailscale, Caddy | ≈ 250-300 MiB | – |
-| k3s server (API, scheduler, kubelet, containerd, kube-router, CoreDNS, local-path, metrics-server) | ≈ 500-650 MiB | – |
-| PHP-FPM (up to 6 workers) + nginx | ≈ 150-300 MiB | 128 + 16 MiB |
-| Reverb, queue, scheduler | ≈ 60-80 MiB each | 80 + 96 + 80 MiB |
-| scanner | ≈ 60-80 MiB | 64 MiB |
-| PostgreSQL (shared_buffers 96 MB) | ≈ 100-200 MiB | 160 MiB |
-| Redis (maxmemory 96 MB) | ≈ 10-30 MiB | 24 MiB |
-| **Total** | **≈ 1.3-1.8 GiB of 1.9 GiB usable** | **648 MiB** (+64-128 MiB while a CronJob runs) |
+**Decision: production starts on t4g.small.** The brief's acceptance test (50 WebSocket
+clients, 10 messages/s for 2 minutes, instance memory under 80 %) projects to
+**≈ 1.25-1.3 GiB, 62-64 % of the instance**, with no message lost. t4g.medium would add $14/month
+(+67 %) for headroom this showcase does not need; move to it on the signals below.
 
-The requests fit easily (the scheduler sees ≈ 1.8 GiB allocatable), but real use leaves only a
-few hundred MiB of page cache; the 2 GiB swap file absorbs spikes (pods themselves do not
-swap). **It should run, tightly.** Starting at t4g.small as the brief says is reasonable for a
-low-traffic showcase; move to **t4g.medium (4 GiB, +$14/month)** if Task 14's load test or
-production shows any of: `free -m` available below 200 MiB for long, swap in steady use
-(`vmstat 5` si/so non-zero), OOM kills (`journalctl -k | grep -i oom`), pods evicted. How: §4.9.
+How the number is built (the full report: [docs/load-test-results.md](load-test-results.md),
+`make load`):
+
+| Part | MiB | Source |
+|---|---:|---|
+| k3s itself: server, containerd and shims, CoreDNS, metrics-server, local-path | ≈ 655 | **measured**: a k3s v1.36.5 node (in Docker, amd64) running the production chart and images, idle: node working set 856 MiB minus the Slax pods' 202 MiB |
+| Slax pods under the load (app with nginx and PHP-FPM, Reverb, queue, scanner, PostgreSQL, Redis; the scheduler added at the queue worker's size) | ≈ 258 | **measured** on the Compose e2e stack at the load's peak: 221 MiB without MinIO, + 37 (at rest the same pods take 202 MiB on k3s and 210 on Compose: the two agree) |
+| A budget for growth | 100 | PHP-FPM may run up to 6 workers (one or two were enough at 10 requests/s), PostgreSQL's 96 MB of shared buffers fill up over days |
+| Ubuntu (systemd, journald, snapd, SSM agent), Tailscale, Caddy | ≈ 250-300 | estimate (not measurable without the instance) |
+| **Total at the brief's load** | **≈ 1,263-1,313** | 655 + 258 + 100 + 250-300; **62-64 % of 2,048 MiB** (the brief's limit: 80 % = 1,638 MiB) |
+
+What remains (≈ 630-680 MiB of the ≈ 1,946 MiB usable) is page cache and room for the
+CronJobs: the backup (≤ 256 MiB, 02:30), the weekly restore check (≤ 640 MiB with its
+throwaway PostgreSQL, Sunday 03:30, when nobody is around) and the uptime monitor (≤ 64 MiB
+for a few seconds each minute). The 2 GiB swap file absorbs a coincidence; pods do not swap.
+
+Limits of this estimate, to keep in mind: the load ran on Compose (development PHP image,
+x86) and k3s ran without load; arm64 (Graviton) processes should be of a similar size but were not
+measured; the OS share is an estimate; the load generator was on the same machine. The k3s
+figures are the solid part, and they agree with the ≈ 600 MiB the plan assumed.
+
+**Move to t4g.medium (4 GiB, +$14/month)** if production shows any of: `free -m` available
+below 200 MiB for long, swap in steady use (`vmstat 5` si/so non-zero), OOM kills
+(`journalctl -k | grep -i oom`), pods evicted, or the uptime monitor's `DOWN` alerts while
+the node is busy. How: §4.9. Checklist item 14 (§7) looks at it after a day.
 
 ### Monthly cost (eu-central-1, on-demand list prices, October 2026, before tax)
 
-| Item | t4g.small | t4g.medium |
+| Item | **t4g.small (chosen)** | t4g.medium (if needed) |
 |---|---|---|
 | EC2 instance (730 h) | $14.02 | $28.03 |
 | EBS gp3 30 GB (encrypted) | $2.86 | $2.86 |
@@ -86,7 +101,9 @@ production shows any of: `free -m` available below 200 MiB for long, swap in ste
 | Data transfer out (first 100 GB/month free) | $0 | $0 |
 | **Total** | **≈ $20.9** | **≈ $34.9** |
 
-Against the 15-20 $/month target: t4g.small lands just above it. Levers: `SLAX_ROOT_GB=20`
+Production starts on t4g.small (the measured sizing above); the uptime monitor and the
+Telegram alerts add nothing to the bill. Against the 15-20 $/month target: t4g.small lands
+just above it. Levers: `SLAX_ROOT_GB=20`
 (−$0.95; 20 GB is enough for the OS, images, a 10 GiB database volume and swap); a 1-year
 Savings Plan or reserved instance (≈ −35 % on the instance). **With or without the Elastic
 IP:** since February 2024 AWS bills every public IPv4 address, so an instance's automatic
@@ -273,8 +290,8 @@ lists the key names (no `AWS_*`).
 **YOU DO THIS** after the first `Images` run on `main` that includes `slax-backup`: make that
 package **public** like the other three (github.com/yechpa?tab=packages → `slax-backup` →
 Package settings → Change visibility → Public; deploy/dev/BOOTSTRAP.md §9.3). A new GHCR
-package is private, and k3s pulls without credentials: dev never uses this image, so nothing
-else would notice before the first backup at 02:30. The release workflow's `check` job probes
+package is private, and k3s pulls without credentials: dev runs it too (the uptime monitor,
+`slax-monitor`, every minute), so a private package shows there first as `ImagePullBackOff`. The release workflow's `check` job probes
 all four images anonymously and refuses to deploy while one is private. Check, logged out:
 `docker buildx imagetools inspect ghcr.io/yechpa/slax-backup:<sha>`.
 
@@ -490,6 +507,62 @@ are kept. By hand: `kubectl -n slax exec deploy/slax-scheduler -- php artisan sl
   then on the node `sudo growpart /dev/nvme0n1 1 && sudo resize2fs /dev/nvme0n1p1`.
 - More replicas are not useful on one node (Reverb, queue and scheduler must stay single).
 
+### 4.10 Uptime and disk alerts
+
+The CronJob `slax-monitor` (chart `monitor.*`, script `deploy/monitoring/uptime.sh` in the
+slax-backup image) runs every minute, outside Laravel: it keeps alerting when the app, its
+queue or its Redis are down. It needs no Kubernetes API access; its state (failure counts,
+what was sent) is a small file on its own 16 Mi volume.
+
+| Check | How | In the messages |
+|---|---|---|
+| `app` | `GET http://slax-app/api/v1/health` (nginx + PHP-FPM + Laravel booting) | `HTTP 503`, `timeout`, `connection refused`... |
+| `reverb` | `GET http://slax-reverb:8080/up` | same |
+| `postgres` | `pg_isready` (no password sent, so no sign-in is attempted) | `no answer`, `rejecting connections` |
+| `redis` | a bare `PING` (no password: `-NOAUTH` proves it is up) | `no answer`, `timeout` |
+| `public` (production) | `GET https://slax.yechpa.com/api/v1/health` from the node, through the Elastic IP, Caddy and its certificate | `TLS error`, `DNS failure`, `HTTP 502`... |
+| disks | `df` on its emptyDir (the kubelet's disk) and on its volume (the local-path volumes' disk); on the production node both are the root disk, reported once as `node` | percentages |
+
+Messages (`[Prod]` or `[Dev]`, the check's name, a status or a failure class, counts, a
+UTC time; never a URL, host or secret):
+
+- `[Prod] DOWN: app failed 3 checks in a row (HTTP 503), since 14:02 UTC.`: three failures
+  in a row (≈ 3 minutes). One message, however long it lasts.
+- `[Prod] RECOVERED: app is answering again (HTTP 200) after about 7 min down (7 failed checks).`
+- `[Prod] DISK: node disk 83% full (alert above 80%). Reminder every 6 h while above; all clear below 75%.`
+  then, once below 75 %, `[Prod] DISK OK: node disk back to 72% (below 75%).`
+
+A message Telegram refuses (network, Telegram down) is retried the next minute; the
+monitor logs a warning with curl's exit code, never the token. A run always succeeds as a
+Job unless its configuration is wrong (exit 2: `kubectl -n slax get jobs` shows it failed).
+
+- What it sees now: `kubectl -n slax logs -l app.kubernetes.io/component=monitor --tail=5`
+  (`uptime: app=ok reverb=ok postgres=ok redis=ok public=ok disk:node=34% disk:volumes=same-as-node`).
+- Run it at once: `kubectl -n slax create job --from=cronjob/slax-monitor slax-monitor-now`
+  (between two scheduled runs: the two would share the state file), then
+  `kubectl -n slax logs job/slax-monitor-now` and `kubectl -n slax delete job slax-monitor-now`.
+- Test the alert path without touching production's traffic: scale Reverb down for
+  four minutes (the site works; only live updates pause and clients reconnect):
+
+  ```sh
+  kubectl -n slax scale deploy slax-reverb --replicas=0
+  # 3-4 minutes later: [Prod] DOWN: reverb failed 3 checks in a row (connection refused) ...
+  kubectl -n slax scale deploy slax-reverb --replicas=1
+  # within 2 minutes: [Prod] RECOVERED: reverb is answering again (HTTP 200) ...
+  ```
+
+  Or, on dev, the same with `slax-app`. Never stop PostgreSQL for a test.
+- Pause it (maintenance): `kubectl -n slax patch cronjob slax-monitor -p '{"spec":{"suspend":true}}'`,
+  and `false` afterwards: it stays suspended across releases until you do (Helm leaves a
+  field it never set alone).
+- Thresholds: `monitor.failThreshold` (3), `monitor.disk.alertPercent` (80),
+  `recoverPercent` (75), `realertHours` (6) in the values; a release applies them.
+
+What it cannot see: the node itself dead or cut from the Internet (nothing runs to send);
+the Sunday "restore check OK" and Telegram's silence are then the signal. An external
+pinger (a free uptime service polling `/api/v1/health`) would cover that; none is set up
+(docs/known-limitations.md).
+
 ## 5. Incident playbook
 
 ### Site down (`curl -I https://slax.yechpa.com` fails or 5xx)
@@ -528,13 +601,30 @@ after a crash. Free space on the node first (`sudo k3s crictl rmi --prune`,
 `journalctl --vacuum-size=100M`), then grow the disk (4.9). PostgreSQL refuses writes when the
 disk is full; it recovers by itself once there is room.
 
+### Telegram: `DOWN` or `DISK` from the uptime monitor
+
+- `DOWN: public` alone (the in-cluster `app` is fine): the edge. Caddy (`systemctl status
+  caddy`, `journalctl -u caddy -n 50`), the certificate (§5 "Certificate expiry"), DNS
+  (`dig +short slax.yechpa.com`), the security group.
+- `DOWN: app` (and `public`): the web pod. `kubectl -n slax get pods`, `describe` the app
+  pod, `logs deploy/slax-app -c php` / `-c web`; a bad release: roll back (§4.2).
+- `DOWN: reverb`: realtime is paused (pages still load). `kubectl -n slax logs deploy/slax-reverb`,
+  `rollout restart deployment slax-reverb`.
+- `DOWN: postgres` or `redis`: everything is broken. `kubectl -n slax describe pod slax-postgres-0`
+  (or `slax-redis-0`), its logs, then the disk (`df -h /`).
+- `DISK`: §5 "Database full" below; the usual suspects on the node are container images
+  (`sudo k3s crictl rmi --prune`), the journal (`journalctl --vacuum-size=100M`) and the
+  database.
+
 ### Telegram storm
 
 Alerts are grouped and rate-limited by the app (docs/known-limitations.md). If the chat floods
 anyway: find the source (`[Prod]` messages name the error), fix or roll back. To silence
 production meanwhile: `sudo bash /tmp/create-secrets.sh set TELEGRAM_CHAT_ID` with an invalid
 value (or remove the key: `kubectl -n slax patch secret slax-secrets --type json -p '[{"op":"remove","path":"/data/TELEGRAM_CHAT_ID"}]'`),
-`kubectl -n slax rollout restart deployment`; restore it afterwards.
+`kubectl -n slax rollout restart deployment`; restore it afterwards. The uptime monitor reads
+the Secret at each run (every minute): it follows without a restart; to silence only it,
+suspend its CronJob (§4.10).
 
 ### S3 errors (uploads or downloads fail, backups fail at "upload")
 
@@ -692,7 +782,7 @@ no AWS access). Tick each item.
    while sleep 1; do curl -s -o /dev/null -w '%{http_code}\n' https://slax.yechpa.com/api/v1/health; done   # another terminal
    helm upgrade slax deploy/helm/slax -n slax -f deploy/helm/slax/values-prod.yaml --set image.tag=<deployed sha> \
      --set s3.bucket=slax-files-<suffix> --set backup.bucket=slax-backups-<suffix> \
-     --set app.web.resources.limits.memory=8Mi --atomic --wait --timeout 4m
+     --set app.web.resources.requests.memory=8Mi --set app.web.resources.limits.memory=8Mi --atomic --wait --timeout 4m
    ```
 
    The upgrade fails, `helm -n slax history slax` shows the failed revision and a newer
@@ -713,6 +803,13 @@ no AWS access). Tick each item.
     for about 90 days; `systemctl list-timers` shows `k3s-image-prune.timer` and
     `apt-daily-upgrade.timer`.
 14. [ ] Memory after a day: `free -m` available > 200 MiB, `vmstat` si/so ≈ 0; otherwise plan
-    t4g.medium (§2, §4.9).
+    t4g.medium (§2, §4.9). Compare `free -m` "used" with §2's estimate (≈ 1.25 GiB).
 15. [ ] `aws ec2 describe-instances --instance-ids <wa-bot id>` is exactly as before (state,
     security groups, tags): provisioning never touched it.
+16. [ ] Uptime monitor: `kubectl -n slax logs -l app.kubernetes.io/component=monitor --tail=3` →
+    `uptime: app=ok reverb=ok postgres=ok redis=ok public=ok disk:node=NN% disk:volumes=same-as-node`.
+    `public=ok` proves a pod reaches the instance's own Elastic IP through the Internet
+    gateway; if it says `FAIL(timeout)` while the site works from outside, set
+    `monitor.checkPublicUrl: false` in values-prod.yaml and rely on the release checks.
+17. [ ] Its alert path, end to end, as in §4.10 (Reverb down four minutes): one `[Prod] DOWN: reverb`
+    and one `[Prod] RECOVERED: reverb` message, nothing else.

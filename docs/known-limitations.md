@@ -144,9 +144,11 @@ receives the channel's events until it disconnects.
 
 **Where:** `deploy/aws/`, `deploy/backup/`, `.github/workflows/release-prod.yml`, `docs/runbook.md`.
 
-- **One small node.** t4g.small (2 GiB) holds k3s and every pod with a few hundred MiB to spare and a 2 GiB swap
-  file; Task 14's load test decides whether t4g.medium is needed (runbook §2). A reboot (security updates at
-  02:00 UTC when needed) or a resize is a minute or two of downtime.
+- **One small node.** t4g.small (2 GiB): at the brief's load (50 clients, 10 messages/s) the estimate is ≈ 1.25-1.3
+  GiB (62-64 %), from k3s measured idle and the load measured on Compose, not from the instance itself (runbook §2,
+  docs/load-test-results.md). A heavier use, the weekly restore check at the wrong moment or a memory leak would lean
+  on the 2 GiB swap file; t4g.medium is the next step. A reboot (security updates at 02:00 UTC when needed) or a
+  resize is a minute or two of downtime.
 - **The app, queue, scheduler and backup pods can use the instance role** (IMDSv2 with hop limit 2, so containers
   reach the metadata service); Reverb, PostgreSQL, Redis and the migration Job are denied 169.254.169.254 by egress
   policies, the scanner has no egress at all. The role reaches only the two Slax buckets and cannot delete backups;
@@ -176,3 +178,36 @@ receives the channel's events until it disconnects.
   deployments, not about a tag refused by the `check` job (visible in GitHub Actions).
 - **The release's post-deploy checks look at the public site**: an outage of Caddy or DNS during a release also
   triggers a rollback of a good release (harmless: re-run it).
+
+## Uptime monitor and load test
+
+**Where:** `deploy/monitoring/uptime.sh`, `deploy/helm/slax/templates/monitor-cronjob.yaml`, `e2e/load/`,
+`docs/load-test-results.md`, runbook §2 and §4.10.
+
+- **Nothing watches the watcher's node.** The monitor runs in the cluster: a dead node, k3s down or the instance cut
+  from the Internet sends nothing. The silence (and the missing Sunday "restore check OK") is the signal. A free
+  external pinger on `/api/v1/health` would close that gap; none is set up.
+- **`/api/v1/health` is shallow** (nginx, PHP-FPM and Laravel's boot). The monitor checks PostgreSQL and Redis on
+  their own, as "answering" (`pg_isready`, a bare `PING`), not as "Slax's queries work"; Administration → Status
+  goes further (a query, a Redis ping, Reverb, the scanner, S3) but only for a signed-in administrator.
+- **Only 3 failures in a row alert.** A check that flaps (fail, fail, pass, ...) never does; a restart that takes
+  under three minutes is silent by design.
+- **The monitor's pod may connect** to the web pod (8080), Reverb, PostgreSQL and Redis without any of their
+  passwords. Like any pod on the pod network it could send a forged `X-Forwarded-For` to nginx, which believes the
+  pod network (its own script sends none).
+- **A pod a minute.** The CronJob creates 1,440 short Jobs a day (a few seconds of CPU each and some writes to k3s's
+  datastore); one finished Job of each kind is kept. A long-running pod would be lighter but less isolated, and the
+  brief asked for a CronJob.
+- **Its volume claim is kept by Helm** (`helm.sh/resource-policy: keep`, because the CI deployer may not delete
+  claims): `helm uninstall` leaves `slax-monitor` behind (`kubectl -n slax delete pvc slax-monitor`). Its size cannot
+  change once created (local-path cannot resize).
+- **Production's public check goes out and back in** through the Elastic IP (the pod reaches the instance's own
+  public address through the Internet gateway). That this works is to be confirmed on the real node (runbook §7
+  item 16); dev checks inside the cluster only.
+- **The disk check sees filesystems,** not quotas: on the production node the volumes and the kubelet share the root
+  disk (one `node` figure); on slax-dev they are two disks.
+- **The load test ran on Compose, not on k3s** (development PHP image, x86, the generator on the same machine); the
+  k3s figures are from an idle cluster. It covers sign-in, subscriptions, presence heartbeats and messages, not file
+  uploads, typing whispers or reconnect storms. `make load` is manual; `make e2e` (and so CI) runs a 10-second smoke
+  of it (5 clients) that fails on any loss or error.
+

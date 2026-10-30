@@ -361,7 +361,13 @@ kubectl apply -f deploy/dev/deployer-rbac.yaml
 This creates the namespace `slax` (Pod Security Standard *restricted* enforced: every Slax
 pod complies) and the identity GitHub Actions deploys with: a ServiceAccount whose Role only
 covers what the chart manages, in this namespace only (no cluster-wide access, no nodes, no
-RBAC, no other namespace).
+RBAC, no other namespace). It may create volume claims (the uptime monitor's) but never
+delete one.
+
+**Applying it again** is safe (the token Secret is kept) and is needed whenever the file
+changes. In particular, **before the first deployment that includes the uptime monitor**
+(`slax-monitor`, Task 14), run the `kubectl apply` above once more: the earlier Role could
+not create its volume claim, and the deployment would fail and roll back.
 
 Build its kubeconfig (the token stays in shell variables and a private file, never on a
 command line):
@@ -484,7 +490,8 @@ web UI).
 3. After the first `Images` run on `main`, make the packages public (the cluster pulls
    them without credentials): github.com/yechpa?tab=packages → `slax-app` → Package
    settings → Change visibility → Public. Same for `slax-web`, `slax-scanner` and
-   `slax-backup` (production's backups). Check:
+   `slax-backup` (production's backups, and the uptime monitor in both clusters: until it is
+   public, dev's `slax-monitor` pods stay in `ImagePullBackOff`). Check:
    `docker pull ghcr.io/yechpa/slax-app:<sha>` works while logged out.
 
 ## 10. First deployment
@@ -550,6 +557,13 @@ Once steps 1-10 are done, check the whole chain (Task 12, step 5). Tick each lin
         and Telegram gets `[Dev] Deploy FAILED (failure): <sha>`. Put the rule back.
 14. [ ] An error reaches Telegram: `kubectl -n slax exec deploy/slax-app -c php -- php artisan tinker --execute 'logger()->error("bootstrap check");'`
         → a `[Dev]` alert (needs the Telegram keys in `slax-secrets`).
+15. [ ] The uptime monitor runs every minute and sees everything:
+        `kubectl -n slax logs -l app.kubernetes.io/component=monitor --tail=3` →
+        `uptime: app=ok reverb=ok postgres=ok redis=ok disk:node=NN% disk:volumes=NN%` (on
+        slax-dev the volumes are on `/mnt/ssd`, so two disks). Its alert path, once:
+        `kubectl -n slax scale deploy slax-reverb --replicas=0`, wait 3-4 minutes →
+        `[Dev] DOWN: reverb failed 3 checks in a row (...)`; `--replicas=1` → one
+        `[Dev] RECOVERED: reverb ...` within two minutes. (docs/runbook.md §4.10.)
 
 ## 12. Rollback
 
