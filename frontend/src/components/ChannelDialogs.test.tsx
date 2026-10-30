@@ -103,6 +103,22 @@ describe('channels', () => {
     expect(document.querySelector('dialog')).toBeNull()
   })
 
+  it('browse lists a public channel created by someone else since the list was loaded', async () => {
+    let list = [channel(7, { name: 'general' })]
+    app = await mountApp(
+      {
+        'GET /api/v1/channels': () => ({ body: list }),
+        'GET /api/v1/channels/7/messages': empty,
+      },
+      '/c/7',
+    )
+    // Created elsewhere after start-up: nothing is pushed for it.
+    list = [...list, channel(12, { name: 'launch', is_member: false })]
+    const dialog = await action(app.host, 'Browse channels')
+    await settle()
+    expect([...dialog.querySelectorAll('.browse__name')].map((n) => plain(n.textContent))).toEqual(['#general', '#launch'])
+  })
+
   it('shows the members, lets an owner add and remove people, and explains a refused leave', async () => {
     let list = [...members]
     const calls: string[] = []

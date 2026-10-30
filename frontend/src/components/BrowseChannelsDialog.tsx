@@ -1,5 +1,9 @@
-/** "Browse channels": every public channel, filtered by name, to open or join. */
-import { useState } from 'preact/hooks'
+/**
+ * "Browse channels": every public channel, filtered by name, to open or join. The list is
+ * refetched when the dialog opens: channels created by others are not pushed, and finding
+ * them is what this dialog is for.
+ */
+import { useEffect, useState } from 'preact/hooks'
 import { isApiError } from '../api/client.ts'
 import type { Channel } from '../api/types.ts'
 import { plural, t } from '../i18n/index.ts'
@@ -16,6 +20,10 @@ export function BrowseChannelsDialog({ onClose }: { onClose: () => void }) {
   const chat = useChat()
   const [filter, setFilter] = useState('')
   const [joining, setJoining] = useState<number | null>(null)
+  useEffect(() => {
+    // The known list shows at once; a failure keeps it (the periodic refresh tries again).
+    chat.refreshChannels().catch(() => undefined)
+  }, [chat])
   const query = filter.trim().toLowerCase().replace(/^#/, '')
   const list = rooms.value.filter((c) => c.kind === 'public' && (query === '' || (c.name ?? '').includes(query)))
 
