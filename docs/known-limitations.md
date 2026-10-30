@@ -135,14 +135,13 @@ receives the channel's events until it disconnects.
   itself offline), the update banner after a simulated deploy, the notices and toasts never covering each other or
   the composer (1280x800 and 375x667, English and Hebrew), and sign-out's cleanup, under the production CSP. The iOS
   Add to Home Screen help and Chromium's Install button are covered by unit tests (user agents and a fake
-  `beforeinstallprompt`), not by a browser: headless Chromium does not offer installation, and the suite runs desktop
-  Chromium only (WebKit and phone emulation come with the mobile pass). **To try on real devices:** install from
+  `beforeinstallprompt`), not by a browser: headless Chromium does not offer installation, and the service worker is
+  tested in Chromium only (the WebKit phone project blocks it, see "Phones" below). **To try on real devices:** install from
   Chrome on Android (account menu → Install Slax) and from Safari on an iPhone (the three steps), open from the icon,
   check the status bar colour in both themes, go to airplane mode and reopen (offline notice, then automatic
   recovery), deploy and check the banner appears when the app comes back to the foreground.
-- **Safe areas come with the mobile pass.** `viewport-fit=cover` is set so the app can use the whole screen, but the
-  safe-area padding (notch, home indicator) is the next task's work; until then, landscape on a notched iPhone can
-  put the edges of the sidebar under the notch.
+- **Safe areas** (`viewport-fit=cover`): the notch, rounded corners and home indicator are padded by the styles; see
+  "Phones" below for what was checked and how.
 - **Where install is offered.** Chromium (Android, Windows, macOS, Linux) shows the Install button once the browser
   fires `beforeinstallprompt`; iPhone and iPad (Safari and the other iOS browsers) get the steps. Firefox desktop
   cannot install web apps, and Safari on macOS ("Add to Dock") is not detected: the menu says nothing there.
@@ -170,6 +169,63 @@ receives the channel's events until it disconnects.
   launcher masks it is to be checked on the real phones.
 - **The manifest is in English** (`lang: en`, name "Slax", the same in every language); the app itself follows the
   person's language once opened.
+
+## Phones (iPhone and Android)
+
+**Where:** `frontend/src/styles/` (`tokens.css` safe areas, `app.css`, `chat.css`, `utilities.css`),
+`frontend/src/lib/viewport.ts` (on-screen keyboard), `frontend/src/lib/longPress.ts`, `frontend/index.html`,
+`e2e/tests/mobile.spec.ts`, `e2e/support/mobile.ts`.
+
+- **Emulation, not phones.** `make e2e` runs `mobile.spec.ts` in two more Playwright projects: `iphone` (WebKit with
+  an iPhone 14's size, touch, user agent and scale) and `pixel` (Chromium as a Pixel 7). Neither is Safari on iOS nor
+  Chrome on Android: same engines, none of their browser chrome, keyboards or gestures. Checked there: the viewport
+  meta; the app exactly as tall as the window and the page never scrolling; fields of 16 px or more (iOS zooms on a
+  smaller one); 44 x 44 px for the drawer toggle, channel details, attach, send, a message's "more" button, the menu
+  items, the thread's buttons, the channels and the account menu; no sideways scroll at 375 and 360 px in English,
+  Hebrew and French, both themes, with long words and a long link, drawer, menu and thread open; the drawer from the
+  inline start (the right in Hebrew) and closed by a tap beside it; a message's menu by a tap on "more" or a long
+  press; dialogs inside the screen, scrolling inside with their buttons in view; and the journey by touch (sign in,
+  post, thread reply, reaction, conversation) in English on both and in Hebrew on the iPhone. The phones run that
+  spec only, not the whole desktop suite (time).
+- **The keyboard is emulated.** No headless browser has an on-screen keyboard: the test replaces
+  `window.visualViewport` with one that shrinks by a keyboard's height (and pans, as Safari does) and checks that the
+  composer, Send, the header, a thread's composer and a dialog stay inside what is left. That proves the app follows
+  the visual viewport, not that iOS reports it the way the emulation does. Chrome on Android is asked to resize the
+  page instead (`interactive-widget=resizes-content`, Chrome 108+), which the emulation does not exercise either.
+- **The notch is emulated.** `env(safe-area-inset-*)` is 0 in every emulator: the tests set the app's own variables
+  (`--safe-top`, `--safe-bottom`, `--safe-inline-start`, `--safe-inline-end`) to a notched phone's values and check
+  the header, composer, drawer, thread and notice band keep clear. Whether iOS gives the values expected (portrait in
+  Safari: none at the top, the home indicator at the bottom; landscape: the sides) is for a real device.
+- **No service worker in the WebKit project.** Once a worker controls the page, Playwright's WebKit stops routing
+  the page's requests (the real Turnstile script was fetched), so the `iphone` project blocks workers; the worker is
+  tested in Chromium (`pwa.spec.ts`).
+- **A message's text cannot be selected on a touch screen.** A long press opens the message's menu instead, which
+  has "Copy text" (the whole text). Links and images keep the browser's own long press; part of a message cannot be
+  copied on a phone. *Intended fix if it matters:* a "Select text" item that makes the message selectable once.
+- **Enter sends, on a phone too.** The keyboard's Enter key says "Send" (`enterkeyhint`); a phone keyboard has no
+  Shift+Enter, so a message typed on a phone is one paragraph (pasted line breaks are kept). *Intended fix if the
+  family wants it:* Enter as a new line on touch screens, with Send as the only way to send.
+- **The page itself never overscrolls vertically** (`overscroll-behavior-y: none` on the page, `contain` on the
+  lists, the sidebar and the dialogs): no pull-to-refresh, so a stuck page is reloaded from the browser's menu
+  (Safari's reload button, Chrome's ⟳), or by closing and reopening the installed app.
+- **Popovers ignore the keyboard.** The emoji picker and the message menu are placed in the window, not in what the
+  keyboard leaves; they open from a tap, which normally closes the keyboard first.
+- **On a real iPhone (Safari, then installed from the Home Screen), please check:**
+  1. Tap the message field: the page does not zoom in; the keyboard opens and the field and Send sit right on top
+     of it, the channel header still visible; type, tap Send, the keyboard can stay open; close it: the app fills the
+     screen again, no gap at the bottom.
+  2. Open a thread and reply from its field: same as above. Open "New channel" and tap its Name: the dialog and its
+     Create button stay above the keyboard.
+  3. Long press a message: its menu opens (no text selection, no magnifier); Copy text, then paste it elsewhere.
+     Long press a link in a message: Safari's own link menu, not Slax's.
+  4. Rotate to landscape: nothing under the notch or the rounded corners; the composer clear of the home indicator
+     in both orientations; the channel list (drawer in portrait, sidebar in landscape) reachable.
+  5. In Hebrew: the drawer comes from the right, the menu and thread read right to left.
+  6. Scroll a long channel to the top and keep pulling: the list stops, the page does not bounce or reload.
+  7. Both themes: the status bar and the tapped-message tint look right.
+- **On a real Android phone (Chrome, then installed):** items 1 to 7 as above (on item 1 Chrome shrinks the page with
+  the keyboard; the composer must end right above it), and a long press on a message must open Slax's menu, not
+  Chrome's text selection.
 
 ## Administration, alerts and the demo reset
 

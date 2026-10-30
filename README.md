@@ -87,7 +87,10 @@ suite in the official Playwright image, then removes the whole stack. It can run
 failure traces are left in `e2e/playwright-report/` and `e2e/test-results/`.
 `E2E_SCREENSHOTS=1 make e2e` also rewrites the RTL reference screenshots in
 `docs/design/e2e/`. The e2e build registers the service worker like production
-(`e2e/tests/pwa.spec.ts`). It ends with a 10-second load smoke (5 WebSocket clients) that fails on
+(`e2e/tests/pwa.spec.ts`). Besides desktop Chromium, two phone projects run
+`e2e/tests/mobile.spec.ts` only: `iphone` (WebKit, iPhone 14 emulation) and `pixel`
+(Chromium, Pixel 7 emulation); emulation, not devices (see `docs/known-limitations.md`,
+"Phones"). It ends with a 10-second load smoke (5 WebSocket clients) that fails on
 any lost or doubled message; `make load` runs the full load test on a stack of its own and
 writes `docs/load-test-results.md`.
 
