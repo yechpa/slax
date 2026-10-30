@@ -6,8 +6,11 @@
  * Updates: a new version installs (precaches) and then waits. It takes over only when the
  * app says so (message SKIP_WAITING, after the person accepted the reload: see register.ts)
  * or once no tab uses the old one, so a page never runs against files it did not load.
+ *
+ * Web Push (sw-push.ts): every push shows a notification; a tap opens the conversation.
  */
 import { CACHE_PREFIX, activate, handle, precache, routeRequest, type SwDeps } from './sw-core.ts'
+import { openFromNotification, showPush } from './sw-push.ts'
 
 declare const __SLAX_PRECACHE__: string[]
 declare const __SLAX_VERSION__: string
@@ -39,4 +42,14 @@ sw.addEventListener('message', (event) => {
   // After a sign-out the app empties Cache Storage; each worker (the active one, and one waiting
   // to take over) fetches its own shell again for offline use.
   if (type === 'PRECACHE') event.waitUntil(precache(deps, CACHE, FILES, sw.location.origin))
+})
+
+sw.addEventListener('push', (event) => {
+  event.waitUntil(showPush(sw.registration, event.data, sw.location.origin))
+})
+
+sw.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = (event.notification.data as { url?: unknown } | null)?.url
+  event.waitUntil(openFromNotification(sw.clients, url, sw.location.origin))
 })
