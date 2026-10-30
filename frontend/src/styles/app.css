@@ -10,6 +10,7 @@
     place-content: center;
     justify-items: center;
     gap: var(--space-4);
+    min-block-size: 100vh;
     min-block-size: 100dvh;
     padding: var(--space-6) var(--space-4);
     font-size: var(--text-xl);
@@ -27,6 +28,7 @@
     position: relative;
     display: grid;
     grid-template-rows: auto 1fr;
+    min-block-size: 100vh;
     min-block-size: 100dvh;
     background-color: var(--color-bg);
     background-image: var(--paper);
@@ -132,6 +134,7 @@
 
   /* ── Application shell ───────────────────────────────── */
   .shell--app {
+    block-size: 100vh;
     block-size: 100dvh;
     border: 0;
   }
@@ -151,6 +154,7 @@
     flex-direction: column;
     min-block-size: 0;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   .sidebar__scroll > .sidebar__heading:first-child {
@@ -641,6 +645,7 @@
     gap: var(--space-4);
     min-block-size: 0;
     overflow: auto;
+    overscroll-behavior-y: contain;
     padding: var(--space-4);
   }
 
@@ -907,6 +912,7 @@
   #app:has(> .top-bands :is(.update-banner, .conn-banner)) {
     display: flex;
     flex-direction: column;
+    block-size: 100vh;
     block-size: 100dvh;
   }
 

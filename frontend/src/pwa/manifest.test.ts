@@ -109,6 +109,14 @@ describe('index.html', () => {
     expect(indexHtml).toMatch(/<meta name="viewport" content="[^"]*viewport-fit=cover[^"]*" \/>/)
   })
 
+  it('asks Android to resize the page for the keyboard, and never stops anyone zooming', () => {
+    const content = /<meta name="viewport" content="([^"]*)" \/>/.exec(indexHtml)?.[1] ?? ''
+    expect(content.split(',').map((part) => part.trim())).toEqual(
+      expect.arrayContaining(['width=device-width', 'initial-scale=1', 'viewport-fit=cover', 'interactive-widget=resizes-content']),
+    )
+    expect(content).not.toMatch(/user-scalable|maximum-scale/)
+  })
+
   it('colours the browser chrome per colour scheme before the script runs, in the theme colours', () => {
     expect(indexHtml).toContain(`<meta name="theme-color" media="(prefers-color-scheme: dark)" content="${background('console')}" />`)
     expect(indexHtml).toContain(`<meta name="theme-color" media="(prefers-color-scheme: light)" content="${background('listing')}" />`)

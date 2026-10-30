@@ -370,6 +370,7 @@
     min-block-size: 0;
     padding: var(--space-4) var(--space-2) var(--space-4);
     overflow-y: auto;
+    overscroll-behavior-y: contain;
     background: var(--color-surface);
     border-inline-end: var(--border-width) var(--rule-style) var(--color-border);
   }
@@ -1081,6 +1082,7 @@
   .message-list {
     min-block-size: 0;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
     padding-block: var(--space-2);
     background-color: var(--color-bg);
     background-image: var(--paper-holes), var(--paper-holes), var(--paper);

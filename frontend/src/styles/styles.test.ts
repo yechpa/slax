@@ -118,6 +118,39 @@ describe('styles', () => {
     for (const css of good) expect(fourValueShorthands(css), css).toEqual([])
   })
 
+  it('every dynamic viewport height has a 100vh fallback just before it (older browsers drop the dvh line)', () => {
+    const missing: string[] = []
+    for (const file of files) {
+      const css = stripComments(readFileSync(file, 'utf8'))
+      for (const [, body] of css.matchAll(/\{([^{}]*)\}/g)) {
+        const declarations = body.split(';').map((d) => d.trim()).filter(Boolean)
+        declarations.forEach((declaration, i) => {
+          if (!/\bdvh\b|\ddvh/.test(declaration)) return
+          const [property] = declaration.split(':')
+          const fallback = declaration.replace(/(\d)dvh/g, '$1vh')
+          if (declarations[i - 1] !== fallback) missing.push(`${relative(SRC, file)}: ${declaration} (expected "${fallback}" before it, on ${property})`)
+        })
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  it('sets the page up for touch screens: text size kept, a themed tap highlight, no page overscroll', () => {
+    const css = files.map((file) => stripComments(readFileSync(file, 'utf8'))).join('\n')
+    const html = [...css.matchAll(/(?:^|[{}])\s*html\s*\{([^}]*)\}/g)].map((m) => m[1]).join(';')
+    // 100%, not none: none also disables the reader's own text zoom in some browsers.
+    expect(html).toMatch(/-webkit-text-size-adjust:\s*100%/)
+    expect(html).toMatch(/(?<!-)text-size-adjust:\s*100%/)
+    expect(css).not.toMatch(/text-size-adjust:\s*none/)
+    expect(html).toMatch(/-webkit-tap-highlight-color:\s*color-mix\([^;]*var\(--color-accent\)/)
+    // Vertical only: horizontal overscroll is the browser's back/forward swipe.
+    expect(html).toMatch(/overscroll-behavior-y:\s*none/)
+    for (const scroller of ['.message-list', '.thread__log', '.sidebar__scroll', '.dialog__body']) {
+      const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => selector.split(',').some((s) => s.trim() === scroller))
+      expect(rules.some(([, , body]) => /overscroll-behavior-y:\s*contain/.test(body)), scroller).toBe(true)
+    }
+  })
+
   it('declares the cascade layer order first', () => {
     const index = stripComments(readFileSync(join(STYLES, 'index.css'), 'utf8')).trim()
     expect(index.startsWith('@layer reset, tokens, base, components, utilities;')).toBe(true)
