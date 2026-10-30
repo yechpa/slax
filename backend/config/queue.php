@@ -69,7 +69,9 @@ return [
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
             'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
-            'block_for' => null,
+            // Seconds a worker waits on Redis for a job (BLPOP) before looking again: it takes a
+            // job the moment one is pushed, without polling. Null: poll, then sleep (--sleep).
+            'block_for' => env('REDIS_QUEUE_BLOCK_FOR') === null ? null : (int) env('REDIS_QUEUE_BLOCK_FOR'),
             'after_commit' => false,
         ],
 
