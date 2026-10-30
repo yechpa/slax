@@ -25,6 +25,11 @@ return [
         'failed_sign_in_window_minutes' => (int) env('SLAX_FAILED_SIGN_IN_WINDOW_MINUTES', 10),
     ],
 
+    /* Audit log entries are kept this long (audit:prune, daily). */
+    'audit' => [
+        'retention_days' => (int) env('SLAX_AUDIT_RETENTION_DAYS', 180),
+    ],
+
     /*
     | The public demo: accounts signed up by visitors are kept while they are used, and
     | deleted after this many days without activity (slax:demo-reset, nightly).

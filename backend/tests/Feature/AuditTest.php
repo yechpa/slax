@@ -6,7 +6,10 @@ use App\Models\AuditLog;
 use App\Models\User;
 use App\Services\Identity\GoogleProfile;
 use App\Services\Turnstile;
+use Database\Seeders\DefaultWorkspaceSeeder;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\FakeIdentityProvider;
 use Tests\Support\RecordingNotifier;
@@ -120,4 +123,48 @@ test('presence heartbeats record activity at most every 15 minutes', function ()
     $this->travel(6)->minutes();
     asUser($user->fresh())->postJson('/api/v1/presence/heartbeat', ['active' => false])->assertNoContent();
     expect($user->fresh()->last_seen_at->gt($seen))->toBeTrue();
+});
+
+test('refused sends are audited once per sender and channel per 10 minutes', function () {
+    $this->seed(DefaultWorkspaceSeeder::class);
+    $owner = User::factory()->create();
+    $outsider = User::factory()->create();
+    $other = User::factory()->create();
+    $channel = privateChannel($owner);
+    $post = fn (User $user) => asUser($user)->postJson("/api/v1/channels/{$channel->id}/messages", ['body' => 'x', 'client_id' => (string) Str::uuid()]);
+
+    foreach (range(1, 5) as $_) {
+        $post($outsider)->assertNotFound();
+    }
+    $post($other)->assertNotFound();
+    // Refused sends that the channel's visibility answers (404) are not sends; public channels refuse with 403.
+    $public = publicChannel($owner, 'open');
+    $postPublic = fn (User $user) => asUser($user)->postJson("/api/v1/channels/{$public->id}/messages", ['body' => 'x', 'client_id' => (string) Str::uuid()]);
+    foreach (range(1, 5) as $_) {
+        $postPublic($outsider)->assertForbidden();
+    }
+    $postPublic($other)->assertForbidden();
+
+    expect(AuditLog::where('action', 'message.send_refused')->where('actor_id', $outsider->id)->count())->toBe(1)
+        ->and(AuditLog::where('action', 'message.send_refused')->where('actor_id', $other->id)->count())->toBe(1);
+
+    $this->travel(11)->minutes();
+    $postPublic($outsider)->assertForbidden();
+    expect(AuditLog::where('action', 'message.send_refused')->where('actor_id', $outsider->id)->count())->toBe(2);
+});
+
+test('audit entries older than the retention are pruned daily', function () {
+    config(['slax.audit.retention_days' => 180]);
+    $old = new AuditLog;
+    $old->forceFill(['action' => 'user.banned', 'created_at' => now()->subDays(181)])->save();
+    $kept = new AuditLog;
+    $kept->forceFill(['action' => 'user.banned', 'created_at' => now()->subDays(179)])->save();
+
+    $this->artisan('audit:prune')->assertSuccessful();
+
+    expect(AuditLog::pluck('id')->all())->toBe([$kept->id]);
+
+    $events = collect(app(Schedule::class)->events())
+        ->filter(fn ($event) => str_contains((string) $event->command, 'audit:prune'));
+    expect($events)->toHaveCount(1)->and($events->first()->expression)->toBe('30 4 * * *');
 });

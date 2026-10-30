@@ -8,6 +8,7 @@ use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
@@ -91,6 +92,25 @@ class AuditLogger
         if (str_starts_with($action, self::SIGN_IN_FAILED) && $entry->ip !== null) {
             $this->countFailedSignIn($entry->ip);
         }
+    }
+
+    /**
+     * Like record(), at most once per actor, action and target in $minutes: for actions a
+     * person can repeat at will (a refused send), so the log is not theirs to flood.
+     */
+    public function recordOncePer(int $minutes, string $action, Model $target): void
+    {
+        $key = 'audit:once:'.hash('sha256', implode('|', [$action, Auth::id() ?? '-', $target::class, $target->getKey()]));
+
+        try {
+            if (! Cache::add($key, 1, $minutes * 60)) {
+                return;
+            }
+        } catch (Throwable $e) {
+            report($e);
+        }
+
+        $this->record($action, $target);
     }
 
     private function ip(): ?string

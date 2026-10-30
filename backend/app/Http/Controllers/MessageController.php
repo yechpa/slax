@@ -55,7 +55,8 @@ class MessageController extends Controller
         Gate::authorize('view', $channel);
         $decision = Gate::inspect('post', $channel);
         if ($decision->denied()) {
-            $audit->record(AuditLogger::SEND_REFUSED, $channel);
+            // Once per sender and channel per 10 minutes: retrying is not news.
+            $audit->recordOncePer(10, AuditLogger::SEND_REFUSED, $channel);
             $decision->authorize();
         }
 

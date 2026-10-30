@@ -17,3 +17,6 @@ Schedule::command('slax:demo-reset')
     ->when(fn () => (bool) config('slax.demo.reset_enabled'))
     ->withoutOverlapping()
     ->onOneServer();
+
+// The audit log keeps slax.audit.retention_days (180 by default).
+Schedule::command('audit:prune')->dailyAt('04:30')->withoutOverlapping()->onOneServer();
