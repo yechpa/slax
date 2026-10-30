@@ -56,6 +56,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/status', [AdminController::class, 'status']);
             Route::get('/audit', [AdminController::class, 'audit']);
             Route::get('/users/banned', [AdminController::class, 'bannedUsers']);
+            Route::get('/channels', [AdminController::class, 'channels']);
 
             Route::middleware('throttle:admin-writes')->group(function () {
                 Route::post('/users/{id}/ban', [AdminController::class, 'ban'])->whereNumber('id');

@@ -8,6 +8,7 @@ use App\Models\Channel;
 use App\Models\File;
 use App\Models\Message;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Services\Moderation;
 use App\Services\ServiceStatus;
 use Illuminate\Http\JsonResponse;
@@ -86,6 +87,24 @@ class AdminController extends Controller
         }
 
         return response()->noContent();
+    }
+
+    /** GET /admin/channels: every public and private channel (members or not), to lock. */
+    public function channels(): JsonResponse
+    {
+        $channels = Channel::where('workspace_id', Workspace::default()->id)
+            ->whereIn('kind', [Channel::KIND_PUBLIC, Channel::KIND_PRIVATE])
+            ->withCount('members')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json(['data' => $channels->map(fn (Channel $channel) => [
+            'id' => $channel->id,
+            'name' => $channel->name,
+            'kind' => $channel->kind,
+            'locked' => $channel->isLocked(),
+            'member_count' => $channel->members_count,
+        ])->all()]);
     }
 
     /**

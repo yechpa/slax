@@ -441,3 +441,19 @@ test('an account whose address is in ADMIN_EMAILS cannot be banned, flag or not'
         ->assertUnprocessable()->assertExactJson(['error' => 'cannot_ban_admin']);
     expect($listed->fresh()->isBanned())->toBeFalse();
 });
+
+test('administrators list every room to lock, private ones they are not in included, conversations excluded', function () {
+    $owner = User::factory()->create();
+    $public = publicChannel($owner, 'zeta');
+    $private = privateChannel($owner, 'hidden');
+    $private->forceFill(['locked_at' => now()])->save();
+    $dm = Channel::factory()->dm()->create();
+
+    $list = asUser(admin())->getJson('/api/v1/admin/channels')->assertOk()->json('data');
+
+    $byId = collect($list)->keyBy('id');
+    expect($byId->has($public->id))->toBeTrue()
+        ->and($byId[$private->id])->toMatchArray(['name' => 'hidden', 'kind' => 'private', 'locked' => true, 'member_count' => 1])
+        ->and($byId->has($dm->id))->toBeFalse()
+        ->and(collect($list)->pluck('name')->all())->toBe(collect($list)->pluck('name')->sort()->values()->all());
+});
