@@ -21,6 +21,11 @@ server {
     include /tmp/nginx/security-headers.conf;
 
     location ~ ^/(api|auth|sanctum|broadcasting)/ {
+        # Nothing authenticated stays in the browser's HTTP cache on a shared device after a
+        # sign-out (Laravel's default, no-cache, allows storing): one header, no-store.
+        include /tmp/nginx/security-headers.conf;
+        fastcgi_hide_header Cache-Control;
+        add_header Cache-Control "no-store" always;
         fastcgi_pass ${SLAX_PHP_UPSTREAM};
         include /etc/nginx/fastcgi_params;
         fastcgi_param SCRIPT_FILENAME /var/www/html/public/index.php;

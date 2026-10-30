@@ -19,6 +19,8 @@ if (str_starts_with($_SERVER['REQUEST_URI'], '/api/v1/files/')) {
     header('Location: https://files.example.test/object', true, 302);
     exit;
 }
+// Laravel's default for every response: a browser may keep it on disk (no-cache is not no-store).
+header('Cache-Control: no-cache, private');
 header('Content-Type: application/json');
 echo json_encode(['https' => $_SERVER['HTTPS'] ?? '', 'remote' => $_SERVER['REMOTE_ADDR']]);
 PHP
@@ -69,6 +71,8 @@ check "the page carries the public settings" has "$body" '<meta name="slax:turns
 
 api="$(headers "$base/api/v1/health")"
 check "API through PHP-FPM, with the security headers" has "$api" "^content-security-policy: default-src 'self'"
+check "API responses are never stored by the browser (shared devices): Cache-Control: no-store" has "$api" '^cache-control: no-store$'
+check "... one Cache-Control header only" test "$(count "$api" '^cache-control:')" = 1
 check "PHP is told the public scheme is https" has "$(curl -s "$base/api/v1/health")" '"https":"on"'
 check "the visitor's address comes from X-Forwarded-For of a trusted proxy" \
     has "$(curl -s -H 'X-Forwarded-For: 203.0.113.7' "$base/api/v1/health")" '"remote":"203.0.113.7"'
@@ -76,6 +80,7 @@ check "the visitor's address comes from X-Forwarded-For of a trusted proxy" \
 download="$(headers "$base/api/v1/files/1/download")"
 check "a download keeps the API's Referrer-Policy: no-referrer" has "$download" '^referrer-policy: no-referrer$'
 check "... and only that one" test "$(count "$download" '^referrer-policy:')" = 1
+check "... and is not stored either" has "$download" '^cache-control: no-store$'
 
 check "Reverb's HTTP API is not served (/apps/ -> 404)" has "$(headers "$base/apps/1/events")" '^HTTP/1.1 404'
 check "/app/ accepts WebSocket upgrades only (-> 426)" has "$(headers "$base/app/key")" '^HTTP/1.1 426'
