@@ -46,6 +46,11 @@ class Moderation
         });
         $user->refresh();
 
+        // Audited (and alerted) first: nothing that fails below can skip it.
+        if ($changed) {
+            $this->audit->record(AuditLogger::USER_BANNED, $user);
+        }
+
         try {
             $this->sessions->destroyAll($user);
             $this->presence->forget($user->id);
@@ -54,10 +59,6 @@ class Moderation
             report($e);
         }
         UserBanned::dispatch($user);
-
-        if ($changed) {
-            $this->audit->record(AuditLogger::USER_BANNED, $user);
-        }
     }
 
     public function unban(User $user): void

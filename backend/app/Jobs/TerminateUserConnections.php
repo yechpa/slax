@@ -37,7 +37,12 @@ class TerminateUserConnections implements ShouldQueue
             $broadcaster->terminateUserConnections($userId, timeoutSeconds: 2);
         } catch (Throwable $e) {
             report($e);
-            self::dispatch($userId);
+            try {
+                self::dispatch($userId);
+            } catch (Throwable $queueDown) {
+                // Neither Reverb nor the queue: the caller's work stands; the sockets close at their next reconnect.
+                report($queueDown);
+            }
         }
     }
 

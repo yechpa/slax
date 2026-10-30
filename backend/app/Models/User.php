@@ -59,6 +59,12 @@ class User extends Authenticatable
         return $this->banned_at !== null;
     }
 
+    /** An administrator by flag, or by address (ADMIN_EMAILS), whatever the flag says now. */
+    public function isAdministrator(): bool
+    {
+        return $this->is_admin || in_array(strtolower(trim($this->email)), (array) config('slax.admin_emails', []), true);
+    }
+
     /** Recorded on sign-in and by presence heartbeats, at most every 15 minutes. */
     public function touchLastSeen(): void
     {

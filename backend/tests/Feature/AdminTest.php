@@ -404,3 +404,41 @@ test('banned people are cut off from the cheap places they still reached', funct
     app('auth')->forgetGuards();
     expect(collect(asUser($friend)->getJson('/api/v1/channels')->json())->pluck('id')->all())->not->toContain($dm->id);
 });
+
+test('with Redis unreachable a ban still stands, is audited and closes the sockets', function () {
+    fakeReverb();
+    fakeTerminations();
+    $admin = admin();
+    $target = User::factory()->create();
+    config(['database.redis.default.port' => 1, 'database.redis.default.timeout' => 0.2, 'database.redis.default.read_timeout' => 0.2]);
+    app('redis')->purge();
+
+    asUser($admin)->postJson("/api/v1/admin/users/{$target->id}/ban")->assertOk();
+
+    expect($target->fresh()->isBanned())->toBeTrue()
+        ->and(AuditLog::where('action', 'user.banned')->where('target_id', $target->id)->count())->toBe(1)
+        ->and(terminationPaths())->toBe(["/apps/test-app/users/{$target->id}/terminate_connections"]);
+});
+
+test('with neither Reverb nor the queue reachable a ban still stands and is audited and alerted', function () {
+    fakeReverb();
+    // Reverb refuses, and the retry job (sync queue in tests) fails too.
+    fakeTerminations(fn () => throw new Illuminate\Http\Client\ConnectionException('down'));
+    $admin = admin();
+    $target = User::factory()->create();
+
+    asUser($admin)->postJson("/api/v1/admin/users/{$target->id}/ban")->assertOk();
+
+    expect($target->fresh()->isBanned())->toBeTrue()
+        ->and(AuditLog::where('action', 'user.banned')->count())->toBe(1)
+        ->and($this->notifier->withTitle('user.banned'))->toHaveCount(1);
+});
+
+test('an account whose address is in ADMIN_EMAILS cannot be banned, flag or not', function () {
+    config(['slax.admin_emails' => ['boss@example.com']]);
+    $listed = User::factory()->create(['email' => 'Boss@Example.com', 'is_admin' => false]);
+
+    asUser(admin())->postJson("/api/v1/admin/users/{$listed->id}/ban")
+        ->assertUnprocessable()->assertExactJson(['error' => 'cannot_ban_admin']);
+    expect($listed->fresh()->isBanned())->toBeFalse();
+});

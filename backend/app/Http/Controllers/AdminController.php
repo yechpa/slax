@@ -38,7 +38,8 @@ class AdminController extends Controller
         $data = $request->validate(['banned' => ['sometimes', 'boolean']]);
         $user = User::findOrFail($id);
 
-        if ($user->is_admin) {
+        // An ADMIN_EMAILS address is an administrator at its next sign-in, flag or not.
+        if ($user->isAdministrator()) {
             return response()->json(['error' => 'cannot_ban_admin'], 422);
         }
 
