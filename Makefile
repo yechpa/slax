@@ -83,8 +83,8 @@ fmt: env deps ## Fix formatting with Pint and Ruff
 PLAYWRIGHT_IMAGE := mcr.microsoft.com/playwright:v1.64.1-noble
 
 screenshots: env deps ## Capture the design-system kitchen sink (2 themes x 3 languages) into docs/design
-	$(RUN) --no-deps frontend npx vite build --logLevel warn
+	$(RUN) --no-deps frontend npx vite build --mode design-system --logLevel warn
 	docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) -e HOME=/tmp \
-		-v $(CURDIR)/frontend/dist:/dist:ro -v $(CURDIR)/frontend/scripts:/scripts:ro -v $(CURDIR)/docs/design:/out \
+		-v $(CURDIR)/frontend/dist-design-system:/dist:ro -v $(CURDIR)/frontend/scripts:/scripts:ro -v $(CURDIR)/docs/design:/out \
 		$(PLAYWRIGHT_IMAGE) sh -c 'npm install --silent --no-audit --no-fund --prefix /tmp/pw playwright-core@1.64.1 \
 		&& PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core/index.mjs node /scripts/design-screenshots.mjs'

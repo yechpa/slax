@@ -32,14 +32,35 @@ await new Promise((resolve) => server.listen(PORT, '127.0.0.1', resolve))
 
 const desktop = { width: 1280, height: 900 }
 const mobile = { width: 390, height: 844 }
+// Every theme × language is loaded and checked at both widths; only some are saved.
 const shots = []
 for (const theme of ['console', 'listing']) {
   for (const lang of ['en', 'he', 'fr']) {
-    shots.push({ file: `${theme}-${lang}.png`, theme, lang, viewport: desktop, fullPage: false })
-    shots.push({ file: `full/${theme}-${lang}.png`, theme, lang, viewport: desktop, fullPage: true })
+    shots.push({ files: [`${theme}-${lang}.png`, `full/${theme}-${lang}.png`], theme, lang, viewport: desktop })
+    const saveMobile = theme === 'console' && lang === 'fr'
+    shots.push({ files: saveMobile ? ['mobile-console-fr.png'] : [], theme, lang, viewport: mobile, isMobile: true })
   }
 }
-shots.push({ file: 'mobile-console-fr.png', theme: 'console', lang: 'fr', viewport: mobile, fullPage: false, isMobile: true })
+
+/** Runs in the page: anything clipped that must not be. */
+function layoutProblems() {
+  const problems = []
+  const root = document.documentElement
+  if (root.scrollWidth > root.clientWidth) problems.push(`page scrolls sideways: ${root.scrollWidth}px > ${root.clientWidth}px`)
+  const canvas = document.createElement('canvas').getContext('2d')
+  for (const input of document.querySelectorAll('input[placeholder], textarea[placeholder]')) {
+    if (!input.offsetParent || !input.placeholder) continue
+    const style = getComputedStyle(input)
+    canvas.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const room = input.clientWidth - parseFloat(style.paddingInlineStart) - parseFloat(style.paddingInlineEnd)
+    const needed = canvas.measureText(input.placeholder).width
+    if (needed > room + 0.5) problems.push(`placeholder clipped (${Math.round(needed)}px in ${Math.round(room)}px): ${input.placeholder}`)
+  }
+  for (const el of document.querySelectorAll('.composer__placeholder')) {
+    if (el.scrollWidth > el.clientWidth + 1) problems.push(`composer placeholder clipped: ${el.textContent}`)
+  }
+  return problems
+}
 
 await mkdir(join(OUT, 'full'), { recursive: true })
 const browser = await chromium.launch()
@@ -55,17 +76,21 @@ for (const shot of shots) {
     locale: shot.lang,
   })
   const page = await context.newPage()
-  page.on('console', (msg) => msg.type() === 'error' && failures.push(`${shot.file}: ${msg.text()}`))
-  page.on('pageerror', (err) => failures.push(`${shot.file}: ${err.message}`))
-  page.on('requestfailed', (req) => failures.push(`${shot.file}: request failed ${req.url()}`))
+  page.on('console', (msg) => msg.type() === 'error' && failures.push(`${shot.theme}/${shot.lang}: ${msg.text()}`))
+  page.on('pageerror', (err) => failures.push(`${shot.theme}/${shot.lang}: ${err.message}`))
+  page.on('requestfailed', (req) => failures.push(`${shot.theme}/${shot.lang}: request failed ${req.url()}`))
   await page.goto(`http://127.0.0.1:${PORT}/design-system.html?theme=${shot.theme}&lang=${shot.lang}`)
   await page.evaluate(async () => {
     await Promise.all([document.fonts.load('300 1em "Cascadia Mono"', 'שלום'), document.fonts.load('700 1em "Cascadia Mono"', 'שלום')])
     await document.fonts.ready
   })
   const fonts = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').length)
-  await page.screenshot({ path: join(OUT, shot.file), fullPage: shot.fullPage })
-  console.log(`${shot.file}  (${fonts} font files loaded)`)
+  const label = `${shot.theme}/${shot.lang} @${shot.viewport.width}px`
+  for (const problem of await page.evaluate(layoutProblems)) failures.push(`${label}: ${problem}`)
+  for (const file of shot.files) {
+    await page.screenshot({ path: join(OUT, file), fullPage: file.startsWith('full/') })
+  }
+  console.log(`${label}  checked, ${fonts} font files loaded${shot.files.length ? `, saved ${shot.files.join(' ')}` : ''}`)
   await context.close()
 }
 await browser.close()
