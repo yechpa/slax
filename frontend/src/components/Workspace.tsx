@@ -38,7 +38,6 @@ import { NewMessageDialog } from './NewMessageDialog.tsx'
 import { Skeleton } from './MessageList.tsx'
 import { NavToggle } from './NavToggle.tsx'
 import { Sidebar } from './Sidebar.tsx'
-import { ConnectionBanner, Toasts } from './Toasts.tsx'
 
 /** How long the socket may be down before the banner says so: a blip is not news. */
 const BANNER_DELAY_MS = 2000
@@ -129,8 +128,6 @@ export function Workspace({ connect, chat: given }: Props) {
     <ChatContext.Provider value={chat}>
       <Shell loadFailed={loadFailed} onRetryLoad={retryLoad} />
       <Dialogs />
-      <ConnectionBanner />
-      <Toasts />
     </ChatContext.Provider>
   )
 }

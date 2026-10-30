@@ -847,23 +847,6 @@
     }
   }
 
-  /* In the app, toasts sit at the top, under the header: never over the composer and its Send. */
-  .toast-region--app {
-    inset-block: 3.5rem auto;
-  }
-
-  /* ── Connection banner ───────────────────────────────── */
-  .conn-banner-region {
-    position: fixed;
-    inset-block-start: var(--space-2);
-    inset-inline: 0;
-    z-index: 90;
-    display: flex;
-    justify-content: center;
-    padding-inline: var(--space-4);
-    pointer-events: none;
-  }
-
   .conn-banner {
     display: inline-flex;
     align-items: center;
@@ -883,31 +866,61 @@
   }
 
   /*
-   * A new version is ready (pwa/UpdateBanner.tsx): a band above the screen, in the page's flow,
-   * never drawn over it. While it shows, the screen takes the height that remains, so nothing
-   * (the composer and its Send above all, the header's controls) is ever under it.
+   * The top bands (app.tsx): the update notice (pwa/UpdateBanner.tsx) and the connection notice
+   * (Toasts.tsx), stacked in the page's flow above the screen, never drawn over it or over each
+   * other. While one shows, #app becomes a column and the screen takes the height that remains,
+   * so nothing (the composer and its Send above all, the header's controls) is ever under them.
+   * Their live regions are always there (empty: no height), so a notice is announced.
    */
-  .update-banner-region:has(> .update-banner) {
+  .top-bands {
+    position: relative;
+  }
+
+  .top-bands:has(.update-banner, .conn-banner) {
     display: flex;
-    justify-content: center;
+    flex-direction: column;
     padding: var(--space-2) var(--space-4);
     background: var(--color-surface);
     border-block-end: var(--border-width) var(--rule-style) var(--color-border);
   }
 
-  #app:has(> .update-banner-region > .update-banner) {
+  .update-banner-region,
+  .conn-banner-region {
+    display: flex;
+    justify-content: center;
+  }
+
+  .update-banner-region:has(.update-banner) + .conn-banner-region:has(.conn-banner) {
+    margin-block-start: var(--space-2);
+  }
+
+  /*
+   * Toasts hang just under the bands and the header (3.5rem): never over a notice, the header or
+   * the composer and its Send. Anchored to the bands' box, they move down with them.
+   */
+  .top-bands > .toast-region--app {
+    position: absolute;
+    inset-block: calc(100% + 3.5rem) auto;
+    inset-inline-end: var(--space-4);
+  }
+
+  #app:has(> .top-bands :is(.update-banner, .conn-banner)) {
     display: flex;
     flex-direction: column;
     block-size: 100dvh;
   }
 
-  #app:has(> .update-banner-region > .update-banner) > :is(.shell--app, .splash, .signin) {
+  #app:has(> .top-bands :is(.update-banner, .conn-banner)) > .top-bands {
+    flex: none;
+  }
+
+  #app:has(> .top-bands :is(.update-banner, .conn-banner)) > :is(.shell--app, .splash, .signin) {
     flex: 1 1 auto;
     block-size: auto;
     min-block-size: 0;
   }
 
-  #app:has(> .update-banner-region > .update-banner) > :is(.splash, .signin) {
+  #app:has(> .top-bands :is(.update-banner, .conn-banner)) > :is(.splash, .signin) {
     overflow: auto;
   }
 

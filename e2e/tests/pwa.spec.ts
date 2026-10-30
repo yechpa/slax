@@ -5,7 +5,7 @@
  * Storage; and none of it trips the production Content-Security-Policy.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { api, closeAll, newContext, send, signIn, signInThroughGoogle, ui, uniq, type Person } from '../support/app.ts'
+import { api, closeAll, newContext, realtimeSwitch, send, signIn, signInThroughGoogle, ui, uniq, type Person } from '../support/app.ts'
 import { t, type Locale } from '../support/i18n.ts'
 
 /** The policy slax-web sends (docker/web/entrypoint.sh) for http://localhost with the e2e services. */
@@ -188,6 +188,28 @@ const reachable = (locator: import('@playwright/test').Locator) =>
     return top !== null && (top === element || element.contains(top))
   })
 
+/** Signed in at this size (signIn() expects the sidebar, which a phone keeps in a drawer). */
+async function signInAt(browser: import('@playwright/test').Browser, locale: Locale, viewport: { width: number; height: number }) {
+  const context = await newContext(browser, { locale, viewport })
+  const page = await context.newPage()
+  // Before the app connects: lets a test cut the realtime connection as a real network loss would.
+  const realtime = await realtimeSwitch(page)
+  const email = `${uniq('banner')}@example.test`
+  const fullName = `Banner ${uniq('b')}`
+  await signInThroughGoogle(page, { email, name: fullName, locale })
+  await expect(page.locator('.shell__main .message-list')).toBeVisible()
+  const { id } = await api(page).get<{ id: number }>('/me')
+  const person: Person = { context, page, id, name: fullName, email, locale, theme: 'console' }
+  return { person, realtime }
+}
+
+type Box = { x: number; y: number; width: number; height: number }
+const overlap = (a: Box | null, b: Box | null) =>
+  a !== null && b !== null && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+
+/** One scroll only: the page itself never scrolls (the screen's own areas do). */
+const pageScrolls = (page: Page) => page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)
+
 const LAYOUTS = [
   { name: 'desktop 1280x800', viewport: { width: 1280, height: 800 } },
   { name: 'phone 375x667', viewport: { width: 375, height: 667 } },
@@ -198,18 +220,12 @@ for (const locale of ['en', 'he'] satisfies Locale[]) {
     test(`the update banner never covers the composer or its Send button (${name}, ${locale})`, async ({ browser }) => {
       let person: Person | undefined
       try {
-        // Signed in at this size (signIn() expects the sidebar, which a phone keeps in a drawer).
-        const context = await newContext(browser, { locale, viewport })
-        const page = await context.newPage()
-        const email = `${uniq('banner')}@example.test`
-        const fullName = `Banner ${uniq('b')}`
-        await signInThroughGoogle(page, { email, name: fullName, locale })
-        await expect(page.locator('.shell__main .message-list')).toBeVisible()
-        const { id } = await api(page).get<{ id: number }>('/me')
-        person = { context, page, id, name: fullName, email, locale, theme: 'console' }
+        ;({ person } = await signInAt(browser, locale, viewport))
+        const { page } = person
         await controlled(page)
         const banner = await deployNewVersion(person)
         await expect(banner).toBeInViewport({ ratio: 1 })
+        expect(await pageScrolls(page)).toBe(false)
 
         const view = ui(person)
         const sendButton = page.locator('.shell__footer').getByRole('button', { name: t(locale, 'action.send') })
@@ -228,6 +244,61 @@ for (const locale of ['en', 'he'] satisfies Locale[]) {
         await expect(view.sent(text)).toHaveCount(1)
         await expect(banner).toBeVisible()
       } finally {
+        await closeAll(person)
+      }
+    })
+  }
+}
+
+for (const locale of ['en', 'he'] satisfies Locale[]) {
+  for (const { name, viewport } of LAYOUTS) {
+    test(`offline with an update waiting: the notices and a toast never cover each other, Reload or Send (${name}, ${locale})`, async ({ browser }) => {
+      let person: Person | undefined
+      try {
+        const signedIn = await signInAt(browser, locale, viewport)
+        person = signedIn.person
+        const { page, context } = person
+        await controlled(page)
+        const banner = await deployNewVersion(person)
+        const reload = banner.getByRole('button', { name: t(locale, 'pwa.update.reload') })
+
+        // The network goes (the open socket with it): the connection notice appears beside the update band.
+        await context.setOffline(true)
+        await signedIn.realtime.cut()
+        const connection = page.locator('.conn-banner')
+        await expect(connection).toBeVisible({ timeout: 20_000 })
+        await expect(connection).toContainText(t(locale, 'error.network'))
+
+        const view = ui(person)
+        const sendButton = page.locator('.shell__footer').getByRole('button', { name: t(locale, 'action.send') })
+        const checkLayout = async () => {
+          for (const element of [reload, connection, sendButton, view.composer]) await expect(element).toBeInViewport({ ratio: 1 })
+          expect(overlap(await connection.boundingBox(), await reload.boundingBox())).toBe(false)
+          for (const element of [reload, sendButton, view.composer]) expect(await reachable(element)).toBe(true)
+          expect(await pageScrolls(page)).toBe(false)
+        }
+        await checkLayout()
+
+        // A toast (signing out fails offline) with both notices up: over neither Reload nor the composer.
+        const navToggle = page.locator('.channel-header__nav')
+        const drawer = await navToggle.isVisible()
+        if (drawer) await navToggle.click()
+        await view.userMenu.click()
+        await page.getByRole('button', { name: t(locale, 'action.signOut') }).click()
+        const toast = view.toasts.locator('.toast')
+        await expect(toast).toContainText(t(locale, 'error.signOutFailed'))
+        await page.keyboard.press('Escape')
+        if (drawer) {
+          await page.keyboard.press('Escape')
+          await expect(navToggle).toHaveAttribute('aria-expanded', 'false')
+        }
+        await expect(toast).toBeInViewport({ ratio: 1 })
+        for (const element of [reload, connection, sendButton, view.composer]) {
+          expect(overlap(await toast.boundingBox(), await element.boundingBox())).toBe(false)
+        }
+        await checkLayout()
+      } finally {
+        await person?.context.setOffline(false)
         await closeAll(person)
       }
     })

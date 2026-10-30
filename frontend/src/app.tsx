@@ -7,6 +7,7 @@ import type { TurnstileClient } from './auth/turnstile.ts'
 import { Brand } from './components/ui/Brand.tsx'
 import { Button } from './components/ui/Button.tsx'
 import { SignedOut } from './components/SignedOut.tsx'
+import { ConnectionBanner, Toasts } from './components/Toasts.tsx'
 import { Workspace, type ConnectRealtime } from './components/Workspace.tsx'
 import { t } from './i18n/index.ts'
 import { useLocale } from './i18n/useLocale.ts'
@@ -28,10 +29,20 @@ type Props = {
 }
 
 export function App(props: Props) {
-  // On every screen: an old app must not keep running unnoticed after a deploy (register.ts).
+  const signedIn = session.value.status === 'signed-in'
   return (
     <>
-      <UpdateBanner />
+      {/*
+        The notices, in one band above the screen (app.css): the update (every screen: an old
+        app must not keep running unnoticed after a deploy, register.ts), the connection and,
+        anchored just under them, the toasts. In the page's flow, so they never cover each
+        other, the header or the composer.
+      */}
+      <div class="top-bands">
+        <UpdateBanner />
+        {signedIn && <ConnectionBanner />}
+        {signedIn && <Toasts />}
+      </div>
       <Screen {...props} />
     </>
   )
