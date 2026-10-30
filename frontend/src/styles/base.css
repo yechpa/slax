@@ -1,0 +1,120 @@
+@layer base {
+  html {
+    font-family: var(--font-mono);
+    font-weight: var(--weight-text);
+    line-height: var(--leading);
+    font-synthesis: none;
+    font-variant-ligatures: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    tab-size: 4;
+    background: var(--color-bg, Canvas);
+    color: var(--color-text, CanvasText);
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+
+  body {
+    font-size: var(--text-base);
+  }
+
+  b,
+  strong,
+  th {
+    font-weight: var(--weight-strong);
+  }
+
+  /* No italics anywhere: the face has none we ship, and fake obliques look cheap. */
+  em,
+  i,
+  cite,
+  dfn {
+    font-style: normal;
+    text-decoration: underline dotted;
+    text-underline-offset: 0.2em;
+  }
+
+  h1 {
+    font-size: var(--text-xl);
+    font-weight: var(--weight-strong);
+    line-height: var(--leading-tight);
+  }
+
+  h2 {
+    font-size: var(--text-md);
+    font-weight: var(--weight-strong);
+    line-height: var(--leading-tight);
+  }
+
+  a {
+    color: var(--color-link);
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.22em;
+  }
+
+  a:hover {
+    text-decoration-thickness: 2px;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: inherit;
+    font-size: inherit;
+  }
+
+  /* Code is left-to-right even in a Hebrew sentence. */
+  code,
+  pre,
+  kbd {
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  kbd {
+    display: inline-block;
+    padding-inline: 0.35em;
+    border: var(--border-width) solid var(--color-control-border);
+    border-block-end-width: 2px;
+    border-radius: var(--radius-1);
+    font-size: 0.85em;
+    line-height: 1.3;
+    color: var(--color-text-dim);
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: var(--color-accent-ink);
+  }
+
+  :focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: var(--focus-offset);
+  }
+
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  ::placeholder {
+    color: var(--color-muted);
+    opacity: 1;
+  }
+
+  /*
+   * Motion is opt-in: components only animate inside
+   * @media (prefers-reduced-motion: no-preference). This is the safety net.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
