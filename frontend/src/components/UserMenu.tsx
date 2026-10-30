@@ -1,7 +1,7 @@
 /**
  * The account menu at the foot of the sidebar: who is signed in, language and theme
- * (applied at once, remembered on this device and saved to the account), administration
- * (administrators only), sign out.
+ * (applied at once, remembered on this device and saved to the account), installing the app
+ * (where the browser can, see pwa/install.ts), administration (administrators only), sign out.
  * A disclosure: the button toggles the panel above it; Escape or a click elsewhere
  * closes it and focus returns to the button.
  */
@@ -12,6 +12,7 @@ import { t } from '../i18n/index.ts'
 import { useLocale } from '../i18n/useLocale.ts'
 import { ADMIN_PATH } from '../router.ts'
 import { endSession } from '../session.ts'
+import { InstallPrompt } from '../pwa/InstallPrompt.tsx'
 import { me } from '../store/session.ts'
 import { navOpen, showToast } from '../store/ui.ts'
 import { Avatar } from './ui/Avatar.tsx'
@@ -84,6 +85,7 @@ export function UserMenu() {
         </p>
         <LocaleSwitcher onChange={(locale) => save({ locale })} />
         <ThemeSwitcher onChange={(theme) => save({ theme })} />
+        <InstallPrompt />
         {user.is_admin && (
           <a
             class="user-menu__admin"

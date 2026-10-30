@@ -270,6 +270,33 @@
     justify-self: start;
   }
 
+  /* Installing the app (pwa/InstallPrompt.tsx), in the account menu. */
+  .install {
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+  }
+
+  .install__title {
+    color: var(--color-muted);
+  }
+
+  .install__hint {
+    color: var(--color-text-dim);
+  }
+
+  .install__action {
+    justify-self: start;
+  }
+
+  .install__steps {
+    display: grid;
+    gap: var(--space-1);
+    padding-inline-start: 1.5em;
+    color: var(--color-text-dim);
+    list-style: decimal;
+  }
+
   .user-menu__toggle {
     display: flex;
     align-items: center;

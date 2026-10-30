@@ -352,5 +352,12 @@
   "admin.action.other": "פעולה אחרת",
 
   "pwa.update.ready": "גרסה חדשה של Slax מוכנה.",
-  "pwa.update.reload": "טעינה מחדש"
+  "pwa.update.reload": "טעינה מחדש",
+  "pwa.install.title": "התקנת האפליקציה",
+  "pwa.install.hint": "כך Slax נפתח בחלון משלו, ממסך הבית או מסרגל היישומים.",
+  "pwa.install.action": "התקנת Slax",
+  "pwa.install.ios.title": "הוספת Slax למסך הבית",
+  "pwa.install.ios.step1": "יש להקיש על כפתור השיתוף (ריבוע עם חץ; בחלק מהגרסאות הוא נמצא תחת הכפתור •••).",
+  "pwa.install.ios.step2": "יש לבחור ״הוספה למסך הבית״.",
+  "pwa.install.ios.step3": "יש להקיש על ״הוספה״: מעכשיו Slax נפתח מהסמל שלו, כמו אפליקציה."
 }

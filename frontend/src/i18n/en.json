@@ -352,5 +352,12 @@
   "admin.action.other": "Other action",
 
   "pwa.update.ready": "A new version of Slax is ready.",
-  "pwa.update.reload": "Reload"
+  "pwa.update.reload": "Reload",
+  "pwa.install.title": "Install the app",
+  "pwa.install.hint": "Slax then opens in its own window, from your home screen or dock.",
+  "pwa.install.action": "Install Slax",
+  "pwa.install.ios.title": "Add Slax to your Home Screen",
+  "pwa.install.ios.step1": "Tap the Share button (a square with an arrow; in some versions it is under the ••• button).",
+  "pwa.install.ios.step2": "Choose “Add to Home Screen”.",
+  "pwa.install.ios.step3": "Tap “Add”: Slax then opens from its icon, like an app."
 }

@@ -352,5 +352,12 @@
   "admin.action.other": "Autre action",
 
   "pwa.update.ready": "Une nouvelle version de Slax est prête.",
-  "pwa.update.reload": "Recharger"
+  "pwa.update.reload": "Recharger",
+  "pwa.install.title": "Installer l'application",
+  "pwa.install.hint": "Slax s'ouvre alors dans sa propre fenêtre, depuis l'écran d'accueil ou le Dock.",
+  "pwa.install.action": "Installer Slax",
+  "pwa.install.ios.title": "Ajouter Slax à l'écran d'accueil",
+  "pwa.install.ios.step1": "Touchez le bouton Partager (un carré avec une flèche ; selon la version, il est sous le bouton •••).",
+  "pwa.install.ios.step2": "Choisissez « Sur l'écran d'accueil ».",
+  "pwa.install.ios.step3": "Touchez « Ajouter » : Slax s'ouvre ensuite depuis son icône, comme une app."
 }
