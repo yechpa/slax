@@ -90,7 +90,7 @@ spec:
   egress: []
 {{- range $component, $port := dict "postgres" 5432 "redis" 6379 }}
 ---
-# {{ $component }}: from the Laravel processes (app, reverb, queue, scheduler, migrations).
+# {{ $component }}: from the Laravel processes (app, queue, scheduler, migrations){{ if eq $component "redis" }} and Reverb{{ end }}.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -108,6 +108,11 @@ spec:
             matchLabels:
               app.kubernetes.io/instance: {{ $ctx.Release.Name }}
               {{- include "slax.backendLabel" $ctx | nindent 14 }}
+        {{- if eq $component "redis" }}
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" "reverb") | nindent 14 }}
+        {{- end }}
       ports:
         - port: {{ $port }}
           protocol: TCP

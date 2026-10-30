@@ -115,13 +115,15 @@ e2e: env deps ## Run the Playwright end-to-end suite on a fresh, separate stack 
 HELM_IMAGE := alpine/helm:3.22.1@sha256:8191701ad1f82ee3695c87211fcbfe6d7b1bb7df92ac1c8de9ccdb0995a6a2c1
 KUBECONFORM_IMAGE := ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
 YQ_IMAGE := mikefarah/yq:4.54.1@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
+# datreeio/CRDs-catalog pinned to a commit (schemas of the cert-manager and Traefik resources).
+CRDS_CATALOG_COMMIT := 3eb90d47aba8d61919d4419dd38301536e32a94b
 CHART := deploy/helm/slax
 CHART_OUT := build/chart
 CHART_RUN = docker run --rm -u $(DOCKER_UID):$(DOCKER_GID) -e HOME=/tmp -v $(CURDIR):/repo -w /repo
 HELM = $(CHART_RUN) $(HELM_IMAGE)
 KUBECONFORM = $(CHART_RUN) $(KUBECONFORM_IMAGE) -strict -summary -kubernetes-version 1.36.0 \
 	-schema-location default \
-	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/$(CRDS_CATALOG_COMMIT)/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
 chart-lint: ## Lint, render and validate the Helm chart (dev and prod values)
 	set -e; mkdir -p $(CHART_OUT); \

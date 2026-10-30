@@ -21,7 +21,6 @@ spec:
     metadata:
       labels:
         {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
-        {{- include "slax.backendLabel" . | nindent 8 }}
       annotations:
         {{- include "slax.configChecksum" . | nindent 8 }}
     spec:
@@ -30,7 +29,11 @@ spec:
         {{- include "slax.podSecurityContext" 10001 | nindent 8 }}
       terminationGracePeriodSeconds: 30
       containers:
-        {{- include "slax.phpContainer" (dict "ctx" . "name" "reverb" "resources" .Values.reverb.resources "args" (list "php" "artisan" "reverb:start" "--host=0.0.0.0" "--port=8080" "--no-interaction")) | nindent 8 }}
+        {{- /* Least privilege: its own keys, Redis (restart signal through the cache) and the
+               alert keys; no APP_KEY, database, S3, Google or Turnstile secret. */}}
+        {{- $keys := list "REVERB_APP_KEY" "REVERB_APP_SECRET" "REDIS_PASSWORD" }}
+        {{- $optional := list "TELEGRAM_BOT_TOKEN" "TELEGRAM_CHAT_ID" }}
+        {{- include "slax.phpContainer" (dict "ctx" . "name" "reverb" "resources" .Values.reverb.resources "secretKeys" $keys "optionalSecretKeys" $optional "args" (list "php" "artisan" "reverb:start" "--host=0.0.0.0" "--port=8080" "--no-interaction")) | nindent 8 }}
           ports:
             - name: ws
               containerPort: 8080

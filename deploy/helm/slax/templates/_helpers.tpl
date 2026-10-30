@@ -31,8 +31,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{/*
-Pods running the Laravel code (app, reverb, queue, scheduler, migrations) carry this label:
-the network policies let only them reach PostgreSQL, Redis and MinIO.
+Pods running the Laravel code with database access (app, queue, scheduler, migrations) carry
+this label: the network policies let only them reach PostgreSQL, Redis and MinIO (Reverb, which
+needs only Redis, is let into Redis by name).
 */}}
 {{- define "slax.backendLabel" -}}
 slax.yechpa.com/backend: "true"
@@ -220,8 +221,9 @@ imagePullSecrets:
 
 {{/*
 A Laravel process of the slax-app image: (dict "ctx" $ "name" "queue" "args" (list ...)
-"resources" {...}). The configuration from the ConfigMap, the secrets by key, writable
-storage/ and /tmp as emptyDir volumes.
+"resources" {...}). The configuration from the ConfigMap, the secrets by key (all of them, or
+only "secretKeys" and "optionalSecretKeys" when given), writable storage/ and /tmp as emptyDir
+volumes.
 */}}
 {{- define "slax.phpContainer" -}}
 - name: {{ .name }}
@@ -235,7 +237,16 @@ storage/ and /tmp as emptyDir volumes.
     - configMapRef:
         name: {{ include "slax.name" (dict "ctx" .ctx "component" "config") }}
   env:
+    {{- if .secretKeys }}
+    {{- range $key := .secretKeys }}
+    {{- include "slax.secretRef" (dict "ctx" $.ctx "key" $key) | nindent 4 }}
+    {{- end }}
+    {{- range $key := .optionalSecretKeys }}
+    {{- include "slax.secretRef" (dict "ctx" $.ctx "key" $key "optional" true) | nindent 4 }}
+    {{- end }}
+    {{- else }}
     {{- include "slax.backendSecretEnv" .ctx | trim | nindent 4 }}
+    {{- end }}
   securityContext:
     {{- include "slax.containerSecurityContext" 10001 | nindent 4 }}
   resources:

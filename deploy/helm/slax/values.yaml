@@ -4,8 +4,8 @@
 #     -f deploy/helm/slax/values-dev.yaml --set image.tag=<git commit SHA>
 #
 # No secret ever goes in these files. Every secret value lives in one Secret created by
-# hand in the namespace (secretName below; keys listed in deploy/dev/BOOTSTRAP.md and
-# deploy/dev/secrets.example.sh). The chart only refers to it by name.
+# hand in the namespace (secretName below; keys listed in deploy/dev/BOOTSTRAP.md, created by
+# deploy/dev/create-secrets.sh). The chart only refers to it by name.
 
 image:
   registry: ghcr.io

@@ -76,6 +76,12 @@ for env in dev prod; do
         "$(yq ea -N 'select(.kind == "Ingress" and .metadata.name == "slax") | [.spec.rules[].http.paths[] | .path + ">" + .backend.service.name] | join(",")' "$file")" \
         "/>slax-app"
 
+    expect "$env: Reverb gets only its own secrets, Redis's and the alert keys" \
+        "$(yq ea -N 'select(.kind == "Deployment" and .metadata.name == "slax-reverb") | [.spec.template.spec.containers[0].env[].valueFrom.secretKeyRef.key] | sort | join(",")' "$file")" \
+        "REDIS_PASSWORD,REVERB_APP_KEY,REVERB_APP_SECRET,TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID"
+    expect "$env: PostgreSQL is reachable from the Laravel processes with database access only" \
+        "$(yq ea -N '[select((.kind == "Deployment" or .kind == "Job") and .spec.template.metadata.labels["slax.yechpa.com/backend"] == "true") | .metadata.name] | sort | join(",")' "$file")" \
+        "slax-app,slax-migrate,slax-queue,slax-scheduler"
     expect "$env: Reverb, queue and scheduler run once, never two side by side" \
         "$(yq ea -N 'select(.kind == "Deployment" and (.metadata.name == "slax-reverb" or .metadata.name == "slax-queue" or .metadata.name == "slax-scheduler")) | .spec.replicas + "/" + .spec.strategy.type' "$file" | sort -u | tr '\n' ' ')" \
         "1/Recreate "
