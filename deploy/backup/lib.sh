@@ -15,9 +15,11 @@ log() {
     printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
 }
 
-# alert TEXT: send "[label] TEXT" to the administrators' Telegram chat. Never fails the caller.
-alert() {
-    local text="[${SLAX_ENV_LABEL}] $1"
+# telegram_send TEXT: send "[label] TEXT" to the administrators' Telegram chat. Returns 0 when
+# it was delivered (or when Telegram is not configured: printed only), 1 when sending failed
+# (the warning names curl's exit code, never the token).
+telegram_send() {
+    local text="[${SLAX_ENV_LABEL}] $1" status
     log "alert: $text"
     if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
         log "Telegram is not configured: alert not sent."
@@ -30,10 +32,17 @@ alert() {
             --data-urlencode "text=${text}" \
             --data-urlencode "disable_web_page_preview=true"; then
         log "alert sent."
+        return 0
     else
-        log "the Telegram alert could not be sent (curl exit $?)."
+        status=$?
     fi
-    return 0
+    log "WARNING: the Telegram alert could not be sent (curl exit ${status})."
+    return 1
+}
+
+# alert TEXT: telegram_send, but never fails the caller.
+alert() {
+    telegram_send "$1" || true
 }
 
 # require NAME...: every named variable must be set and non-empty.

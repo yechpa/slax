@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e chart-lint images web-check backup-test proxy-test aws-test edge-guard-test
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e load chart-lint images web-check backup-test monitor-test proxy-test aws-test edge-guard-test
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
@@ -168,6 +168,10 @@ web-check: ## Build slax-web and check its routes and security headers (docker/w
 backup-test: ## Build slax-backup and test pg-backup.sh / restore-check.sh (PostgreSQL, MinIO, fake Telegram)
 	docker build -q -f docker/backup/Dockerfile -t slax-backup:local . >/dev/null
 	deploy/backup/test/backup-test.sh slax-backup:local
+
+monitor-test: ## Build slax-backup and test the uptime monitor (deploy/monitoring/uptime.sh: fake target, PostgreSQL, Redis, fake Telegram)
+	docker build -q -f docker/backup/Dockerfile -t slax-backup:local . >/dev/null
+	deploy/monitoring/test/monitor-test.sh slax-backup:local
 
 proxy-test: ## Build slax-web and test the production front path (Caddy -> nginx): HSTS, no spoofed client IP
 	docker build -q -f docker/web/Dockerfile -t slax-web:local . >/dev/null

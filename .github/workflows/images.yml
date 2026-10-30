@@ -1,5 +1,5 @@
 # Production images: ghcr.io/yechpa/slax-{app,web,scanner,backup} (backup: the production
-# database backup CronJobs, deploy/backup/).
+# database backup CronJobs, deploy/backup/, and the uptime monitor, deploy/monitoring/).
 #
 # Pull request: build and scan only (no registry login, nothing pushed, read-only token).
 #
@@ -32,6 +32,7 @@ on:
       - services/scanner/**
       - docker/**
       - deploy/backup/*.sh
+      - deploy/monitoring/*.sh
       - .github/workflows/images.yml
 
 permissions:
