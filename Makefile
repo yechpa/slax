@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e load chart-lint images web-check backup-test monitor-test proxy-test aws-test edge-guard-test
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e load load-smoke chart-lint images web-check backup-test monitor-test proxy-test aws-test edge-guard-test
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
@@ -93,7 +93,7 @@ screenshots: env deps ## Capture the design-system kitchen sink (2 themes x 3 la
 # configured from e2e/stack.env alone, APP_ENV=e2e. See docker-compose.e2e.yml.
 DCE := $(DC) -p slax-e2e --env-file e2e/stack.env -f docker-compose.yml -f docker-compose.e2e.yml
 
-e2e: env deps ## Run the Playwright end-to-end suite on a fresh, separate stack (APP_ENV=e2e), then remove it
+e2e: env deps ## Run the Playwright end-to-end suite and a load smoke on a fresh, separate stack (APP_ENV=e2e), then remove it
 	set -e; \
 	export APP_KEY="base64:$$(openssl rand -base64 32)"; \
 	trap '$(DCE) --profile e2e down -v --remove-orphans' EXIT; \
@@ -107,8 +107,16 @@ e2e: env deps ## Run the Playwright end-to-end suite on a fresh, separate stack 
 	$(DCE) exec -T app php artisan migrate --force --no-interaction --quiet; \
 	$(DCE) exec -T app php artisan db:seed --class=DefaultWorkspaceSeeder --force --no-interaction --quiet; \
 	echo '==> Playwright'; \
-	mkdir -p docs/design/e2e; \
-	$(DCE) run --rm -T playwright
+	mkdir -p docs/design/e2e build/load; \
+	$(DCE) run --rm -T playwright; \
+	echo '==> Load smoke (5 WebSocket clients, 2 messages/s for 10 s: no loss, no error)'; \
+	LOAD_CLIENTS=5 LOAD_SENDERS=5 LOAD_RATE=2 LOAD_SECONDS=10 $(DCE) --profile load run --rm -T load
+
+load: env deps ## Light load test on a fresh e2e stack: 50 WebSocket clients, 10 messages/s for 2 min -> docs/load-test-results.md
+	e2e/load/run.sh full
+
+load-smoke: env deps ## The load test in small (5 clients, 10 s) -> build/load/load-test-results.md
+	e2e/load/run.sh smoke
 
 # Helm chart checks (deploy/helm/slax), all in pinned containers: helm lint, the dev and prod
 # renders validated against the Kubernetes 1.36 schemas (kubeconform; cert-manager and Traefik

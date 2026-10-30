@@ -82,3 +82,22 @@ services:
       # Reference screenshots for review (rtl.spec.ts).
       - ./docs/design/e2e:/repo/docs/design/e2e
     command: ["sh", "-c", "npm ci --no-audit --no-fund --silent && npx tsc --noEmit && npx playwright test"]
+
+  # The light load test (make load, e2e/load/): simulated clients in Node (its own fetch and
+  # WebSocket, no dependency), on the web container's network like Playwright.
+  load:
+    profiles: ["load"]
+    image: node:24.22.2-alpine3.24@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
+    network_mode: "service:web"
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    init: true
+    environment:
+      LOAD_CLIENTS: "${LOAD_CLIENTS:-50}"
+      LOAD_SENDERS: "${LOAD_SENDERS:-25}"
+      LOAD_RATE: "${LOAD_RATE:-10}"
+      LOAD_SECONDS: "${LOAD_SECONDS:-120}"
+      LOAD_OUT: /out/results.json
+    volumes:
+      - ./e2e/load:/load:ro
+      - ./build/load:/out
+    command: ["node", "/load/load.mjs"]
