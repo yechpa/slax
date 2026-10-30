@@ -14,6 +14,9 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * (`last_read_message_id`, `unread_count`, see ReadState) is computed in bulk by the
  * list (`withReadState()`), otherwise for this channel alone.
  *
+ * Banned accounts are left out of `members` and `member_count`, as from the member list and
+ * the directory: a conversation shows them again once the ban is lifted.
+ *
  * @mixin Channel
  */
 class ChannelResource extends JsonResource
@@ -55,12 +58,12 @@ class ChannelResource extends JsonResource
             // Locked by an administrator: members read, only administrators post.
             'locked' => $this->isLocked(),
             'is_member' => $this->isMember ?? (bool) $this->members_exists,
-            'member_count' => (int) ($this->members_count ?? $this->members()->count()),
+            'member_count' => (int) ($this->members_count ?? $this->members()->whereNull('users.banned_at')->count()),
             'last_read_message_id' => $readState['last_read_message_id'],
             // The true number: the client caps what it displays.
             'unread_count' => $readState['unread_count'],
             // Direct conversations have no name: the client titles them after their members.
-            'members' => $this->when($this->isDirect(), fn () => $this->members->map(fn ($member) => [
+            'members' => $this->when($this->isDirect(), fn () => $this->members->whereNull('banned_at')->values()->map(fn ($member) => [
                 'id' => $member->id,
                 'name' => $member->name,
                 'avatar_url' => $member->avatar_url,

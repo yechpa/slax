@@ -38,7 +38,8 @@ class ChannelController extends Controller
                 ->where('kind', '!=', Channel::KIND_DM)
                 ->orWhereDoesntHave('members', fn ($members) => $members->whereNotNull('users.banned_at')))
             ->withExists(['members' => fn ($members) => $members->whereKey($user->id)])
-            ->withCount('members')
+            // Banned accounts are left out of every member list and count (ChannelResource).
+            ->withCount(['members' => fn ($members) => $members->whereNull('users.banned_at')])
             ->orderBy('name')
             ->orderBy('id')
             ->get();

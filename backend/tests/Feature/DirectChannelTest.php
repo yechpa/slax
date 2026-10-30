@@ -203,6 +203,28 @@ test('dm and group appear in the callers channel list but not in others', functi
     asUser($bob)->getJson("/api/v1/channels/{$dm}")->assertOk()->assertJsonCount(2, 'members');
 });
 
+test('a banned participant is left out of a conversation, like everywhere else, until the ban is lifted', function () {
+    [$alice, $bob, $carol] = User::factory()->count(3)->create();
+    $group = openDm($alice, [$bob->id, $carol->id])->assertCreated()->json('id');
+    $carol->forceFill(['banned_at' => now()])->save();
+
+    $row = collect(asUser($alice)->getJson('/api/v1/channels')->assertOk()->json())->firstWhere('id', $group);
+    expect(array_column($row['members'], 'id'))->toBe([$alice->id, $bob->id])
+        ->and($row['member_count'])->toBe(2);
+    $shown = asUser($bob)->getJson("/api/v1/channels/{$group}")->assertOk();
+    expect(array_column($shown->json('members'), 'id'))->toBe([$alice->id, $bob->id])
+        ->and($shown->json('member_count'))->toBe(2);
+    // As the member list says (it always left banned accounts out).
+    expect(asUser($alice)->getJson("/api/v1/channels/{$group}/members")->json('*.id'))->toEqualCanonicalizing([$alice->id, $bob->id]);
+    expect($shown->getContent())->not->toContain($carol->name);
+
+    // Ban lifted: back in the conversation.
+    $carol->forceFill(['banned_at' => null])->save();
+    $row = collect(asUser($alice)->getJson('/api/v1/channels')->json())->firstWhere('id', $group);
+    expect(array_column($row['members'], 'id'))->toBe([$alice->id, $bob->id, $carol->id])
+        ->and($row['member_count'])->toBe(3);
+});
+
 test('losing a creation race returns the winners channel', function () {
     [$alice, $bob] = User::factory()->count(2)->create();
     $winner = null;
