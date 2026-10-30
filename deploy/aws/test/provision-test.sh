@@ -146,6 +146,10 @@ out="$(provision -i -- --yes 2>&1)" && status=0 || status=$?
 check "--yes without TS_AUTHKEY refuses to create the instance" test "$status" != 0
 check "... before any change" test "$(slax_ids | tr '\n' ' ')" = "instances= sgs= eips= buckets= roles= "
 
+out="$(provision -e AWS_REGION=eu-west-1 -e TS_AUTHKEY="$ts_key" -- --yes 2>&1)" && status=0 || status=$?
+check "another region than eu-central-1 stops (the chart names eu-central-1)" sh -c "test $status != 0 && printf '%s' \"\$1\" | grep -q 'allow-region-override'" _ "$out"
+check "... before any change" test -z "$(writes)"
+
 echo "== first run"
 out="$(provision -e TS_AUTHKEY="$ts_key" -- --yes 2>&1)" && status=0 || status=$?
 check "provision.sh --yes succeeds" test "$status" = 0 || printf '%s\n' "$out" | tail -20
@@ -169,11 +173,15 @@ check "instance: termination protection on" test "$(aws ec2 describe-instance-at
 check "instance: tagged Project=slax, Name=slax-prod" test "$(aws ec2 describe-instances --instance-ids "$instance" --output text --query "Reservations[0].Instances[0].Tags[?Key=='Project' || Key=='Name'] | sort_by(@, &Key)[].Value | join(',', @)")" = "slax-prod,slax"
 vol="$(aws ec2 describe-volumes --filters "Name=attachment.instance-id,Values=$instance" --output text --query 'Volumes[0].[VolumeType, Size, Encrypted, Tags[?Key==`Project`].Value | [0]]')"
 check "root volume: gp3, 30 GB, encrypted, tagged" has "$vol" '^gp3\s+30\s+True\s+slax$'
-aws ec2 describe-instance-attribute --instance-id "$instance" --attribute userData --query UserData.Value --output text | base64 -d > "$dir/user-data"
+aws ec2 describe-instance-attribute --instance-id "$instance" --attribute userData --query UserData.Value --output text | base64 -d > "$dir/user-data.raw"
+# Over 16 KB, provision.sh sends it gzip-compressed (cloud-init reads both).
+check "user data: within EC2's 16 KB limit" test "$(stat -c %s "$dir/user-data.raw")" -le 16384
+gunzip -c "$dir/user-data.raw" > "$dir/user-data" 2>/dev/null || cp "$dir/user-data.raw" "$dir/user-data"
 check "user data: cloud-config with the key and the Caddyfile filled in, no placeholder left" \
     sh -c "head -1 '$dir/user-data' | grep -qx '#cloud-config' && grep -qF '$ts_key' '$dir/user-data' && ! grep -q '__SLAX_' '$dir/user-data'"
 caddy_b64="$(base64 -w0 < "$repo/deploy/aws/Caddyfile")"
 check "user data: the Caddyfile is the repository's" grep -qF "$caddy_b64" "$dir/user-data"
+check "user data: the edge guard is the repository's" grep -qF "$(base64 -w0 < "$repo/deploy/aws/slax-edge-guard.sh")" "$dir/user-data"
 
 rules="$(aws ec2 describe-security-groups --group-ids "$sg" --output text --query \
     'SecurityGroups[0].IpPermissions[].[IpProtocol, FromPort, ToPort, join(`,`, IpRanges[].CidrIp), join(`,`, Ipv6Ranges[].CidrIpv6)]' | sort)"
@@ -182,6 +190,16 @@ check "security group: inbound TCP 80 and 443 from anywhere, nothing else" \
 check "Elastic IP: tagged and on the instance" test "$(aws ec2 describe-addresses --allocation-ids "$eip" --output text --query 'Addresses[0].[InstanceId, Tags[?Key==`Project`].Value | [0]]' | tr '\t' ' ')" = "$instance slax"
 
 policy="$(aws iam get-role-policy --role-name slax-prod-instance --policy-name slax-prod-s3 --output json --query PolicyDocument)"
+actions="$(printf '%s' "$policy" | python3 -c 'import json, sys
+for st in sorted(json.load(sys.stdin)["Statement"], key=lambda st: st["Sid"]):
+    actions = st["Action"] if isinstance(st["Action"], list) else [st["Action"]]
+    print(st["Sid"] + "=" + ",".join(sorted(actions)) + ("" if st["Effect"] == "Allow" else " " + st["Effect"]))')"
+expected_actions="BackupsList=s3:ListBucket
+BackupsLocation=s3:GetBucketLocation
+BackupsObjectsNoDelete=s3:AbortMultipartUpload,s3:GetObject,s3:ListMultipartUploadParts,s3:PutObject
+FilesBucket=s3:GetBucketLocation,s3:ListBucket,s3:ListBucketMultipartUploads
+FilesObjects=s3:AbortMultipartUpload,s3:DeleteObject,s3:GetObject,s3:ListMultipartUploadParts,s3:PutObject,s3:PutObjectAcl"
+check "role policy: exactly the intended actions per statement (PutObjectAcl on files objects only)" test "$actions" = "$expected_actions"
 check "role policy: only the two buckets" test "$(printf '%s' "$policy" | grep -oE 'arn:aws:s3:::[a-z0-9-]+' | sort -u | tr '\n' ' ')" = "arn:aws:s3:::$backups arn:aws:s3:::$files "
 check "role policy: no delete on backups, no wildcard action" sh -c "! printf '%s' '$policy' | tr -d ' \n' | grep -qE 'BackupsObjectsNoDelete[^}]*DeleteObject|\"s3:\\*\"|\"\\*\"'"
 check "role and instance profile: tagged, profile holds the role" \

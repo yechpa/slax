@@ -27,13 +27,20 @@
 #     a manual step (docs/runbook.md, "Teardown") on slax-tagged ids only;
 #   - in --dry-run every mutating call is refused by construction (aws_write).
 #
+# Options: --dry-run, --yes, --allow-region-override.
+#
 # Environment:
-#   AWS_REGION          eu-central-1 (Frankfurt)
+#   AWS_REGION          eu-central-1 (Frankfurt). Another region stops the script unless
+#                       SLAX_ALLOW_REGION_OVERRIDE=1 (or --allow-region-override): the chart's
+#                       values-prod.yaml (s3.region, hence the CSP) names eu-central-1.
 #   TS_AUTHKEY          Tailscale auth key, needed only to create the instance: single use,
 #                       pre-approved, tag:slax-prod, expiring in 1 hour (it stays readable in
 #                       the instance's user data). Never echoed.
 #   SLAX_BUCKET_SUFFIX  bucket name suffix (bucket names are global); default: 10 hex
-#                       characters of sha256("slax:" + account id), stable for the account
+#                       characters of sha256("slax:" + account id): stable for the account, so
+#                       a re-run finds the same buckets. It is not meant to hide the account
+#                       id (AWS does not treat account ids as secret, and a 12-digit id can be
+#                       recovered from the hash); the names appear in presigned URLs anyway.
 #   SLAX_INSTANCE_TYPE  t4g.small        SLAX_ROOT_GB  30
 #   SLAX_AMI_PARAMETER  Canonical's SSM parameter for Ubuntu 24.04 arm64 (tests use their own)
 #   AWS_ENDPOINT_URL    (tests only) a local AWS emulator
@@ -59,6 +66,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --dry-run) dry_run=1 ;;
         --yes) assume_yes=1 ;;
+        --allow-region-override) SLAX_ALLOW_REGION_OVERRIDE=1 ;;
         -h | --help) usage; exit 0 ;;
         *) echo "provision: unknown argument: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -103,7 +111,10 @@ none() { [ -z "$1" ] || [ "$1" = None ] || [ "$1" = null ]; }
 [[ "$root_gb" =~ ^[0-9]+$ ]] && [ "$root_gb" -ge 20 ] && [ "$root_gb" -le 200 ] || die "SLAX_ROOT_GB must be 20 to 200"
 command -v aws >/dev/null || die "the AWS CLI v2 is required (aws)"
 aws --version 2>&1 | grep -q '^aws-cli/2\.' || die "the AWS CLI must be version 2 (aws --version: $(aws --version 2>&1))"
-[ "$region" = eu-central-1 ] || say "Note: region $region, not the planned eu-central-1."
+if [ "$region" != eu-central-1 ]; then
+    [ "${SLAX_ALLOW_REGION_OVERRIDE:-0}" = 1 ] || die "region $region is not eu-central-1, which values-prod.yaml (s3.region, the CSP's files host) assumes. Change the chart first, then re-run with --allow-region-override."
+    say "Note: region $region (override): set s3.region: $region in values-prod.yaml before deploying."
+fi
 
 account="$(aws_read sts get-caller-identity --query Account --output text)" || die "no AWS credentials (aws sso login / aws configure)"
 [[ "$account" =~ ^[0-9]{12}$ ]] || die "unexpected account id from STS"
@@ -316,7 +327,7 @@ aws_write iam put-role-policy --role-name "$ROLE" --policy-name slax-prod-s3 --p
      \"Action\": [\"s3:ListBucket\", \"s3:ListBucketMultipartUploads\", \"s3:GetBucketLocation\"],
      \"Resource\": \"arn:aws:s3:::$files_bucket\"},
     {\"Sid\": \"FilesObjects\", \"Effect\": \"Allow\",
-     \"Action\": [\"s3:GetObject\", \"s3:PutObject\", \"s3:DeleteObject\", \"s3:AbortMultipartUpload\", \"s3:ListMultipartUploadParts\"],
+     \"Action\": [\"s3:GetObject\", \"s3:PutObject\", \"s3:PutObjectAcl\", \"s3:DeleteObject\", \"s3:AbortMultipartUpload\", \"s3:ListMultipartUploadParts\"],
      \"Resource\": \"arn:aws:s3:::$files_bucket/*\"},
     {\"Sid\": \"BackupsLocation\", \"Effect\": \"Allow\",
      \"Action\": [\"s3:GetBucketLocation\"],
@@ -397,16 +408,27 @@ if [ "$need_instance" = 1 ]; then
     none "$subnet" && die "the default VPC has no default subnet"
 
     # User data: cloud-init.yaml with the auth key and the Caddyfile, in a private file.
-    [ -f "$here/cloud-init.yaml" ] && [ -f "$here/Caddyfile" ] || die "cloud-init.yaml and Caddyfile must be next to this script"
+    for file in cloud-init.yaml Caddyfile slax-edge-guard.sh; do
+        [ -f "$here/$file" ] || die "$file must be next to this script"
+    done
     user_data="$(cat "$here/cloud-init.yaml")"
     caddyfile_b64="$(base64 -w0 < "$here/Caddyfile")"
     user_data="${user_data//__SLAX_TS_AUTHKEY__/$TS_AUTHKEY}"
     user_data="${user_data//__SLAX_CADDYFILE_B64__/$caddyfile_b64}"
+    guard_b64="$(base64 -w0 < "$here/slax-edge-guard.sh")"
+    user_data="${user_data//__SLAX_EDGE_GUARD_B64__/$guard_b64}"
     [[ "$user_data" != *__SLAX_* ]] || die "cloud-init.yaml has a placeholder this script does not fill"
     printf '%s\n' "$user_data" > "$tmp/user-data"
     user_data_arg="file://$tmp/user-data"
+    # EC2 takes at most 16 KB of user data; cloud-init reads gzip-compressed user data too.
     if [ "$(stat -c %s "$tmp/user-data")" -gt 16000 ]; then
-        gzip -9 -n -c "$tmp/user-data" > "$tmp/user-data.gz"
+        if command -v gzip >/dev/null; then
+            gzip -9 -n -c "$tmp/user-data" > "$tmp/user-data.gz"
+        else
+            python3 -c 'import gzip, sys; sys.stdout.buffer.write(gzip.compress(sys.stdin.buffer.read(), 9, mtime=0))' \
+                < "$tmp/user-data" > "$tmp/user-data.gz"
+        fi
+        [ "$(stat -c %s "$tmp/user-data.gz")" -le 16000 ] || die "the user data is too large even compressed"
         user_data_arg="fileb://$tmp/user-data.gz"
     fi
 

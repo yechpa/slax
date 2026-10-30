@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e chart-lint images web-check backup-test proxy-test aws-test
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e chart-lint images web-check backup-test proxy-test aws-test edge-guard-test
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
@@ -175,3 +175,6 @@ proxy-test: ## Build slax-web and test the production front path (Caddy -> nginx
 
 aws-test: ## Run deploy/aws/provision.sh against a local AWS emulator (moto): idempotent, tagged, never touches others
 	deploy/aws/test/provision-test.sh
+
+edge-guard-test: ## Test deploy/aws/slax-edge-guard.sh (k3s ports dropped on the public interface, 80/443 kept)
+	deploy/aws/test/edge-guard-test.sh

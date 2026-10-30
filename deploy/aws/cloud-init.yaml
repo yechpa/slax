@@ -1,25 +1,38 @@
 #cloud-config
 # Slax production node: Ubuntu 24.04 LTS arm64 on EC2. The user data of the instance that
-# deploy/aws/provision.sh creates; that script replaces the two placeholders below (names in
+# deploy/aws/provision.sh creates; that script replaces the placeholders below (names in
 # double underscores) at run time, in memory, never in this file:
-#   SLAX_TS_AUTHKEY     the Tailscale auth key (TS_AUTHKEY)
-#   SLAX_CADDYFILE_B64  deploy/aws/Caddyfile, base64
+#   SLAX_TS_AUTHKEY        the Tailscale auth key (TS_AUTHKEY)
+#   SLAX_CADDYFILE_B64     deploy/aws/Caddyfile, base64
+#   SLAX_EDGE_GUARD_B64    deploy/aws/slax-edge-guard.sh, base64
 #
-# User data stays readable by anyone allowed ec2:DescribeInstanceAttribute for the instance's
-# whole life, so the auth key must be worthless after boot: single use, pre-approved, tagged
-# tag:slax-prod, expiring within an hour (docs/runbook.md). It is not "ephemeral" in
-# Tailscale's sense: an ephemeral node is removed from the tailnet after being offline, and a
-# server must survive a reboot. On the machine it only lives in /run (memory) until
-# `tailscale up` has used it.
+# The auth key stays readable for the instance's whole life: through the EC2 API (anyone
+# allowed ec2:DescribeInstanceAttribute), through the instance metadata service (the node, and
+# the pods allowed to reach it), and on disk in cloud-init's copy of the user data
+# (/var/lib/cloud/instance/user-data.txt, root only). So it must be worthless after boot:
+# single use (spent once the node has joined), pre-approved, tagged tag:slax-prod, expiring
+# within the hour (docs/runbook.md §3.2). A spent key grants nothing. It is not "ephemeral"
+# in Tailscale's sense: an ephemeral node is removed from the tailnet after being offline,
+# and a server must survive a reboot. The bootstrap's own copy in /run is shredded once used.
+#
+# A failed first boot is re-run, once the cause is fixed, with
+#   tailscale ssh ubuntu@slax-prod -- sudo bash /usr/local/sbin/slax-bootstrap.sh
+# (every step is safe to repeat; `tailscale up` is skipped once the node is on the tailnet).
+# If Tailscale itself never came up, use the break-glass shell (docs/runbook.md §5).
 #
 # Result: Tailscale (SSH through the tailnet only; sshd disabled, port 22 closed anyway), k3s
-# without Traefik and ServiceLB, Caddy in front (TLS, HSTS, client address), a 2 GiB swap
+# without Traefik and ServiceLB, behind a host firewall rule for its ports on the public
+# interface (slax-edge-guard), Caddy in front (TLS, HSTS, client address), a 2 GiB swap
 # file, unattended security upgrades with a night reboot when needed, kernel and network
 # hardening, bounded journald, a weekly prune of unused images. Progress:
 # /var/log/slax-bootstrap.log; done when /var/lib/slax/bootstrap-done exists.
 
 hostname: slax-prod
 timezone: UTC
+# Package downloads retry (cloud-init's own installs; the bootstrap passes the same option).
+apt:
+  conf: |
+    Acquire::Retries "5";
 package_update: true
 package_upgrade: true
 package_reboot_if_required: false
@@ -47,6 +60,41 @@ write_files:
     owner: root:root
     encoding: b64
     content: "__SLAX_CADDYFILE_B64__"
+
+  # Drops 22/6443/10250/10256 (TCP) and 8472 (UDP) arriving on the public interface, should
+  # the security group ever be opened by mistake. k3s requires it (drop-in below).
+  - path: /usr/local/sbin/slax-edge-guard
+    permissions: "0755"
+    owner: root:root
+    encoding: b64
+    content: "__SLAX_EDGE_GUARD_B64__"
+
+  - path: /etc/systemd/system/slax-edge-guard.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Drop k3s and SSH ports arriving on the public interface (slax-edge-guard)
+      Wants=network-online.target
+      After=network-online.target
+      Before=k3s.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/slax-edge-guard start
+      ExecReload=/usr/local/sbin/slax-edge-guard start
+      ExecStop=/usr/local/sbin/slax-edge-guard stop
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # k3s never runs unguarded: it requires the guard (stopping the guard stops k3s).
+  - path: /etc/systemd/system/k3s.service.d/edge-guard.conf
+    permissions: "0644"
+    content: |
+      [Unit]
+      Requires=slax-edge-guard.service
+      After=slax-edge-guard.service
 
   - path: /etc/sysctl.d/90-slax.conf
     permissions: "0644"
@@ -175,19 +223,26 @@ write_files:
       arch="$(dpkg --print-architecture)"
       work="$(mktemp -d)"
       trap 'rm -rf "$work"' EXIT
+      # Every download retries (a network hiccup at first boot must not leave a half node).
+      fetch() { curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 20 "$@"; }
+      apt_get() { DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 -q "$@"; }
 
       sysctl --system >/dev/null
       systemctl restart systemd-journald
 
       echo "== Tailscale"
-      curl -fsSL -o /usr/share/keyrings/tailscale-archive-keyring.gpg https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
+      fetch -o /usr/share/keyrings/tailscale-archive-keyring.gpg https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
       echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main" \
         > /etc/apt/sources.list.d/tailscale.list
-      apt-get update -q
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -q tailscale
-      tailscale up --auth-key=file:/run/slax-bootstrap/ts-authkey --hostname=slax-prod \
-        --advertise-tags=tag:slax-prod --ssh
-      shred -u /run/slax-bootstrap/ts-authkey
+      apt_get update
+      apt_get install -y tailscale
+      if tailscale status >/dev/null 2>&1; then
+        echo "already on the tailnet: tailscale up skipped"
+      else
+        tailscale up --auth-key=file:/run/slax-bootstrap/ts-authkey --hostname=slax-prod \
+          --advertise-tags=tag:slax-prod --ssh
+      fi
+      [ ! -e /run/slax-bootstrap/ts-authkey ] || shred -u /run/slax-bootstrap/ts-authkey
       tailscale set --auto-update=true
       ts_ip="$(tailscale ip -4)"
       ts_name="$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')"
@@ -197,14 +252,21 @@ write_files:
       systemctl disable --now ssh.socket ssh.service || true
       systemctl mask ssh.socket ssh.service
 
+      echo "== host firewall for k3s's ports on the public interface"
+      systemctl daemon-reload
+      systemctl enable --now slax-edge-guard.service
+      /usr/local/sbin/slax-edge-guard status
+
       echo "== k3s $K3S_VERSION"
-      {
-        echo "tls-san:"
-        echo "  - slax-prod"
-        echo "  - $ts_ip"
-        [ -z "$ts_name" ] || [ "$ts_name" = null ] || echo "  - $ts_name"
-      } >> /etc/rancher/k3s/config.yaml
-      curl -fsSL -o "$work/k3s-install.sh" "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION/+/%2B}/install.sh"
+      if ! grep -q '^tls-san:' /etc/rancher/k3s/config.yaml; then
+        {
+          echo "tls-san:"
+          echo "  - slax-prod"
+          echo "  - $ts_ip"
+          [ -z "$ts_name" ] || [ "$ts_name" = null ] || echo "  - $ts_name"
+        } >> /etc/rancher/k3s/config.yaml
+      fi
+      fetch -o "$work/k3s-install.sh" "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION/+/%2B}/install.sh"
       echo "$K3S_INSTALL_SHA256  $work/k3s-install.sh" | sha256sum -c -
       INSTALL_K3S_VERSION="$K3S_VERSION" sh "$work/k3s-install.sh"
       for _ in $(seq 1 60); do
@@ -215,17 +277,16 @@ write_files:
 
       echo "== Caddy $CADDY_VERSION"
       sha_var="CADDY_SHA512_$arch"
-      curl -fsSL -o "$work/caddy.deb" \
+      fetch -o "$work/caddy.deb" \
         "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_${arch}.deb"
       echo "${!sha_var}  $work/caddy.deb" | sha512sum -c -
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold "$work/caddy.deb"
+      apt_get install -y -o Dpkg::Options::=--force-confold "$work/caddy.deb"
       install -m 0644 /etc/slax/Caddyfile /etc/caddy/Caddyfile
       caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       systemctl enable caddy
       systemctl restart caddy
 
       echo "== timers"
-      systemctl daemon-reload
       systemctl enable --now k3s-image-prune.timer
 
       mkdir -p /var/lib/slax
