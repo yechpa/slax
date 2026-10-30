@@ -1,44 +1,53 @@
 /**
  * One channel or conversation: header, message log and composer (or, for a public
- * channel the user has not joined, a read-only notice with a Join button).
+ * channel the user has not joined, a read-only notice with a Join button), and its
+ * thread panel when one is open. Files dropped on it go to its composer.
  */
 import type { Ref } from 'preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { isApiError } from '../api/client.ts'
 import type { Channel } from '../api/types.ts'
 import { plural, t } from '../i18n/index.ts'
 import { writePref } from '../lib/prefs.ts'
+import { channelPath, navigate } from '../router.ts'
 import { isDirect } from '../store/channels.ts'
 import { channelKey, timeline } from '../store/messages.ts'
 import { me } from '../store/session.ts'
-import { drafts, showToast } from '../store/ui.ts'
+import { showToast } from '../store/ui.ts'
 import { Button } from './ui/Button.tsx'
 import { ChannelName } from './ui/ChannelName.tsx'
-import { Composer } from './ui/Composer.tsx'
-import { charCount, trimBody } from '../lib/text.ts'
-import { TypingIndicator } from './ui/TypingIndicator.tsx'
+import { ChannelDetails } from './ChannelDetails.tsx'
 import { channelLabel } from './channelNames.ts'
+import { ChatComposer, addFiles } from './ChatComposer.tsx'
 import { useChat } from './chatContext.ts'
+import { DropZone } from './DropZone.tsx'
 import { MessageList } from './MessageList.tsx'
 import { NavToggle } from './NavToggle.tsx'
+import { ThreadPanel } from './ThreadPanel.tsx'
+import { Typing } from './Typing.tsx'
 
-export const MAX_BODY = 4000
 export const LAST_CHANNEL_KEY = 'slax.lastChannel'
 
 type Props = {
   channel: Channel
+  /** The thread open beside it (/c/:id/t/:messageId). */
+  threadId: number | null
+  /** The thread covers the conversation (narrow screens): everything else is inert. */
+  threadModal: boolean
   navOpen: boolean
   onToggleNav: () => void
   toggleRef: Ref<HTMLButtonElement>
 }
 
-export function ChannelView({ channel, navOpen, onToggleNav, toggleRef }: Props) {
+export function ChannelView({ channel, threadId, threadModal, navOpen, onToggleNav, toggleRef }: Props) {
   const chat = useChat()
   const meId = me.value?.id ?? null
   const label = channelLabel(channel, meId)
   const messages = timeline(channelKey(channel.id)).value
+  const [details, setDetails] = useState(false)
   // The "new messages" rule stays where the reading stopped when the channel was opened.
   const [unreadAfter, setUnreadAfter] = useState(() => (channel.unread_count > 0 ? (channel.last_read_message_id ?? 0) : null))
+  const behind = threadModal || undefined
 
   useEffect(() => {
     chat.openChannel(channel.id)
@@ -50,33 +59,16 @@ export function ChannelView({ channel, navOpen, onToggleNav, toggleRef }: Props)
     document.title = `${label.replace(/[⁨⁩]/g, '')} · slax`
   }, [label])
 
-  return (
+  const main = (
     <>
-      <header class="channel-header">
-        <NavToggle open={navOpen} onToggle={onToggleNav} buttonRef={toggleRef} />
-        <div class="channel-header__title">
-          <h2 class="channel-header__name" id="channel-title">
-            {isDirect(channel) ? <bdi>{label}</bdi> : <ChannelName name={channel.name ?? ''} />}
-          </h2>
-          <span class="channel-header__meta">
-            {channel.kind === 'private' && <>{t('channel.private')} · </>}
-            {plural('channel.members', channel.member_count)}
-          </span>
-          {channel.topic && (
-            // Aligned with the interface; the topic itself is isolated and takes its own direction.
-            <span class="channel-header__topic" title={channel.topic}>
-              <bdi>{channel.topic}</bdi>
-            </span>
-          )}
-        </div>
-      </header>
-
       <MessageList
         label={label}
         direct={isDirect(channel)}
         timeline={messages}
         meId={meId}
         unreadAfter={unreadAfter}
+        place={{ channelId: channel.id, canPost: channel.is_member, inThread: false }}
+        inert={behind}
         onLoadOlder={() => void chat.loadOlder(channel.id)}
         onRetryOlder={() => void chat.loadOlder(channel.id, { force: true })}
         onRetryLoad={() => void chat.loadLatest(channel.id)}
@@ -86,9 +78,9 @@ export function ChannelView({ channel, navOpen, onToggleNav, toggleRef }: Props)
         onAtBottom={(stillReadable) => chat.noteReadable(channel.id, stillReadable)}
       />
 
-      <footer class="shell__footer">
-        {/* Keeps its line (typing indicators arrive with presence), so the composer never jumps. */}
-        <TypingIndicator names={[]} />
+      <footer class="shell__footer" inert={behind}>
+        {/* Keeps its line, so the composer never jumps. */}
+        <Typing channelId={channel.id} />
         {channel.is_member ? (
           <ChatComposer channel={channel} label={label} onSent={() => setUnreadAfter(null)} />
         ) : (
@@ -97,43 +89,36 @@ export function ChannelView({ channel, navOpen, onToggleNav, toggleRef }: Props)
       </footer>
     </>
   )
-}
-
-function ChatComposer({ channel, label, onSent }: { channel: Channel; label: string; onSent: () => void }) {
-  const chat = useChat()
-  const [value, setValue] = useState(() => drafts.get(channel.id) ?? '')
-  const input = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    // Ready to type on a desktop; on a touch screen, opening the keyboard uninvited is rude.
-    if (globalThis.matchMedia?.('(pointer: fine)').matches) input.current?.focus({ preventScroll: true })
-  }, [channel.id])
-
-  const onInput = (next: string) => {
-    setValue(next)
-    if (next) drafts.set(channel.id, next)
-    else drafts.delete(channel.id)
-  }
-
-  const send = () => {
-    const body = trimBody(value)
-    if (body === '' || charCount(body) > MAX_BODY) return
-    chat.send(channel.id, body)
-    onInput('')
-    onSent()
-    input.current?.focus()
-  }
 
   return (
-    <Composer
-      channel={label}
-      placeholder={isDirect(channel) ? t('composer.placeholderDirect', { name: label }) : undefined}
-      value={value}
-      onInput={onInput}
-      onSend={send}
-      maxLength={MAX_BODY}
-      inputRef={input}
-    />
+    <>
+      <header class="channel-header" inert={behind}>
+        <NavToggle open={navOpen} onToggle={onToggleNav} buttonRef={toggleRef} />
+        <div class="channel-header__title">
+          <h2 class="channel-header__name" id="channel-title">
+            {isDirect(channel) ? <bdi>{label}</bdi> : <ChannelName name={channel.name ?? ''} />}
+          </h2>
+          <button type="button" class="channel-header__meta channel-header__details" aria-haspopup="dialog" onClick={() => setDetails(true)}>
+            {channel.kind === 'private' && <>{t('channel.private')} · </>}
+            {channel.kind === 'group_dm' && <>{t('channel.group')} · </>}
+            {plural('channel.members', channel.member_count)}
+          </button>
+          {channel.topic && (
+            // Its own direction (clipped at its own end), aligned with the interface (see app.css).
+            <span class="channel-header__topic" dir="auto" title={channel.topic}>
+              {channel.topic}
+            </span>
+          )}
+        </div>
+      </header>
+
+      {channel.is_member ? <DropZone onFiles={(files) => addFiles(chat, channel.id, null, files)}>{main}</DropZone> : main}
+
+      {threadId !== null && (
+        <ThreadPanel key={threadId} channel={channel} parentId={threadId} label={label} modal={threadModal} onClose={() => navigate(channelPath(channel.id))} />
+      )}
+      {details && <ChannelDetails channel={channel} label={label} onClose={() => setDetails(false)} />}
+    </>
   )
 }
 

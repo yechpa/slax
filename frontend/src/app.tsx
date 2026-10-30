@@ -31,8 +31,10 @@ export function App({ connect = defaultConnect, turnstile }: Props) {
 
   useEffect(() => {
     // In-app links (sidebar) navigate without reloading the page.
-    document.addEventListener('click', interceptLinks)
-    return () => document.removeEventListener('click', interceptLinks)
+    // Its own listener (not the shared function): no other instance's cleanup can remove it.
+    const onClick = (event: MouseEvent) => interceptLinks(event)
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
   }, [])
 
   switch (current.status) {

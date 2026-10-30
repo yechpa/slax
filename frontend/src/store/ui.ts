@@ -48,8 +48,11 @@ export const showConnectionBanner = computed(() => offline.value || realtimeDown
 /** Mobile: the channel list is open over the conversation. */
 export const navOpen = signal(false)
 
-/** Unsent text per channel, so switching channels keeps what was typed. */
-export const drafts = new Map<number, string>()
+/** Unsent text per composer (`c:12`, `t:40`), so switching channels keeps what was typed. */
+export const drafts = new Map<string, string>()
+
+/** The dialog open over the workspace, if any (sidebar actions). */
+export const openDialog = signal<null | 'create-channel' | 'browse-channels' | 'new-message'>(null)
 
 export function resetUi(): void {
   for (const id of [...timers.keys()]) dismissToast(id)
@@ -59,5 +62,6 @@ export function resetUi(): void {
   offline.value = false
   realtimeDown.value = false
   navOpen.value = false
+  openDialog.value = null
   drafts.clear()
 }

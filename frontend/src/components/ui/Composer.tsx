@@ -1,9 +1,10 @@
 import type { ComponentChildren, Ref } from 'preact'
-import { useId, useRef } from 'preact/hooks'
+import { useId } from 'preact/hooks'
 import { plural, t } from '../../i18n/index.ts'
 import { charCount, trimBody } from '../../lib/text.ts'
 import { Button } from './Button.tsx'
 import { Cursor } from './Cursor.tsx'
+import { useIme } from './useIme.ts'
 
 type Props = {
   channel: string
@@ -16,6 +17,12 @@ type Props = {
   onAttach?: () => void
   /** File chips waiting to be sent. */
   files?: ComponentChildren
+  /** Finished uploads are attached: the text may be empty (a file-only message). */
+  hasFiles?: boolean
+  /** Uploads still on their way: Send waits for them. */
+  busy?: boolean
+  onPaste?: (event: ClipboardEvent) => void
+  onBlur?: () => void
   /** Characters allowed (counted as code points, as the server does). The count shows near the end. */
   maxLength?: number
   inputRef?: Ref<HTMLTextAreaElement>
@@ -30,29 +37,33 @@ const COUNTER_FROM = 200
  * in a blinking block cursor. Enter sends, Shift+Enter breaks the line; Enter
  * that confirms an IME composition (Japanese, Chinese, Korean input) does neither.
  */
-export function Composer({ channel, placeholder: given, value, onInput, onSend, onAttach, files, maxLength, inputRef }: Props) {
+export function Composer(props: Props) {
+  const { channel, placeholder: given, value, onInput, onSend, onAttach, files, hasFiles = false, busy = false, maxLength, inputRef } = props
   const hintId = useId()
   const counterId = useId()
-  const composing = useRef(false)
+  const ime = useIme()
   const placeholder = given ?? t('composer.placeholder', { channel })
   // Measured exactly as the server will: same trim, same count.
   const body = trimBody(value)
   const remaining = maxLength === undefined ? Infinity : maxLength - charCount(body)
   const showCounter = remaining <= COUNTER_FROM
   const blank = body === ''
-  const sendable = !blank && remaining >= 0
+  const sendable = (!blank || hasFiles) && remaining >= 0 && !busy
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter' || event.shiftKey) return
-    // keyCode 229: some browsers (Safari) report the composition-ending Enter that way.
-    if (event.isComposing || composing.current || event.keyCode === 229) return
+    if (ime.composing(event)) return
     event.preventDefault()
     // Same rule as the disabled Send button: nothing (or too much) to send.
     if (sendable) onSend?.()
   }
   return (
     <div class="composer">
-      {files && <div class="composer__files">{files}</div>}
+      {files && (
+        <div class="composer__files" aria-label={t('composer.files')} role="group">
+          {files}
+        </div>
+      )}
       <div class="composer__line">
         <span class="composer__prompt" aria-hidden="true">
           $
@@ -70,12 +81,9 @@ export function Composer({ channel, placeholder: given, value, onInput, onSend, 
             aria-invalid={remaining < 0 || undefined}
             onInput={(event) => onInput(event.currentTarget.value)}
             onKeyDown={onKeyDown}
-            onCompositionStart={() => {
-              composing.current = true
-            }}
-            onCompositionEnd={() => {
-              composing.current = false
-            }}
+            onPaste={props.onPaste}
+            onBlur={props.onBlur}
+            {...ime.handlers}
           />
           {value === '' && (
             <span class="composer__placeholder" aria-hidden="true">

@@ -41,6 +41,100 @@ const openDrawer = async (page) => {
   await page.click('.channel-header__nav')
   await page.waitForSelector('.shell--nav-open')
 }
+const settle = (page) => page.waitForTimeout(150)
+// Part B interactions (the fixture's messages: see src/design-system/app-fixtures.ts).
+const openThread = async (page) => {
+  await page.click('.thread-link >> nth=0')
+  await page.waitForSelector('.thread .thread__parent')
+  await page.waitForSelector('.thread .message-list__row')
+  await settle(page)
+}
+const openDeletedThread = async (page) => {
+  await page.click('.message--deleted .thread-link')
+  await page.waitForSelector('.thread .thread__parent .tombstone')
+  await settle(page)
+}
+const messageItem = (page, index) => page.locator('.message-list .message-item').nth(index)
+const openPicker = async (page) => {
+  const item = messageItem(page, 4)
+  await item.hover()
+  await item.locator('.message-actions__quick').first().click()
+  await page.waitForSelector('.popover--placed .emoji-picker')
+}
+const openMenu = async (page) => {
+  const item = messageItem(page, 5)
+  await item.hover()
+  await item.locator('.message-actions__more').click()
+  await page.waitForSelector('.popover--placed .menu')
+}
+const startEdit = async (page) => {
+  await openMenu(page)
+  await page.click('.menu__item >> nth=2')
+  await page.waitForSelector('.message-editor')
+  await page.keyboard.type(' (edited from the menu)')
+}
+const confirmDelete = async (page) => {
+  await openMenu(page)
+  await page.click('.menu__item--danger')
+  await page.waitForSelector('dialog[open]')
+  await settle(page)
+}
+const newMessage = async (page) => {
+  await page.click('.nav-item--action >> nth=2')
+  await page.waitForSelector('dialog[open] .people-picker__input')
+  await page.fill('.people-picker__input', 'da')
+  await page.waitForSelector('.people-picker__option')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('d')
+  await page.waitForSelector('.people-picker__option')
+  await settle(page)
+}
+const createChannel = async (page) => {
+  await page.click('.nav-item--action >> nth=0')
+  await page.waitForSelector('dialog[open] input')
+  await page.keyboard.type('Release_Notes')
+  await page.waitForSelector('.field__error')
+}
+const browseChannels = async (page) => {
+  await page.click('.nav-item--action >> nth=1')
+  await page.waitForSelector('dialog[open] .browse__list')
+}
+const channelDetails = async (page) => {
+  await page.click('.channel-header__details')
+  await page.waitForSelector('dialog[open] .details__member')
+  await settle(page)
+}
+const attachFiles = async (page) => {
+  const bytes = (n) => Buffer.alloc(n, 1)
+  await page.setInputFiles('.shell__footer .composer__picker', [
+    { name: 'deploy-notes.pdf', mimeType: 'application/pdf', buffer: bytes(182_000) },
+    { name: 'architecture-diagram.png', mimeType: 'image/png', buffer: bytes(640_000) },
+    { name: 'logs-archive.zip', mimeType: 'application/zip', buffer: bytes(52_000) },
+  ])
+  await page.waitForSelector('.composer .file-chip--error')
+  await page.waitForSelector('.composer .file-chip--uploading')
+  await page.fill('.shell__footer .composer__input', 'Notes and the diagram for the review')
+  await settle(page)
+}
+// Touch: the "more" button is always there (no hover), and opens the whole menu.
+const mobileMenu = async (page) => {
+  const item = messageItem(page, 5)
+  await item.scrollIntoViewIfNeeded()
+  await item.locator('.message-actions__more').click()
+  await page.waitForSelector('.popover--placed .menu')
+}
+const mobileNewMessage = async (page) => {
+  await openDrawer(page)
+  await newMessage(page)
+}
+const dragFiles = async (page) => {
+  await page.evaluate(() => {
+    const data = new DataTransfer()
+    data.items.add(new File(['x'], 'screenshot.png', { type: 'image/png' }))
+    document.querySelector('.message-list').dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: data }))
+  })
+  await page.waitForSelector('.drop-zone__overlay')
+}
 // Every theme × language is loaded and checked at both widths; only some are saved.
 const shots = []
 for (const theme of ['console', 'listing']) {
@@ -56,6 +150,40 @@ for (const theme of ['console', 'listing']) {
     shots.push({ url: app(theme, lang), files: appMobile ? [`app/mobile-nav-${theme}-${lang}.png`] : [], theme, lang, viewport: mobile, isMobile: true, ready: '.message__body', before: openDrawer })
     shots.push({ url: signIn(theme, lang), files: appMobile ? [`app/mobile-signin-${theme}-${lang}.png`] : [], theme, lang, viewport: mobile, isMobile: true, ready: '.signin__google' })
   }
+}
+// Part B: threads, reactions, files, dialogs, typing and presence.
+const partB = [
+  ['thread', openThread],
+  ['thread-deleted-parent', openDeletedThread],
+  ['reaction-picker', openPicker],
+  ['message-menu', openMenu],
+  ['edit', startEdit],
+  ['delete-confirm', confirmDelete],
+  ['new-message', newMessage],
+  ['create-channel', createChannel],
+  ['browse-channels', browseChannels],
+  ['channel-details', channelDetails],
+  ['files-upload', attachFiles],
+  ['files-drop', dragFiles],
+]
+for (const lang of ['en', 'he']) {
+  for (const [name, before] of partB) {
+    shots.push({ url: app('console', lang), files: [`app/${name}-console-${lang}.png`], theme: 'console', lang, viewport: appDesktop, ready: '.message__body', before })
+  }
+}
+for (const name of ['thread', 'thread-deleted-parent', 'new-message', 'create-channel', 'browse-channels', 'channel-details', 'files-upload']) {
+  const before = partB.find(([n]) => n === name)[1]
+  shots.push({ url: app('listing', 'fr'), files: [`app/${name}-listing-fr.png`], theme: 'listing', lang: 'fr', viewport: appDesktop, ready: '.message__body', before })
+}
+// Every other combination is still loaded and checked with a thread and a dialog open.
+for (const [theme, lang] of [['console', 'fr'], ['listing', 'en'], ['listing', 'he']]) {
+  shots.push({ url: app(theme, lang), files: [], theme, lang, viewport: appDesktop, ready: '.message__body', before: openThread })
+  shots.push({ url: app(theme, lang), files: [], theme, lang, viewport: appDesktop, ready: '.message__body', before: newMessage })
+}
+for (const [theme, lang] of [['console', 'fr'], ['listing', 'he']]) {
+  shots.push({ url: app(theme, lang), files: [`app/mobile-thread-${theme}-${lang}.png`], theme, lang, viewport: mobile, isMobile: true, ready: '.message__body', before: openThread })
+  shots.push({ url: app(theme, lang), files: [`app/mobile-menu-${theme}-${lang}.png`], theme, lang, viewport: mobile, isMobile: true, ready: '.message__body', before: mobileMenu })
+  shots.push({ url: app(theme, lang), files: [`app/mobile-new-message-${theme}-${lang}.png`], theme, lang, viewport: mobile, isMobile: true, ready: '.message__body', before: mobileNewMessage })
 }
 shots.push({ url: signIn('listing', 'fr', '&auth_error=provider_error'), files: ['app/signin-error-listing-fr.png'], theme: 'listing', lang: 'fr', viewport: appDesktop, ready: '.signin__error' })
 shots.push({ url: app('console', 'en'), files: ['app/shell-menu-console-en.png'], theme: 'console', lang: 'en', viewport: appDesktop, ready: '.message__body', before: (page) => page.click('.user-menu__toggle') })
@@ -100,6 +228,8 @@ for (const shot of shots) {
   page.on('requestfailed', (req) => failures.push(`${shot.theme}/${shot.lang}: request failed ${req.url()}`))
   await page.goto(`http://127.0.0.1:${PORT}${shot.url}`)
   if (shot.ready) await page.waitForSelector(shot.ready)
+  // The app polls presence shortly after showing people: let it answer.
+  if (shot.url.includes('screen=app')) await page.waitForTimeout(500)
   await page.evaluate(async () => {
     await Promise.all([document.fonts.load('300 1em "Cascadia Mono"', 'שלום'), document.fonts.load('700 1em "Cascadia Mono"', 'שלום')])
     await document.fonts.ready

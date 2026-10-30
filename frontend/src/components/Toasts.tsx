@@ -4,7 +4,7 @@ import { Toast } from './ui/Toast.tsx'
 
 export function Toasts() {
   return (
-    <div class="toast-region">
+    <div class="toast-region toast-region--app">
       {toasts.value.map((toast) => (
         <Toast key={toast.id} tone={toast.tone} onClose={() => dismissToast(toast.id)}>
           {toast.text}

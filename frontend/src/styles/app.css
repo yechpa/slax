@@ -319,6 +319,8 @@
     flex: none;
   }
 
+  /* dir="auto": a long topic is clipped at its own end (an English topic in a Hebrew header
+     keeps its beginning); match-parent: a short one still sits at the interface's start. */
   .channel-header__topic {
     flex: 1 1 0;
     min-inline-size: 0;
@@ -327,7 +329,7 @@
     white-space: nowrap;
     color: var(--color-text-dim);
     font-size: var(--text-xs);
-    text-align: start;
+    text-align: match-parent;
   }
 
   /* ── Message pane ────────────────────────────────────── */
@@ -578,6 +580,11 @@
     min-inline-size: 0;
     color: var(--color-text-dim);
     font-size: var(--text-sm);
+  }
+
+  /* In the app, toasts sit at the top, under the header: never over the composer and its Send. */
+  .toast-region--app {
+    inset-block: 3.5rem auto;
   }
 
   /* ── Connection banner ───────────────────────────────── */

@@ -9,6 +9,19 @@ export default tseslint.config(
     // Node scripts run outside the app (scripts/design-screenshots.mjs runs in the Playwright image;
     // `document` there is inside page.evaluate callbacks).
     files: ['scripts/**/*.mjs'],
-    languageOptions: { globals: { process: 'readonly', console: 'readonly', URL: 'readonly', document: 'readonly', getComputedStyle: 'readonly' } },
+    // Buffer runs in Node; DataTransfer, File and DragEvent inside page.evaluate callbacks.
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        URL: 'readonly',
+        Buffer: 'readonly',
+        document: 'readonly',
+        getComputedStyle: 'readonly',
+        DataTransfer: 'readonly',
+        File: 'readonly',
+        DragEvent: 'readonly',
+      },
+    },
   },
 )

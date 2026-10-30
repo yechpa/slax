@@ -82,10 +82,10 @@ describe('sidebar', () => {
     await createChat({ api, realtime: null }).start()
     render(<Sidebar currentId={1} />, host)
 
-    const labels = [...host.querySelectorAll('.nav-item__label')].map((l) => l.textContent?.replace(/[⁨⁩]/g, ''))
+    const labels = [...host.querySelectorAll('a.nav-item .nav-item__label')].map((l) => l.textContent?.replace(/[⁨⁩]/g, ''))
     expect(labels).toEqual(['general', 'secret', 'random', 'נעם', 'dana, נעם'])
     expect(host.querySelector('a[aria-current="page"]')?.getAttribute('href')).toBe('/c/1')
-    const random = [...host.querySelectorAll('.nav-item')][2]
+    const random = [...host.querySelectorAll('a.nav-item')][2]
     expect(random.classList.contains('nav-item--muted')).toBe(true)
     expect(random.textContent).toContain('not joined')
     expect(host.querySelector('[aria-label="private channel"]')).not.toBeNull()

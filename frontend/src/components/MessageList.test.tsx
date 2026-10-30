@@ -52,7 +52,7 @@ describe('MessageList retries', () => {
     const timeline = { ...emptyTimeline(), status: 'ready' as const, entries: mergeMessages([], [live(1)], ME.id), hasMoreBefore: true, olderFailed: true, refreshFailed: true }
     const noop = () => undefined
     render(
-      <MessageList label="#general" timeline={timeline} meId={ME.id} unreadAfter={null} onLoadOlder={noop} onRetryOlder={onRetryOlder}
+      <MessageList label="#general" timeline={timeline} meId={ME.id} unreadAfter={null} place={{ channelId: 7, canPost: true, inThread: false }} onLoadOlder={noop} onRetryOlder={onRetryOlder}
         onRetryLoad={noop} onRetryRefresh={onRetryRefresh} onRetry={noop} onDiscard={noop} onAtBottom={noop} />,
       host,
     )

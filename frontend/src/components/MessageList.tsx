@@ -19,7 +19,8 @@ import type { Timeline } from '../store/messages.ts'
 import { Button } from './ui/Button.tsx'
 import { Divider } from './ui/Divider.tsx'
 import { EmptyState } from './ui/EmptyState.tsx'
-import { MessageItem } from './MessageItem.tsx'
+import { MessageItem, type MessagePlace } from './MessageItem.tsx'
+import { useTrackPresence } from './usePresence.ts'
 
 const GROUP_MS = 5 * 60 * 1000
 /** Closer than this to the bottom counts as "at the bottom". */
@@ -36,6 +37,10 @@ type Props = {
   meId: number | null
   /** Messages after this id (by others) are "new": the rule goes before the first one. */
   unreadAfter: number | null
+  /** Where the messages are shown (their actions depend on it). */
+  place: MessagePlace
+  /** Behind a modal thread drawer. */
+  inert?: boolean
   onLoadOlder: () => void
   /** Retry after a failed older page (scrolling alone no longer retries). */
   onRetryOlder: () => void
@@ -112,6 +117,10 @@ export function MessageList(props: Props) {
   const lastSeen = useRef<{ firstKey: string | null; lastKey: string | null; anchorTop: number | null }>({ firstKey: null, lastKey: null, anchorTop: null })
   const [newBelow, setNewBelow] = useState(0)
   const { entries, status, hasMoreBefore, loadingOlder, olderFailed, refreshFailed } = timeline
+  useTrackPresence(
+    `list:${props.place.channelId}`,
+    entries.flatMap((e) => (e.kind === 'server' && !e.message.deleted ? [e.message.user.id] : [])),
+  )
 
   // Latest callbacks for listeners registered once.
   const latest = useRef(props)
@@ -248,7 +257,7 @@ export function MessageList(props: Props) {
           if (row.kind === 'unread') return <Divider key={row.key} label={t('divider.unread')} tone="new" />
           return (
             <div key={row.key} data-key={row.key} class="message-list__row">
-              <MessageItem entry={row.entry} compact={row.compact} onRetry={props.onRetry} onDiscard={props.onDiscard} />
+              <MessageItem entry={row.entry} compact={row.compact} place={props.place} onRetry={props.onRetry} onDiscard={props.onDiscard} />
             </div>
           )
         })}
@@ -257,7 +266,7 @@ export function MessageList(props: Props) {
   }
 
   return (
-    <div class="message-pane">
+    <div class="message-pane" inert={props.inert}>
       <div
         ref={listRef}
         class="message-list"
