@@ -518,7 +518,11 @@ for (const locale of ['en', 'he'] satisfies Locale[]) {
       me = await signInPhone(browser, names[locale], { locale })
       const { page } = me
       const view = ui(me)
-      await expect(view.header.locator('.channel-header__name')).toHaveText('#general')
+      // Signed in, on a channel (which one depends on the rooms the parallel tests created: a new member
+      // lands in the first room by name), with #general in the drawer.
+      await expect(view.header.locator('.channel-header__name')).toHaveText(/^#/)
+      await expect(view.composer).toBeVisible()
+      await expect(view.navItem('general')).toHaveCount(1)
 
       // Post, with the Send button, in a room of one's own (#general is busy with the parallel tests).
       const room = await roomWithMessages(me, 0)
