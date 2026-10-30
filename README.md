@@ -1,12 +1,52 @@
 # Slax
 
-Slax is a Slack-like team chat: channels, threads, reactions, file sharing,
-direct messages and presence, with Google sign-in and a UI in English, Hebrew
-(right-to-left) and French. Backend: Laravel (API, Reverb WebSockets, queues) on
-PostgreSQL and Redis. Frontend: Vite, TypeScript and Preact. A small Python
-service validates uploads.
+[![CI](https://github.com/yechpa/slax/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/yechpa/slax/actions/workflows/ci.yml)
+[![Images](https://github.com/yechpa/slax/actions/workflows/images.yml/badge.svg?branch=main)](https://github.com/yechpa/slax/actions/workflows/images.yml)
 
-Design and plan: [docs/superpowers/specs/2026-10-30-slax-design.md](docs/superpowers/specs/2026-10-30-slax-design.md).
+Slax is a Slack-like team chat, built to show one application designed, deployed and
+operated end to end: channels, threads, reactions, files, direct messages and presence, in
+English, Hebrew (right to left) and French, with two themes. Its home is
+<https://slax.yechpa.com>, a public demo reset every night, on one small AWS Graviton
+instance; a development cluster on the tailnet deploys every merge.
+
+<p>
+  <img src="docs/design/app/thread-console-en.png" alt="Slax in the Console theme (dark), English: a channel and a thread with Hebrew and English messages" width="49%">
+  <img src="docs/design/app/shell-listing-he.png" alt="Slax in the Listing theme (light), Hebrew, right to left" width="49%">
+</p>
+
+*Console (dark, phosphor green) and Listing (light, continuous-form paper), one click apart.*
+
+## What it does
+
+- Public and private channels, real-time messages, threads, mentions, emoji reactions,
+  editing and deleting one's own messages.
+- Direct messages, one to one and in groups of up to 8.
+- Files by drag and drop (10 MB each, 100 MB per account): image and PDF previews,
+  checked by a separate scanner before anything is stored.
+- Presence (online, away, offline) and "is typing".
+- English, Hebrew and French, chosen per person; right to left done with CSS logical
+  properties and per-message bidi isolation.
+- Sign-in with Google only (no password anywhere), behind Cloudflare Turnstile.
+- Administration: service status, audit log, ban, delete, lock; alerts to a Telegram bot.
+
+## How it is built
+
+Laravel 12 (API, Reverb WebSockets, queues) on PostgreSQL 16 and Redis 7; a Preact and
+TypeScript SPA with plain modern CSS; a Python upload scanner; S3 for files. Everything is
+containerised; dev and prod run the same images on single-node k3s through one Helm chart,
+released by GitHub Actions over Tailscale (dev on every merge, prod on a version tag after
+approval). Production: one EC2 t4g.small behind Caddy, about $21 a month.
+
+| Read | For |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | services, data flows, sign-in, environments, security model, decisions and their reasons, cost, what comes next |
+| [docs/runbook.md](docs/runbook.md) | production: setup, operations, backups, alerts, incidents, sizing, teardown |
+| [deploy/dev/BOOTSTRAP.md](deploy/dev/BOOTSTRAP.md) | setting up the development cluster |
+| [docs/recette.md](docs/recette.md) | the acceptance checklist, automated and manual |
+| [docs/known-limitations.md](docs/known-limitations.md) | what is deliberately left out or not yet proven |
+| [docs/design-system.md](docs/design-system.md) | the visual identity, themes, typography, RTL rules |
+| [docs/load-test-results.md](docs/load-test-results.md) | 50 WebSocket clients at 10 messages/s: latency, memory |
+| [the design spec](docs/superpowers/specs/2026-10-30-slax-design.md) | the original brief (French) |
 
 ## Run it locally
 
@@ -16,7 +56,8 @@ Requirements: Docker with the compose plugin, `make`, `openssl`, `curl`.
 make up      # builds and starts everything, then migrates
 make test    # Pest (backend), Vitest (frontend), pytest (scanner)
 make lint    # Pint, ESLint, Ruff
-make e2e     # Playwright end to end, on a fresh stack of its own (APP_ENV=e2e)
+make e2e     # Playwright end to end, then a load smoke, on a fresh stack of its own (APP_ENV=e2e)
+make load    # the load test: 50 WebSocket clients, 10 messages/s for 2 minutes
 make help    # all targets
 ```
 
@@ -39,7 +80,9 @@ suite in the official Playwright image, then removes the whole stack. It can run
 `APP_ENV=e2e`; Turnstile uses Cloudflare's always-pass test keys. The HTML report and
 failure traces are left in `e2e/playwright-report/` and `e2e/test-results/`.
 `E2E_SCREENSHOTS=1 make e2e` also rewrites the RTL reference screenshots in
-`docs/design/e2e/`.
+`docs/design/e2e/`. It ends with a 10-second load smoke (5 WebSocket clients) that fails on
+any lost or doubled message; `make load` runs the full load test on a stack of its own and
+writes `docs/load-test-results.md`.
 
 ## Reproducing CI locally
 
@@ -64,7 +107,7 @@ suite relies on is pinned in `backend/phpunit.xml` (`force="true"`, in both `<en
 
 Development and production run the same production images
 (`ghcr.io/yechpa/slax-{app,web,scanner}`, plus `slax-backup` for production's database
-backups, built for amd64 and arm64 by
+backups and the uptime monitor, built for amd64 and arm64 by
 `.github/workflows/images.yml`) on single-node k3s, through one Helm chart with a values
 file per environment:
 
@@ -80,7 +123,8 @@ file per environment:
   Provisioning (`deploy/aws/provision.sh`), first-time setup, operations, backups and
   restores, incidents, costs and teardown: [docs/runbook.md](docs/runbook.md). Local checks:
   `make aws-test` (provisioning against an AWS emulator), `make proxy-test` (Caddy in front of
-  nginx), `make backup-test` (backup and restore check).
+  nginx), `make backup-test` (backup and restore check), `make monitor-test` (the uptime and
+  disk monitor).
 
 ## Secrets
 
@@ -91,4 +135,5 @@ optionally, locally: `pre-commit install` (see `.pre-commit-config.yaml`).
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The Cascadia Mono font files shipped with the front end keep
+their own license, the SIL Open Font License 1.1 ([frontend/public/fonts/OFL.txt](frontend/public/fonts/OFL.txt)).
