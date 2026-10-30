@@ -73,11 +73,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100")"
+          # Every page; GitHub Actions' own check runs only (another app could post a "lint").
+          runs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            --jq '.check_runs[] | select(.app.slug == "github-actions") | {name, id, conclusion}' | jq -s .)"
           failed=0
           for job in lint test e2e chart secrets; do
             # The latest run of each job (a re-run supersedes an earlier one).
-            conclusion="$(jq -r --arg job "$job" '[.check_runs[] | select(.name == $job)] | sort_by(.id) | last | .conclusion // "missing"' <<< "$runs")"
+            conclusion="$(jq -r --arg job "$job" '[.[] | select(.name == $job)] | sort_by(.id) | last | .conclusion // "missing"' <<< "$runs")"
             if [ "$conclusion" = success ]; then
               echo "ok:   CI $job"
             else
@@ -94,12 +96,15 @@ jobs:
           set -euo pipefail
           export DOCKER_CONFIG="$RUNNER_TEMP/anonymous-docker"
           mkdir -p "$DOCKER_CONFIG"
+          # The tool itself first: a missing buildx plugin must not read as "still private".
+          docker buildx version
           missing=0
           for image in app web scanner backup; do
             ref="$IMAGE_PREFIX-$image:$GITHUB_SHA"
-            if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+            if docker buildx imagetools inspect "$ref" >/dev/null 2> "$RUNNER_TEMP/inspect.err"; then
               echo "found $ref"
             else
+              sed 's/^/  /' "$RUNNER_TEMP/inspect.err"
               echo "::error::$ref cannot be pulled anonymously: the Images run of this commit on main has not finished or failed, or the package slax-$image is still private (docs/runbook.md §3.9). Fix that, then re-run this workflow."
               missing=1
             fi
