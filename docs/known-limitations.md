@@ -145,8 +145,9 @@ receives the channel's events until it disconnects.
 - **Where install is offered.** Chromium (Android, Windows, macOS, Linux) shows the Install button once the browser
   fires `beforeinstallprompt`; iPhone and iPad (Safari and the other iOS browsers) get the steps. Firefox desktop
   cannot install web apps, and Safari on macOS ("Add to Dock") is not detected: the menu says nothing there.
-- **The update banner cannot be dismissed**, by design: an old app must not run unnoticed against a newer API.
-  Reloading loses an unsent draft (drafts live in memory). Until the person reloads, the old version keeps working
+- **The update banner cannot be dismissed**, by design: an old app must not run unnoticed against a newer API. It is
+  a band above the screen, which shrinks to make room, so it never covers the composer, its Send or the header
+  (checked at 1280x800 and 375x667 in English and Hebrew). Reloading loses an unsent draft (drafts live in memory). Until the person reloads, the old version keeps working
   (old worker, old cache); any reload, by the banner or by hand, gets the newest page (navigations are network
   first). The browser checks for a new `sw.js` on navigations; the app also asks when it returns to the foreground
   and every hour.
