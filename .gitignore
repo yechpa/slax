@@ -16,3 +16,7 @@ __pycache__/
 .ruff_cache/
 .phpunit.cache/
 .phpunit.result.cache
+
+# End-to-end runs (make e2e)
+e2e/test-results/
+e2e/playwright-report/

@@ -12,10 +12,10 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e
 
 help: ## Show this help
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-8s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-8s %s\n", $$1, $$2}'
 
 env: ## Create .env from .env.example (with a generated APP_KEY) if missing
 	@test -f .env || { \
@@ -88,3 +88,23 @@ screenshots: env deps ## Capture the design-system kitchen sink (2 themes x 3 la
 		-v $(CURDIR)/frontend/dist-design-system:/dist:ro -v $(CURDIR)/frontend/scripts:/scripts:ro -v $(CURDIR)/docs/design:/out \
 		$(PLAYWRIGHT_IMAGE) sh -c 'npm install --silent --no-audit --no-fund --prefix /tmp/pw playwright-core@1.64.1 \
 		&& PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core/index.mjs node /scripts/design-screenshots.mjs'
+
+# The end-to-end stack: its own Compose project (fresh volumes, nothing published on the host),
+# configured from e2e/stack.env alone, APP_ENV=e2e. See docker-compose.e2e.yml.
+DCE := $(DC) -p slax-e2e --env-file e2e/stack.env -f docker-compose.yml -f docker-compose.e2e.yml
+
+e2e: env deps ## Run the Playwright end-to-end suite on a fresh, separate stack (APP_ENV=e2e), then remove it
+	set -e; \
+	export APP_KEY="base64:$$(openssl rand -base64 32)"; \
+	trap '$(DCE) --profile e2e down -v --remove-orphans' EXIT; \
+	$(DCE) --profile e2e down -v --remove-orphans; \
+	echo '==> Building the e2e bundle'; \
+	$(DCE) run --rm -T --no-deps -e NPM_CONFIG_UPDATE_NOTIFIER=false frontend npx vite build --mode e2e --logLevel warn; \
+	echo '==> Starting the e2e stack'; \
+	$(DCE) up -d --build --quiet-build --wait app reverb queue web scanner minio; \
+	$(DCE) run --rm -T minio-private; \
+	$(DCE) exec -T app php artisan migrate --force --no-interaction --quiet; \
+	$(DCE) exec -T app php artisan db:seed --class=DefaultWorkspaceSeeder --force --no-interaction --quiet; \
+	echo '==> Playwright'; \
+	mkdir -p docs/design/e2e; \
+	$(DCE) run --rm -T playwright

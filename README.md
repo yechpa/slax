@@ -16,6 +16,7 @@ Requirements: Docker with the compose plugin, `make`, `openssl`, `curl`.
 make up      # builds and starts everything, then migrates
 make test    # Pest (backend), Vitest (frontend), pytest (scanner)
 make lint    # Pint, ESLint, Ruff
+make e2e     # Playwright end to end, on a fresh stack of its own (APP_ENV=e2e)
 make help    # all targets
 ```
 
@@ -27,6 +28,18 @@ make help    # all targets
 - MinIO console: <http://localhost:9001> (credentials in `.env`)
 
 Stop with `make down`. Data lives in Docker volumes and survives restarts.
+
+## End-to-end tests
+
+`make e2e` builds the front end for end-to-end runs (`vite build --mode e2e`), starts a
+separate Compose project (`slax-e2e`: its own database and volumes, nothing published on
+the host, configured from `e2e/stack.env` only) with `APP_ENV=e2e`, runs the Playwright
+suite in the official Playwright image, then removes the whole stack. It can run while
+`make up` is running. Google is replaced by an account chooser that exists only under
+`APP_ENV=e2e`; Turnstile uses Cloudflare's always-pass test keys. The HTML report and
+failure traces are left in `e2e/playwright-report/` and `e2e/test-results/`.
+`E2E_SCREENSHOTS=1 make e2e` also rewrites the RTL reference screenshots in
+`docs/design/e2e/`.
 
 ## Secrets
 
