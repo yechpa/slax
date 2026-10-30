@@ -152,4 +152,28 @@ describe('message actions', () => {
     const chip = item(app.host, 1).querySelector('.reaction[aria-pressed="true"]')!
     expect(plain(chip.getAttribute('aria-label'))).toBe('1 person reacted with 👎')
   })
+  it('keeps the picker on its message while the list scrolls under it, and closes it once the message is gone from view', async () => {
+    app = await setup()
+    const message = item(app.host, 1)
+    const react = message.querySelector<HTMLButtonElement>('.message-actions__quick')!
+    let top = 300
+    react.getBoundingClientRect = () => ({ top, bottom: top + 24, left: 900, right: 924, width: 24, height: 24, x: 900, y: top, toJSON: () => ({}) }) as DOMRect
+    react.click()
+    await settle()
+    const picker = document.querySelector<HTMLElement>('.popover')!
+    expect(picker.style.getPropertyValue('--pop-block')).toBe(`${300 + 24 + 4}px`)
+
+    // A new message pushes the list up (it keeps to the bottom): the picker follows its message.
+    top = 260
+    app.host.querySelector('.message-list')!.dispatchEvent(new Event('scroll'))
+    await settle()
+    expect(picker.isConnected).toBe(true)
+    expect(picker.style.getPropertyValue('--pop-block')).toBe(`${260 + 24 + 4}px`)
+
+    // Scrolled out of the window: nothing left to point at.
+    top = -100
+    app.host.querySelector('.message-list')!.dispatchEvent(new Event('scroll'))
+    await settle()
+    expect(picker.isConnected).toBe(false)
+  })
 })

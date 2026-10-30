@@ -16,8 +16,10 @@ const GAP = 4
 /**
  * A small panel over everything (a menu, the emoji picker), placed under its anchor and
  * aligned with its inline end, or above it when there is no room below; kept inside the
- * window. It closes on Escape (focus back to the anchor), a click elsewhere, a scroll of
- * what is under it, or a resize: it never floats away from its anchor.
+ * window. It closes on Escape (focus back to the anchor), a click elsewhere, or a resize.
+ * When what is under it scrolls (the reader, or a message list keeping to its newest
+ * message as one arrives), it follows its anchor, and closes once the anchor has left the
+ * window: it never floats away from its anchor.
  *
  * The position goes through two custom properties set from script (CSSOM), not a style
  * attribute: the CSP needs no 'unsafe-inline'.
@@ -28,14 +30,17 @@ export function Popover({ anchor, onClose, children, class: extra }: Props) {
   const close = useRef(onClose)
   close.current = onClose
 
-  useLayoutEffect(() => {
+  /** Placed against the anchor; false when the anchor is gone or out of the window. */
+  const place = useRef(() => {
     const el = panel.current
-    const at = anchor.current?.getBoundingClientRect()
-    if (!el || !at) return
+    const target = anchor.current
+    const at = target?.isConnected ? target.getBoundingClientRect() : null
+    if (!el || !at) return false
     const width = el.offsetWidth
     const height = el.offsetHeight
     const viewWidth = document.documentElement.clientWidth || innerWidth
     const viewHeight = document.documentElement.clientHeight || innerHeight
+    if (at.bottom < 0 || at.top > viewHeight) return false
     const rtl = getComputedStyle(el).direction === 'rtl'
     // Distance from the inline-start edge of the window, aligning the inline ends.
     const fromStart = rtl ? viewWidth - at.left - width : at.right - width
@@ -45,7 +50,11 @@ export function Popover({ anchor, onClose, children, class: extra }: Props) {
     block = Math.max(MARGIN, Math.min(block, viewHeight - height - MARGIN))
     el.style.setProperty('--pop-inline', `${Math.round(inline)}px`)
     el.style.setProperty('--pop-block', `${Math.round(block)}px`)
-    setPlaced(true)
+    return true
+  })
+
+  useLayoutEffect(() => {
+    if (place.current()) setPlaced(true)
   }, [anchor])
 
   useEffect(() => {
@@ -61,7 +70,7 @@ export function Popover({ anchor, onClose, children, class: extra }: Props) {
       if (!el?.contains(target) && !anchor.current?.contains(target)) close.current(false)
     }
     const onScroll = (event: Event) => {
-      if (!el?.contains(event.target as Node)) close.current(false)
+      if (!el?.contains(event.target as Node) && !place.current()) close.current(false)
     }
     const onResize = () => close.current(false)
     el?.addEventListener('keydown', onKey)
