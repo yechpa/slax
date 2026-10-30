@@ -1,8 +1,11 @@
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setLocale } from '../i18n/index.ts'
-import { live } from '../test/fixtures.ts'
-import { MessageItem } from './MessageItem.tsx'
+import type { Chat } from '../store/chat.ts'
+import { session } from '../store/session.ts'
+import { ME, live } from '../test/fixtures.ts'
+import { ChatContext } from './chatContext.ts'
+import { MessageItem, type MessagePlace } from './MessageItem.tsx'
 import { tokenize } from './RichText.tsx'
 
 let host: HTMLElement
@@ -16,6 +19,7 @@ beforeEach(() => {
 afterEach(() => {
   render(null, host)
   host.remove()
+  session.value = { status: 'loading' }
 })
 
 const show = (body: string) => render(<MessageItem entry={{ kind: 'server', key: 'm:1', message: live(1, { body }) }} />, host)
@@ -118,5 +122,39 @@ describe('message bodies', () => {
     const elapsed = performance.now() - started
     expect(tokens.find((t) => t.type === 'link')?.text).toBe(`https://a.test/${'x'.repeat(2500)}`)
     expect(elapsed).toBeLessThan(50)
+  })
+})
+
+describe('message actions', () => {
+  const chat = { presence: { stateOf: () => 'offline' }, toggleReaction: async () => undefined } as unknown as Chat
+  const place = (canPost: boolean): MessagePlace => ({ channelId: 7, canPost, inThread: false })
+  const showIn = (where: MessagePlace, user = { id: 2, name: 'dana', avatar_url: null }) =>
+    render(
+      <ChatContext.Provider value={chat}>
+        <MessageItem entry={{ kind: 'server', key: 'm:1', message: live(1, { user }) }} place={where} />
+      </ChatContext.Provider>,
+      host,
+    )
+
+  it('shows no toolbar to someone who can do nothing with the message', () => {
+    session.value = { status: 'signed-in', me: ME }
+    // Not a member, someone else's message, not an administrator: nothing to offer.
+    showIn(place(false))
+    expect(host.querySelector('[role="toolbar"]')).toBeNull()
+    expect(host.querySelector('.message--menu')).toBeNull()
+
+    // A member may react and reply.
+    showIn(place(true))
+    expect(host.querySelector('[role="toolbar"] .message-actions__more')).not.toBeNull()
+    expect(host.querySelector('.message--menu')).not.toBeNull()
+
+    // My own message, even after leaving: I may still delete it.
+    showIn(place(false), { id: ME.id, name: ME.name, avatar_url: null })
+    expect(host.querySelector('[role="toolbar"] .message-actions__more')).not.toBeNull()
+
+    // An administrator may moderate someone else's message anywhere.
+    session.value = { status: 'signed-in', me: { ...ME, is_admin: true } }
+    showIn(place(false))
+    expect(host.querySelector('[role="toolbar"] .message-actions__more')).not.toBeNull()
   })
 })

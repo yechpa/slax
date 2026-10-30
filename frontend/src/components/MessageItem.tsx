@@ -141,8 +141,9 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
     }
   }
 
+  // Someone who can do nothing with it (not a member, not theirs, not moderating) gets no toolbar at all.
   const actions =
-    chat && place ? (
+    chat && place && (canPost || mine || moderator) ? (
       <MessageActions
         canPost={canPost}
         mine={mine}
