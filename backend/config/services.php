@@ -30,6 +30,13 @@ return [
         'url' => env('SCANNER_URL', 'http://scanner:8000'),
     ],
 
+    // Administrator alerts (App\Services\Alerts\TelegramNotifier). Secrets: from the
+    // environment only, never in the repository. Unset: alerts are dropped (NullNotifier).
+    'telegram' => [
+        'bot_token' => env('TELEGRAM_BOT_TOKEN'),
+        'chat_id' => env('TELEGRAM_CHAT_ID'),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

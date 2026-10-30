@@ -3,8 +3,10 @@
 namespace App\Providers;
 
 use App\Broadcasting\ReverbBroadcaster;
+use App\Contracts\AdminNotifier;
 use App\Contracts\IdentityProvider;
 use App\Http\Controllers\GoogleAuthController;
+use App\Services\Alerts\NotifierFactory;
 use App\Services\FakeScannerClient;
 use App\Services\FakeTurnstile;
 use App\Services\Identity\E2eIdentityProvider;
@@ -33,6 +35,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(Turnstile::class, $this->app->environment(['testing', 'e2e']) ? FakeTurnstile::class : Turnstile::class);
         // The scanner runs in the compose stack, E2E runs included: only unit and feature tests fake it.
         $this->app->singleton(ScannerClient::class, $this->app->environment('testing') ? FakeScannerClient::class : ScannerClient::class);
+        // Telegram when configured (never in tests), nothing otherwise.
+        $this->app->singleton(AdminNotifier::class, fn ($app) => NotifierFactory::make($app->environment()));
     }
 
     public function boot(): void

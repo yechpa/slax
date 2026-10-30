@@ -11,4 +11,28 @@ return [
         explode(',', (string) env('ADMIN_EMAILS', '')),
     ))),
 
+    /*
+    | Administrator alerts (Telegram, see config/services.php). Every message starts with
+    | the environment label: "[Dev]" unless SLAX_ENV_LABEL says otherwise (production
+    | sets SLAX_ENV_LABEL=Prod).
+    */
+    'alerts' => [
+        'env_label' => env('SLAX_ENV_LABEL', 'Dev'),
+
+        // A burst of failed sign-ins from one IP address: this many within the window
+        // (fixed windows) raises one alert per window.
+        'failed_sign_in_threshold' => (int) env('SLAX_FAILED_SIGN_IN_THRESHOLD', 10),
+        'failed_sign_in_window_minutes' => (int) env('SLAX_FAILED_SIGN_IN_WINDOW_MINUTES', 10),
+    ],
+
+    /*
+    | The public demo: accounts signed up by visitors are kept while they are used, and
+    | deleted after this many days without activity (slax:demo-reset, nightly).
+    */
+    'demo' => [
+        'inactive_days' => 7,
+        'reset_time' => '03:00',
+        'reset_timezone' => 'Asia/Jerusalem',
+    ],
+
 ];

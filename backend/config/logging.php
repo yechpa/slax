@@ -1,5 +1,6 @@
 <?php
 
+use App\Logging\CreateTelegramLogger;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -52,10 +53,23 @@ return [
 
     'channels' => [
 
+        // Deployed environments log through the stack (LOG_CHANNEL=stack, LOG_STACK=stderr):
+        // errors and above also go to the administrators (the `telegram` channel, a no-op when
+        // Telegram is not configured, and in tests). The local stack logs to stderr only.
         'stack' => [
             'driver' => 'stack',
-            'channels' => explode(',', (string) env('LOG_STACK', 'single')),
+            // First: a handler that stops the record (NullHandler does) must not hide it from alerts.
+            'channels' => array_values(array_unique([
+                'telegram',
+                ...array_filter(array_map('trim', explode(',', (string) env('LOG_STACK', 'single')))),
+            ])),
             'ignore_exceptions' => false,
+        ],
+
+        'telegram' => [
+            'driver' => 'custom',
+            'via' => CreateTelegramLogger::class,
+            'level' => 'error',
         ],
 
         'single' => [
