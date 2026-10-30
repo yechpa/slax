@@ -5,9 +5,11 @@
 
 Slax is a Slack-like team chat, built to show one application designed, deployed and
 operated end to end: channels, threads, reactions, files, direct messages and presence, in
-English, Hebrew (right to left) and French, with two themes. Its home is
-<https://slax.yechpa.com>, a public demo reset every night, on one small AWS Graviton
-instance; a development cluster on the tailnet deploys every merge.
+English, Hebrew (right to left) and French, with two themes. It is meant to run at
+<https://slax.yechpa.com> as a public demo reset every night, on one small AWS Graviton
+instance, with a development cluster on the tailnet that deploys every merge. Until the
+acceptance checklist ([docs/recette.md](docs/recette.md)) has passed on production, that
+address is the target, not a promise.
 
 <p>
   <img src="docs/design/app/thread-console-en.png" alt="Slax in the Console theme (dark), English: a channel and a thread with Hebrew and English messages" width="49%">
@@ -35,7 +37,7 @@ Laravel 12 (API, Reverb WebSockets, queues) on PostgreSQL 16 and Redis 7; a Prea
 TypeScript SPA with plain modern CSS; a Python upload scanner; S3 for files. Everything is
 containerised; dev and prod run the same images on single-node k3s through one Helm chart,
 released by GitHub Actions over Tailscale (dev on every merge, prod on a version tag after
-approval). Production: one EC2 t4g.small behind Caddy, about $21 a month.
+approval). Production is designed for one EC2 t4g.small behind Caddy, about $21 a month.
 
 | Read | For |
 |---|---|

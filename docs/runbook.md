@@ -74,11 +74,15 @@ How the number is built (the full report: [docs/load-test-results.md](load-test-
 | A budget for growth | 100 | PHP-FPM may run up to 6 workers (one or two were enough at 10 requests/s), PostgreSQL's 96 MB of shared buffers fill up over days |
 | Ubuntu (systemd, journald, snapd, SSM agent), Tailscale, Caddy | ≈ 250-300 | estimate (not measurable without the instance) |
 | **Total at the brief's load** | **≈ 1,263-1,313** | 655 + 258 + 100 + 250-300; **62-64 % of 2,048 MiB** (the brief's limit: 80 % = 1,638 MiB) |
+| Pessimistic band | **≈ 1,413-1,563** | the same, plus 150-250 MiB more if the 100 MiB budget is too small: PostgreSQL's `shared_buffers` (96 MB) filled where 31 MiB were measured, and PHP-FPM at its 6 workers where 53 MiB were measured for the whole pod; **69-76 %, still under 80 %** |
 
-What remains (≈ 630-680 MiB of the ≈ 1,946 MiB usable) is page cache and room for the
-CronJobs: the backup (≤ 256 MiB, 02:30), the weekly restore check (≤ 640 MiB with its
-throwaway PostgreSQL, Sunday 03:30, when nobody is around) and the uptime monitor (≤ 64 MiB
-for a few seconds each minute). The 2 GiB swap file absorbs a coincidence; pods do not swap.
+What remains (≈ 630-680 MiB of the ≈ 1,946 MiB usable at the estimate, ≈ 380-530 MiB in
+the pessimistic band) is page cache and room for the CronJobs: the backup (≤ 256 MiB, 02:30),
+the weekly restore check and the uptime monitor (≤ 64 MiB for a few seconds each minute).
+The restore check is the big one (≤ 640 MiB with its throwaway PostgreSQL); what keeps it
+from stacking on peak load is its time, Sunday 03:30 Asia/Jerusalem, when the demo is idle
+(and just after the 03:00 reset): do not move it into the day. The 2 GiB swap file absorbs a
+coincidence; pods do not swap.
 
 Limits of this estimate, to keep in mind: the load ran on Compose (development PHP image,
 x86) and k3s ran without load; arm64 (Graviton) processes should be of a similar size but were not
@@ -533,7 +537,11 @@ UTC time; never a URL, host or secret):
   then, once below 75 %, `[Prod] DISK OK: node disk back to 72% (below 75%).`
 
 A message Telegram refuses (network, Telegram down) is retried the next minute; the
-monitor logs a warning with curl's exit code, never the token. A run always succeeds as a
+monitor logs a warning with curl's exit code, never the token. A run never outlives its
+Job: the checks run in parallel (10 s at most), a Telegram call is given 5 s, and an alert
+that could not finish within 35 s of the start is left for the next run (logged as
+`deferred to the next run`); the state is saved after every alert sent, so a run cut short
+never sends one twice. A run always succeeds as a
 Job unless its configuration is wrong (exit 2: `kubectl -n slax get jobs` shows it failed).
 
 - What it sees now: `kubectl -n slax logs -l app.kubernetes.io/component=monitor --tail=5`

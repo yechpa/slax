@@ -9,8 +9,9 @@ Run them in order: each part assumes the previous ones passed.
 either environment existed). The local suites it refers to were run when it was written: see
 the "Automated" column and the commands in part 1.
 
-Legend: **A** automated (the suite or job named runs it, locally and in CI), **M** manual on
-the real environment, **A+M** automated on the local e2e stack (fake Google, MinIO) and to be
+Legend: **A** automated and run by CI on every pull request (the job named), **A (local)**
+automated but run by hand on a workstation (`make …`, not in CI), **M** manual on the real
+environment, **A+M** automated on the local e2e stack in CI (fake Google, MinIO) and to be
 seen once by hand on the real one (real Google, real S3, Caddy, k3s).
 
 What you need: the dev cluster bootstrapped (deploy/dev/BOOTSTRAP.md §1-10) and production
@@ -30,8 +31,8 @@ Record each run here (copy the table per environment):
 | # | Check | How | |
 |---|---|---|---|
 | 1.1 | CI green on the commit: `lint`, `test`, `e2e` (Playwright, 15 tests, then the 10-second load smoke), `chart`, `secrets` (gitleaks), Images (6 builds, 4 manifests, Trivy) | GitHub → Actions, or `gh run list --branch main --limit 5` | A |
-| 1.2 | The deployment pieces' own tests | `make chart-lint backup-test monitor-test proxy-test aws-test edge-guard-test` | A |
-| 1.3 | The load test: 50 WebSocket clients, 10 messages/s for 2 min, 0 lost, 0 duplicated, 0 HTTP error | `make load` → docs/load-test-results.md (a run is committed) | A |
+| 1.2 | The deployment pieces' own tests (`make chart-lint` also runs in CI, job `chart`; the others do not) | `make chart-lint backup-test monitor-test proxy-test aws-test edge-guard-test` | A (local) |
+| 1.3 | The load test: 50 WebSocket clients, 10 messages/s for 2 min, 0 lost, 0 duplicated, 0 HTTP error (CI runs only the 10-second smoke at the end of `e2e`) | `make load` → docs/load-test-results.md (a run is committed) | A (local) |
 | 1.4 | No secret in the repository or its history | CI `secrets`; GitHub → Security → Secret scanning: no open alert | A+M |
 
 ## 2. Delivery: merge → dev, tag → prod with approval, rollback
