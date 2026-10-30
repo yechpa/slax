@@ -15,6 +15,7 @@ return new class extends Migration
         DB::statement('ALTER TABLE channels ALTER COLUMN dm_key TYPE text');
     }
 
+    /** Fails while any conversation's key is longer than 64 characters (as a narrowing must). */
     public function down(): void
     {
         DB::statement('ALTER TABLE channels ALTER COLUMN dm_key TYPE varchar(64)');
