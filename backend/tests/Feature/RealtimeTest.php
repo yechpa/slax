@@ -351,3 +351,47 @@ test('reverb_e2e_removed_member_socket_is_cut_and_cannot_resubscribe', function 
     $again->close();
     $ownerSocket->close();
 })->group('reverb-e2e')->skip(! getenv('REVERB_E2E'), 'Opt-in: set REVERB_E2E=1 with the dev Reverb server running.');
+
+test('reverb_e2e_banned_user_socket_is_cut_and_cannot_resubscribe', function () {
+    useReverbDriver();
+    $host = config('broadcasting.connections.reverb.options.host');
+    $port = (int) config('broadcasting.connections.reverb.options.port');
+    $key = config('broadcasting.connections.reverb.key');
+
+    $admin = User::factory()->admin()->create();
+    $owner = User::factory()->create();
+    $member = User::factory()->create();
+    $channel = privateChannel($owner);
+    $channel->members()->attach($member->id);
+    $name = "private-channel.{$channel->id}";
+
+    $subscribe = function (User $user) use ($host, $port, $key, $channel, $name): WebSocketClient {
+        $socket = WebSocketClient::connect($host, $port, "/app/{$key}?protocol=7&client=slax-e2e&version=1.0");
+        $socketId = json_decode($socket->waitFor('pusher:connection_established')['data'], true)['socket_id'];
+        $auth = authorizeChannel($user, $channel->id, $socketId)->assertOk()->json();
+        $socket->send(['event' => 'pusher:subscribe', 'data' => ['channel' => $name] + $auth]);
+        expect($socket->waitFor('pusher_internal:subscription_succeeded'))->not->toBeNull();
+
+        return $socket;
+    };
+
+    $memberSocket = $subscribe($member);
+    $ownerSocket = $subscribe($owner);
+
+    asUser($admin)->postJson("/api/v1/admin/users/{$member->id}/ban")->assertOk();
+
+    // Reverb closed the banned user's socket; the others keep theirs.
+    expect($memberSocket->waitFor('message.created', 3))->toBeNull()
+        ->and($memberSocket->isClosed())->toBeTrue();
+    asUser($owner)->postJson("/api/v1/channels/{$channel->id}/messages", ['body' => 'after the ban', 'client_id' => (string) Str::uuid()])->assertCreated();
+    expect(json_decode($ownerSocket->waitFor('message.created')['data'], true)['body'])->toBe('after the ban');
+
+    // A new socket gets no channel at all.
+    $again = WebSocketClient::connect($host, $port, "/app/{$key}?protocol=7&client=slax-e2e&version=1.0");
+    $socketId = json_decode($again->waitFor('pusher:connection_established')['data'], true)['socket_id'];
+    app('auth')->forgetGuards();
+    authorizeChannel($member->fresh(), $channel->id, $socketId)->assertForbidden();
+
+    $again->close();
+    $ownerSocket->close();
+})->group('reverb-e2e')->skip(! getenv('REVERB_E2E'), 'Opt-in: set REVERB_E2E=1 with the dev Reverb server running.');
