@@ -177,10 +177,11 @@ export function notOlderThanStore(message: Message, mark: number): Message {
   if (message.deleted) return message
   if (changedSince(message.id, mark)) return findMessage(message.id) ?? message
   let result: Message = message
+  const counted = message.last_reply_at
   for (const change of summaryChanges.get(message.id) ?? []) {
     if (change.clock <= mark || change.delta < 0) continue
-    // The answer already counts a reply no later than its own last one.
-    if (result.last_reply_at !== null && Date.parse(change.at) <= Date.parse(result.last_reply_at)) continue
+    // The answer already counts a reply no later than its own last one (the answer's, not one laid over it).
+    if (counted !== null && Date.parse(change.at) <= Date.parse(counted)) continue
     result = withSummaryDelta(result, change.delta, change.at)
   }
   return result

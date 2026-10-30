@@ -153,6 +153,17 @@ describe('REST answers older than live events', () => {
     expect(first()).toMatchObject({ reply_count: 4, last_reply_at: '2026-10-30T10:00:30.000Z' })
   })
 
+  it('two replies during a catch-up both count, even when they arrive out of order', async () => {
+    await catchUpWith(
+      () => {
+        realtime.emit('private-channel.7', 'message.created', replyAt(5, '2026-10-30T10:00:40.000Z'))
+        realtime.emit('private-channel.7', 'message.created', replyAt(6, '2026-10-30T10:00:35.000Z'))
+      },
+      live(1, { reply_count: 3, last_reply_at: '2026-10-30T10:00:20.000Z' }),
+    )
+    expect(first()).toMatchObject({ reply_count: 5, last_reply_at: '2026-10-30T10:00:40.000Z' })
+  })
+
   it('a reply the catch-up page already counts is not counted twice', async () => {
     await catchUpWith(
       () => realtime.emit('private-channel.7', 'message.created', replyAt(5, '2026-10-30T10:00:30.000Z')),
