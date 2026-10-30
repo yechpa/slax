@@ -230,7 +230,8 @@ monitor:
     recoverPercent: 75
     realertHours: 6
   activeDeadlineSeconds: 50
-  # Its state file (a few hundred bytes) and the probe of the volumes' disk.
+  # Its state file (a few hundred bytes) and the probe of the volumes' disk. Fixed once
+  # created: local-path volumes cannot be resized (an upgrade changing the size fails).
   storage:
     size: 16Mi
     storageClassName: local-path

@@ -125,6 +125,9 @@ for env in dev prod; do
     expect "$env: the uptime monitor alerts after 3 failures, disk above 80 % (6 h reminders, all clear below 75 %)" \
         "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | [.spec.jobTemplate.spec.template.spec.containers[0].env[] | select(.name == "MONITOR_FAIL_THRESHOLD" or .name == "MONITOR_DISK_ALERT_PERCENT" or .name == "MONITOR_DISK_RECOVER_PERCENT" or .name == "MONITOR_DISK_REALERT_SECONDS") | .value] | join(",")' "$file")" \
         "3,80,75,21600"
+    expect "$env: Helm never deletes the monitor's volume claim (the deployer may not delete claims)" \
+        "$(yq ea -N 'select(.kind == "PersistentVolumeClaim") | .metadata.name + ":" + .metadata.annotations["helm.sh/resource-policy"]' "$file")" \
+        "slax-monitor:keep"
     expect "$env: PostgreSQL and Redis admit the uptime monitor (no password given to it)" \
         "$(yq e -N 'select(.kind == "NetworkPolicy" and (.metadata.name == "slax-postgres" or .metadata.name == "slax-redis")) | .metadata.name + ":" + ([.spec.ingress[].from[].podSelector.matchLabels["app.kubernetes.io/component"] | select(. == "monitor")] | join(","))' "$file" | sort | tr '\n' ' ')" \
         "slax-postgres:monitor slax-redis:monitor "

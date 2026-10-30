@@ -27,6 +27,10 @@ metadata:
   name: {{ include "slax.name" (dict "ctx" . "component" $component) }}
   labels:
     {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    # Never deleted by Helm (uninstall, rollback of the release that created it): the deployer
+    # may create volume claims but not delete any (deploy/dev/deployer-rbac.yaml).
+    helm.sh/resource-policy: keep
 spec:
   accessModes: ["ReadWriteOnce"]
   storageClassName: {{ $m.storage.storageClassName | quote }}

@@ -48,6 +48,17 @@ rules:
   - apiGroups: [traefik.io]
     resources: [middlewares]
     verbs: [get, list, watch, create, update, patch, delete]
+  # The uptime monitor's small state volume (slax-monitor): Helm creates it once and may update
+  # it, but the deployer can never delete a volume claim (PostgreSQL's and Redis's data among
+  # them). The chart marks that claim "keep", so Helm never tries to. Kubernetes cannot limit
+  # `create` to one name.
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    resourceNames: [slax-monitor]
+    verbs: [update, patch]
   # Read-only: what `helm upgrade --wait` watches, and what a failed deployment is debugged with.
   - apiGroups: [""]
     resources: [pods, pods/log, events, persistentvolumeclaims]
