@@ -97,6 +97,31 @@ describe('reactions', () => {
     expect(reactionsOf()).toEqual([{ emoji: '🚀', count: 1, reacted_by_me: false, user_ids: [DANA.id] }])
   })
 
+  it('an answer older than a live event does not undo that event', async () => {
+    const put = deferred<FakeReply>()
+    const { chat } = setup({ [route('PUT', '👍')]: () => put.promise })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+
+    const adding = chat.toggleReaction(1, '👍')
+    // The server applied mine, then Dana added 🎉: that broadcast arrives before my answer.
+    realtime.emit(
+      'private-channel.7',
+      'reaction.changed',
+      withReactions([
+        { emoji: '👍', count: 2, reacted_by_me: false, user_ids: [DANA.id, ME.id] },
+        { emoji: '🎉', count: 1, reacted_by_me: false, user_ids: [DANA.id] },
+      ]),
+    )
+    put.resolve({ body: withReactions([{ emoji: '👍', count: 2, reacted_by_me: true, user_ids: [DANA.id, ME.id] }]) })
+    await adding
+    expect(reactionsOf()).toEqual([
+      { emoji: '👍', count: 2, reacted_by_me: true, user_ids: [DANA.id, ME.id] },
+      { emoji: '🎉', count: 1, reacted_by_me: false, user_ids: [DANA.id] },
+    ])
+  })
+
   it('reaction_changed_event_is_merged_idempotently', async () => {
     const put = deferred<FakeReply>()
     const { chat } = setup({ [route('PUT', '😀')]: () => put.promise })

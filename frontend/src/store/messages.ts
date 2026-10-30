@@ -106,6 +106,43 @@ export function applyKnown(message: Message): void {
   })
 }
 
+/**
+ * Live changes against REST answers. A REST answer (a page, the answer to my reaction, edit
+ * or post) is a snapshot taken when the server handled the request; a broadcast that arrived
+ * while it was on its way may be newer (someone reacted just after), and replacing the
+ * event's copy with the answer's would undo it. Every live change (an event, a thread summary
+ * moved) is numbered; a request notes the number when it starts (`liveMark`), and its answer
+ * gives way, for each message changed since (`changedSince`), to the copy the store holds.
+ * Nothing is lost by that: every change is broadcast to every member, the requester included,
+ * so the answer's own change is in an event that came, or will come. While no event arrives
+ * (socket down), answers apply as they are.
+ */
+let liveClock = 0
+const changedAt = new Map<number, number>()
+const CHANGED_LIMIT = 5000
+
+export const liveMark = (): number => liveClock
+
+/** A live change (an event, a summary moved) reached message `id`. */
+export function noteLiveChange(id: number): void {
+  liveClock += 1
+  changedAt.delete(id)
+  changedAt.set(id, liveClock)
+  if (changedAt.size > CHANGED_LIMIT) changedAt.delete(changedAt.keys().next().value!)
+}
+
+/** Did a live change reach message `id` after `mark` (a request's start)? */
+export const changedSince = (id: number, mark: number): boolean => (changedAt.get(id) ?? 0) > mark
+
+/**
+ * A message of a REST answer asked for at `mark`: the store's copy when a live change came
+ * since. A tombstone is final, never older than anything: it is always taken.
+ */
+export function notOlderThanStore(message: Message, mark: number): Message {
+  return !message.deleted && changedSince(message.id, mark) ? (findMessage(message.id) ?? message) : message
+}
+
 export function resetTimelines(): void {
   timelines.clear()
+  changedAt.clear()
 }

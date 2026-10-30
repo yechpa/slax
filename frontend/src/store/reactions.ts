@@ -11,12 +11,15 @@
  *   request answers. If a snapshot already shows my change (a broadcast caused by my own
  *   request), the toggle is marked confirmed: should the request then fail (a lost
  *   response), the change is kept, not rolled back.
+ * - The answer is a snapshot from when the server applied my toggle: if an event came while
+ *   it was on its way, that event may be newer (someone else reacted just after) and is kept;
+ *   my toggle was laid over it, and its own broadcast follows.
  */
 import { isApiError } from '../api/client.ts'
 import type { Api } from '../api/endpoints.ts'
 import type { Message, Reaction } from '../api/types.ts'
 import { t } from '../i18n/index.ts'
-import { applyKnown, findMessage, updateMessage } from './messages.ts'
+import { applyKnown, changedSince, findMessage, liveMark, updateMessage } from './messages.ts'
 import { showToast } from './ui.ts'
 
 /** backend MessageResource::MAX_REACTION_USER_IDS */
@@ -97,11 +100,12 @@ export function createReactions({ api, meId, alive }: { api: Api; meId: () => nu
     const op: PendingToggle = { messageId, emoji, on, confirmed: false }
     pending.set(key, op)
     const still = alive()
+    const mark = liveMark()
     updateMessage(messageId, (m) => (m.deleted ? m : { ...m, reactions: withMyReaction(m.reactions, emoji, on, id) }))
     try {
       const answer = await (on ? api.react(messageId, emoji) : api.unreact(messageId, emoji))
       pending.delete(key)
-      if (still()) applyKnown(overlay(answer))
+      if (still() && !changedSince(messageId, mark)) applyKnown(overlay(answer))
     } catch (error) {
       pending.delete(key)
       if (!still() || op.confirmed) return

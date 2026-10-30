@@ -48,6 +48,118 @@ afterEach(() => {
   document.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'
 })
 
+describe('REST answers older than live events', () => {
+  const tada = [{ emoji: '🎉', count: 1, reacted_by_me: false, user_ids: [2] }]
+  const first = (): Message => {
+    const entry = entries()[0]
+    if (entry?.kind !== 'server') throw new Error('no message')
+    return entry.message
+  }
+
+  it('an edit answer keeps a newer event and still shows the edit', async () => {
+    const answers: ReturnType<typeof deferred<FakeReply>>[] = []
+    const { chat } = setup({
+      'GET /api/v1/channels/7/messages': () => ({ body: { data: [live(1)], has_more: false } }),
+      'PATCH /api/v1/messages/1': () => {
+        const answer = deferred<FakeReply>()
+        answers.push(answer)
+        return answer.promise
+      },
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+
+    // Dana reacts just after my edit: her broadcast (edit included) comes before my answer.
+    const editing = chat.editMessage(1, 'fixed')
+    await flush()
+    const edited = { body: 'fixed', edited_at: '2026-10-30T10:01:00.000Z' }
+    realtime.emit('private-channel.7', 'reaction.changed', live(1, { ...edited, reactions: tada }))
+    answers[0].resolve({ body: live(1, edited) })
+    await editing
+    expect(first()).toMatchObject({ ...edited, reactions: tada })
+
+    // Dana reacts just before my next edit: her broadcast is older than my answer.
+    const again = chat.editMessage(1, 'fixed again')
+    await flush()
+    realtime.emit('private-channel.7', 'reaction.changed', live(1, { ...edited, reactions: [...tada, { emoji: '👀', count: 1, reacted_by_me: false, user_ids: [2] }] }))
+    const newer = { body: 'fixed again', edited_at: '2026-10-30T10:02:00.000Z' }
+    answers[1].resolve({ body: live(1, { ...newer, reactions: [...tada, { emoji: '👀', count: 1, reacted_by_me: false, user_ids: [2] }] }) })
+    await again
+    const latest = first()
+    expect(latest).toMatchObject(newer)
+    expect(latest.deleted ? [] : latest.reactions.map((r) => r.emoji)).toEqual(['🎉', '👀'])
+  })
+
+  it('a page asked for before a reply event does not take back the thread summary', async () => {
+    const latest = deferred<FakeReply>()
+    let reconnected = false
+    const { chat } = setup({
+      'GET /api/v1/channels/7/messages': ({ query }) => {
+        if (!reconnected) return { body: { data: [live(1)], has_more: false } }
+        if (query.get('after') === '1') return { body: { data: [], has_more: false } }
+        return latest.promise
+      },
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+
+    realtime.drop()
+    reconnected = true
+    realtime.reconnect()
+    await flush()
+    // A reply comes while the catch-up's latest page is on its way.
+    realtime.emit('private-channel.7', 'message.created', live(2, { parent_id: 1, created_at: '2026-10-30T10:00:30.000Z' }))
+    expect(first()).toMatchObject({ reply_count: 1, last_reply_at: '2026-10-30T10:00:30.000Z' })
+    latest.resolve({ body: { data: [live(1)], has_more: false } })
+    await flush()
+    expect(first()).toMatchObject({ reply_count: 1, last_reply_at: '2026-10-30T10:00:30.000Z' })
+  })
+
+  it('a deletion in a page is final, even after a live event', async () => {
+    const latest = deferred<FakeReply>()
+    let reconnected = false
+    const { chat } = setup({
+      'GET /api/v1/channels/7/messages': ({ query }) => {
+        if (!reconnected) return { body: { data: [live(1)], has_more: false } }
+        if (query.get('after') === '1') return { body: { data: [], has_more: false } }
+        return latest.promise
+      },
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+
+    realtime.drop()
+    reconnected = true
+    realtime.reconnect()
+    await flush()
+    realtime.emit('private-channel.7', 'reaction.changed', live(1, { reactions: tada }))
+    latest.resolve({ body: { data: [tombstone(1)], has_more: false } })
+    await flush()
+    expect(first().deleted).toBe(true)
+  })
+
+  it('my POST answer does not undo a reaction that came before it', async () => {
+    const response = deferred<FakeReply>()
+    const { chat } = setup({
+      'GET /api/v1/channels/7/messages': () => ({ body: { data: [], has_more: false } }),
+      'POST /api/v1/channels/7/messages': () => response.promise,
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+
+    chat.send(CHANNEL, 'hello')
+    realtime.emit('private-channel.7', 'message.created', mine(2))
+    realtime.emit('private-channel.7', 'reaction.changed', { ...mine(2), reactions: tada })
+    response.resolve({ status: 201, body: mine(2) })
+    await flush()
+    expect(first()).toMatchObject({ id: 2, reactions: tada })
+  })
+})
+
 describe('optimistic sending', () => {
   it('optimistic_message_replaced_by_server_copy_without_duplicate', async () => {
     // Order 1: the POST response first, then the realtime event.

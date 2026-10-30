@@ -19,6 +19,8 @@
  *   view offers a Retry.
  * - While a latest page is on its way, events for that channel are held and applied
  *   after it, through the same merge, so none is lost and none is undone by the page.
+ * - A REST answer never undoes a live event that arrived while it was on its way (the event
+ *   may be newer): see liveMark in messages.ts.
  * - Nothing that finishes after `stop()` (sign-out) touches the stores.
  * - Threads (threads.ts), reactions (reactions.ts) and uploads (uploads.ts) have their own
  *   modules; this one routes the events to them and owns the sending of messages.
@@ -41,7 +43,20 @@ import {
   resetTo,
   updatePending,
 } from './merge.ts'
-import { applyKnown, channelKey, findMessage, peekTimeline, threadKey, timelineKeys, updateTimeline } from './messages.ts'
+import {
+  applyKnown,
+  changedSince,
+  channelKey,
+  findMessage,
+  liveMark,
+  noteLiveChange,
+  notOlderThanStore,
+  peekTimeline,
+  threadKey,
+  timelineKeys,
+  updateMessage,
+  updateTimeline,
+} from './messages.ts'
 import { createPresence } from './presence.ts'
 import { createReactions } from './reactions.ts'
 import { me } from './session.ts'
@@ -157,6 +172,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
 
   function onMessageEvent(channelId: number, event: (typeof MESSAGE_EVENTS)[number], payload: unknown): void {
     if (!isMessage(payload) || payload.channel_id !== channelId || !channelById.peek().has(channelId)) return
+    noteLiveChange(payload.id)
     const message = reactions.overlay(fromBroadcast(payload))
     // Their message is here: they are done typing it.
     if (event === 'message.created' && !message.deleted) typing.noteMessage(channelId, message.user.id, message.parent_id)
@@ -258,6 +274,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   async function loadLatest(channelId: number): Promise<void> {
     const key = channelKey(channelId)
     const started = generation
+    const mark = liveMark()
     loads.get(channelId)?.abort()
     const controller = new AbortController()
     loads.set(channelId, controller)
@@ -270,7 +287,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
       batch(() => {
         updateTimeline(key, (t) => ({
           ...t,
-          entries: mergeMessages(resetTo(t.entries, prepared(page.data), meId()), topLevel(events), meId()),
+          entries: mergeMessages(resetTo(t.entries, prepared(page.data, mark), meId()), topLevel(events), meId()),
           hasMoreBefore: page.has_more,
           status: 'ready',
           stale: false,
@@ -303,8 +320,12 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     return events
   }
 
-  /** Server messages ready to merge into a channel timeline: top-level, my reactions in flight laid over. */
-  const prepared = (messages: readonly Message[]) => messages.filter(isTopLevel).map(reactions.overlay)
+  /**
+   * Server messages (asked for at `mark`) ready to merge into a channel timeline: top-level,
+   * not older than a live event received since, my reactions in flight laid over.
+   */
+  const prepared = (messages: readonly Message[], mark: number) =>
+    messages.filter(isTopLevel).map((message) => reactions.overlay(notOlderThanStore(message, mark)))
   const topLevel = (events: readonly HeldEvent[]) => events.filter((e) => e.message.parent_id === null).map((e) => e.message)
   function noteHeldReplies(events: readonly HeldEvent[]): void {
     for (const { event, message } of events) if (message.parent_id !== null) threads.noteReply(message, event, { held: true })
@@ -356,13 +377,14 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     if (!t || t.status !== 'ready' || t.loadingOlder || !t.hasMoreBefore || before === null) return
     if (t.olderFailed && !force) return
     const started = generation
+    const mark = liveMark()
     updateTimeline(key, (x) => ({ ...x, loadingOlder: true, olderFailed: false }))
     try {
       const page = await api.messages(channelId, { before, limit: PAGE_SIZE })
       if (started !== generation) return
       updateTimeline(key, (x) => ({
         ...x,
-        entries: mergeMessages(x.entries, prepared(page.data), meId()),
+        entries: mergeMessages(x.entries, prepared(page.data, mark), meId()),
         hasMoreBefore: page.has_more,
         loadingOlder: false,
       }))
@@ -405,15 +427,15 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     const pending = findPending(peekTimeline(key)?.entries ?? [], clientId)
     if (!pending) return
     const started = generation
+    const mark = liveMark()
     try {
-      const message = reactions.overlay(
-        await api.postMessage(channelId, {
-          body: pending.body,
-          client_id: clientId,
-          parent_id: pending.parentId,
-          ...(pending.files.length > 0 ? { file_ids: pending.files.map((f) => f.id) } : {}),
-        }),
-      )
+      const answer = await api.postMessage(channelId, {
+        body: pending.body,
+        client_id: clientId,
+        parent_id: pending.parentId,
+        ...(pending.files.length > 0 ? { file_ids: pending.files.map((f) => f.id) } : {}),
+      })
+      const message = reactions.overlay(notOlderThanStore(answer, mark))
       if (started !== generation) return
       batch(() => {
         updateTimeline(key, (t) => withEntries(t, mergeMessages(t.entries, [message], meId())))
@@ -472,11 +494,25 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     return channel
   }
 
-  /** Saves an edit (not optimistic: the server's time stamps the edit). Errors go to the caller. */
+  /**
+   * Saves an edit (not optimistic: the server's time stamps the edit). Errors go to the caller.
+   * An event that came meanwhile may be newer than the answer: then only the edit is taken
+   * from the answer (edits are ordered by their time), the rest stays as the event left it.
+   */
   async function editMessage(messageId: number, body: string): Promise<void> {
     const still = alive()
+    const mark = liveMark()
     const message = await api.editMessage(messageId, body)
-    if (still()) applyKnown(reactions.overlay(message))
+    if (!still()) return
+    if (!changedSince(messageId, mark)) {
+      applyKnown(reactions.overlay(message))
+      return
+    }
+    if (message.deleted || message.edited_at === null) return
+    const at = Date.parse(message.edited_at)
+    updateMessage(messageId, (m) =>
+      m.deleted || (m.edited_at !== null && Date.parse(m.edited_at) >= at) ? m : { ...m, body: message.body, edited_at: message.edited_at },
+    )
   }
 
   /**
@@ -573,6 +609,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     }
     const after = newestId(t.entries)
     const started = generation
+    const mark = liveMark()
     try {
       const [latest, missed] = await Promise.all([api.messages(channelId, { limit: PAGE_SIZE }), fetchAfter(channelId, after)])
       if (started !== generation) return
@@ -581,13 +618,13 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
           // Too much happened meanwhile: start again from the latest page.
           return {
             ...x,
-            entries: resetTo(x.entries, prepared(latest.data), meId()),
+            entries: resetTo(x.entries, prepared(latest.data, mark), meId()),
             hasMoreBefore: latest.has_more,
             stale: false,
             refreshFailed: false,
           }
         }
-        const repaired = mergeMessages(x.entries, prepared([...missed.messages, ...latest.data]), meId())
+        const repaired = mergeMessages(x.entries, prepared([...missed.messages, ...latest.data], mark), meId())
         return { ...withEntries(x, repaired), stale: false, refreshFailed: false }
       })
       refreshed(channelId)

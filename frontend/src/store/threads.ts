@@ -14,12 +14,14 @@
  *   Known limit: removing the latest reply of a thread that is not loaded keeps the old
  *   "last reply" time until the next refresh (the previous reply's time is not known).
  * - After a reconnection the open thread is refetched; the others are stale until opened.
+ * - A summary moved by a reply is a live change: a page asked for before it does not take it
+ *   back (see liveMark in messages.ts).
  */
 import { isApiError } from '../api/client.ts'
 import type { Api } from '../api/endpoints.ts'
 import type { Message } from '../api/types.ts'
 import { fresher, mergeMessages, oldestId, resetTo } from './merge.ts'
-import { peekTimeline, threadKey, timelineKeys, updateMessage, updateTimeline, type Timeline } from './messages.ts'
+import { liveMark, noteLiveChange, notOlderThanStore, peekTimeline, threadKey, timelineKeys, updateMessage, updateTimeline, type Timeline } from './messages.ts'
 
 export const REPLIES_PAGE = 50
 /** Reply ids whose effect on their parent's summary is applied (bounded). */
@@ -80,6 +82,7 @@ export function createThreads({ api, meId, alive, prepare }: Deps) {
   async function load(channelId: number, parentId: number): Promise<void> {
     const key = threadKey(parentId)
     const still = alive()
+    const mark = liveMark()
     loads.get(parentId)?.abort()
     const controller = new AbortController()
     loads.set(parentId, controller)
@@ -94,8 +97,8 @@ export function createThreads({ api, meId, alive, prepare }: Deps) {
         return
       }
       for (const reply of page.data) remember(reply.id, reply.deleted ? 'deleted' : 'live')
-      const parent = prepare(page.parent)
-      const replies = page.data.map(prepare)
+      const parent = prepare(notOlderThanStore(page.parent, mark))
+      const replies = page.data.map((reply) => prepare(notOlderThanStore(reply, mark)))
       updateTimeline(key, (t) => ({
         ...t,
         parent: t.parent ? fresher(t.parent, parent) : parent,
@@ -134,6 +137,7 @@ export function createThreads({ api, meId, alive, prepare }: Deps) {
     const before = t ? oldestId(t.entries) : null
     if (!t || t.status !== 'ready' || t.loadingOlder || !t.hasMoreBefore || before === null) return
     const still = alive()
+    const mark = liveMark()
     updateTimeline(key, (x) => ({ ...x, loadingOlder: true, olderFailed: false }))
     try {
       const page = await api.replies(parentId, { before, limit: REPLIES_PAGE })
@@ -141,7 +145,11 @@ export function createThreads({ api, meId, alive, prepare }: Deps) {
       for (const reply of page.data) remember(reply.id, reply.deleted ? 'deleted' : 'live')
       updateTimeline(key, (x) => ({
         ...x,
-        entries: mergeMessages(x.entries, page.data.map(prepare), meId()),
+        entries: mergeMessages(
+          x.entries,
+          page.data.map((reply) => prepare(notOlderThanStore(reply, mark))),
+          meId(),
+        ),
         hasMoreBefore: page.has_more,
         loadingOlder: false,
       }))
@@ -182,7 +190,10 @@ export function createThreads({ api, meId, alive, prepare }: Deps) {
       remember(reply.id, 'deleted')
       delta = wasHeld ? 0 : -1
     }
-    if (delta !== 0) updateMessage(parentId, (m) => withSummaryDelta(m, delta, reply.created_at))
+    if (delta !== 0) {
+      noteLiveChange(parentId)
+      updateMessage(parentId, (m) => withSummaryDelta(m, delta, reply.created_at))
+    }
     recount(parentId)
   }
 
