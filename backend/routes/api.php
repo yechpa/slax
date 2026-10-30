@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\DirectChannelController;
+use App\Http\Controllers\FileController;
 use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\MeController;
 use App\Http\Controllers\MessageController;
@@ -39,5 +40,7 @@ Route::prefix('v1')->group(function () {
         Route::delete('/messages/{message}', [MessageController::class, 'destroy']);
         Route::put('/messages/{message}/reactions/{emoji}', [ReactionController::class, 'store']);
         Route::delete('/messages/{message}/reactions/{emoji}', [ReactionController::class, 'destroy']);
+
+        Route::post('/files', [FileController::class, 'store'])->middleware('throttle:uploads');
     });
 });
