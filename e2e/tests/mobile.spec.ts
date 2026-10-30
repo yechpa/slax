@@ -188,6 +188,10 @@ test('the main controls are at least 44 x 44 px, the way to a message’s action
     await measure('channels', page.locator('.sidebar a.nav-item'))
     await measure('sidebar actions', page.locator('.sidebar .nav-item--action'))
     await measure('account menu', view.userMenu)
+    // Inside it: language, theme and Sign out (and Install / Send a test where they show).
+    await view.userMenu.tap()
+    await measure('account menu buttons', page.locator('.user-menu__panel .btn'))
+    await measure('account menu options', page.locator('.user-menu__panel .segmented__option'))
     expect(tooSmall).toEqual([])
   } finally {
     await closeAll(person)

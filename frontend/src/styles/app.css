@@ -357,10 +357,18 @@
     justify-self: start;
   }
 
-  /* A finger needs 44 px: the whole line is the target. */
+  /* A finger needs 44 px: the switch's whole line, and every button and option of the menu. */
   @media (pointer: coarse) {
-    .push__toggle {
+    .push__toggle,
+    .user-menu__panel .btn,
+    .user-menu__panel .segmented__option {
       min-block-size: 2.75rem;
+    }
+
+    .user-menu__panel .btn,
+    .user-menu__panel .segmented__option {
+      min-inline-size: 2.75rem;
+      justify-content: center;
     }
   }
 
