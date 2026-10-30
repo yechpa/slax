@@ -34,6 +34,7 @@ node_image="$(sed -n 's/^ *image: \(node:24[^ ]*\)$/\1/p' docker-compose.e2e.yml
 out=build/load
 sampler=""
 
+# shellcheck disable=SC2329 # run by the EXIT trap
 cleanup() {
     [ -z "$sampler" ] || kill "$sampler" 2> /dev/null || true
     "${dc[@]}" --profile load down -v --remove-orphans > /dev/null 2>&1 || true
@@ -59,7 +60,7 @@ cat > "$out/machine.json" << EOF
   "cpu": "$(lscpu 2> /dev/null | sed -n 's/^Model name: *//p' | head -n 1)",
   "threads": $(nproc),
   "memory_gib": $(awk -v k="$mem_kib" 'BEGIN { printf "%.1f", k / 1048576 }'),
-  "os": "$(. /etc/os-release && echo "$PRETTY_NAME")",
+  "os": "$(sed -n 's/^PRETTY_NAME="\(.*\)"$/\1/p' /etc/os-release)",
   "kernel": "$(uname -r)",
   "docker": "$(docker version --format '{{.Server.Version}}')",
   "arch": "$(uname -m)"
