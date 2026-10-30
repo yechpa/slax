@@ -28,7 +28,7 @@ import { isApiError } from '../api/client.ts'
 import type { Api } from '../api/endpoints.ts'
 import type { Channel, FileInfo, Message } from '../api/types.ts'
 import type { UploadFn } from '../api/upload.ts'
-import type { Realtime } from '../realtime/echo.ts'
+import type { EventHandlers, Realtime } from '../realtime/echo.ts'
 import { bumpUnread, channelById, channels, markReadLocally, setChannels, setUnread, upsertChannel } from './channels.ts'
 import {
   addPending,
@@ -42,9 +42,11 @@ import {
   updatePending,
 } from './merge.ts'
 import { applyKnown, channelKey, findMessage, peekTimeline, threadKey, timelineKeys, updateTimeline } from './messages.ts'
+import { createPresence } from './presence.ts'
 import { createReactions } from './reactions.ts'
 import { me } from './session.ts'
 import { createThreads, type ReplyEvent } from './threads.ts'
+import { createTyping } from './typing.ts'
 import { createUploads } from './uploads.ts'
 
 export const PAGE_SIZE = 50
@@ -110,6 +112,12 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   const reactions = createReactions({ api, meId, alive })
   const threads = createThreads({ api, meId, alive, prepare: (message) => reactions.overlay(message) })
   const uploads = createUploads({ upload })
+  const presence = createPresence({ api })
+  const typing = createTyping({
+    whisper: (channelId, data) => realtime?.whisper(`private-channel.${channelId}`, 'client-typing', data),
+    meId,
+    membersOf: (channelId) => channelById.peek().get(channelId)?.members?.map((m) => m.id) ?? null,
+  })
 
   async function refreshChannels(): Promise<void> {
     const started = generation
@@ -131,7 +139,8 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     }
     for (const id of wanted) {
       if (subscriptions.has(id) || (refusals.get(id) ?? 0) >= 2) continue
-      const handlers = Object.fromEntries(MESSAGE_EVENTS.map((event) => [event, (payload: unknown) => onMessageEvent(id, event, payload)]))
+      const handlers: EventHandlers = Object.fromEntries(MESSAGE_EVENTS.map((event) => [event, (payload: unknown) => onMessageEvent(id, event, payload)]))
+      handlers['client-typing'] = (payload, meta) => typing.received(id, payload, meta)
       subscriptions.set(
         id,
         realtime.subscribe(`private-channel.${id}`, handlers, () => {
@@ -149,6 +158,8 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   function onMessageEvent(channelId: number, event: (typeof MESSAGE_EVENTS)[number], payload: unknown): void {
     if (!isMessage(payload) || payload.channel_id !== channelId || !channelById.peek().has(channelId)) return
     const message = reactions.overlay(fromBroadcast(payload))
+    // Their message is here: they are done typing it.
+    if (event === 'message.created' && !message.deleted) typing.noteMessage(channelId, message.user.id, message.parent_id)
     if (message.parent_id !== null) {
       // A reply: into its thread, and its parent's summary (held with the channel's page if one is coming).
       batch(() => {
@@ -610,6 +621,8 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     threads.stop()
     reactions.clear()
     uploads.stop()
+    presence.stop()
+    typing.stop()
     current = null
   }
 
@@ -642,6 +655,8 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     editMessage,
     deleteMessage,
     uploads,
+    presence,
+    typing,
     /** Exposed for tests and for the realtime fake. */
     onMessageEvent,
   }
