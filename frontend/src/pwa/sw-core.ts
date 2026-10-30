@@ -37,6 +37,9 @@ export function routeRequest(request: RequestShape, origin: string, precached: R
   const url = new URL(request.url)
   if (url.origin !== origin) return 'network'
   if (NEVER.test(url.pathname)) return 'network'
+  // Any other same-origin navigation is a page of the app (nginx answers them with index.html).
+  // By design this includes a file opened as a page, such as /robots.txt or /sw.js: online it
+  // comes from the network as usual; offline it gets the shell, like any unknown route.
   if (request.mode === 'navigate') return 'shell'
   if (url.search === '' && precached.has(url.pathname)) return 'precache'
   return 'network'
