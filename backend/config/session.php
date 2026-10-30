@@ -32,7 +32,11 @@ return [
     |
     */
 
-    'lifetime' => (int) env('SESSION_LIFETIME', 120),
+    // Slax: 14 days (20160 minutes), rolling: each request starts the count again, so a
+    // notification tapped after a quiet week does not land on the sign-in screen. Sign-out
+    // and a ban end a session at once (UserSessions). The chart sets it from
+    // session.lifetimeMinutes.
+    'lifetime' => (int) env('SESSION_LIFETIME', 20160),
 
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
 

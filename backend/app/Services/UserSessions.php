@@ -43,7 +43,7 @@ class UserSessions
         }
     }
 
-    /** Ends every known session of the user. Returns how many were destroyed. */
+    /** Ends every known session of the user (a ban). Returns how many were destroyed. */
     public function destroyAll(User $user): int
     {
         $handler = app('session')->driver()->getHandler();
@@ -52,6 +52,8 @@ class UserSessions
 
         foreach ($ids as $id) {
             $handler->destroy((string) $id);
+            // Ended like a sign-out: a request still on its way cannot write it back.
+            $this->end((string) $id);
         }
         $redis->del(self::key($user->id));
 
