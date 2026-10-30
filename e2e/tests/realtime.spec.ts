@@ -149,10 +149,14 @@ test('a member removed from a private channel receives nothing from it any more'
   await send(owner, hello)
   await expect(ui(removed).sent(hello)).toHaveCount(1)
 
-  // The owner removes Hen from the channel details.
+  // The owner removes Hen from the channel details, and confirms.
   await ui(owner).header.locator('.channel-header__details').click()
   const details = owner.page.getByRole('dialog')
   await details.getByRole('button', { name: t('en', 'details.remove', { name: removed.name }) }).click()
+  const confirm = owner.page.getByRole('alertdialog')
+  await expect(confirm.locator('.dialog__title')).toHaveText(t('en', 'details.removeTitle', { name: removed.name, channel: `#${secret.name}` }))
+  await confirm.getByRole('button', { name: t('en', 'action.remove'), exact: true }).click()
+  await expect(confirm).toHaveCount(0)
   await expect(details.getByRole('button', { name: t('en', 'details.remove', { name: removed.name }) })).toHaveCount(0)
   await details.getByRole('button', { name: t('en', 'action.close') }).first().click()
 
