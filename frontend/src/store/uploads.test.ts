@@ -53,6 +53,26 @@ beforeEach(() => setLocale('en'))
 afterEach(() => resetUi())
 
 describe('uploads', () => {
+  it('goes back to uploading when the bytes are sent again (a 419 re-send), then ends done', async () => {
+    const { started, upload } = controlledUploads()
+    const uploads = createUploads({ upload })
+    const tray = uploads.tray(KEY)
+    uploads.add(KEY, 7, [file('report.pdf', 3, 'application/pdf')])
+    started[0].progress(1)
+    expect(tray.value[0]).toMatchObject({ status: 'scanning', progress: 1 })
+    // The session token had expired: the same bytes go again from the start.
+    started[0].progress(0)
+    expect(tray.value[0]).toMatchObject({ status: 'uploading', progress: 0 })
+    expect(uploads.busy(KEY)).toBe(true)
+    started[0].progress(0.5)
+    expect(tray.value[0]).toMatchObject({ status: 'uploading', progress: 0.5 })
+    started[0].progress(1)
+    expect(tray.value[0]).toMatchObject({ status: 'scanning', progress: 1 })
+    started[0].resolve(info(4, 'report.pdf'))
+    await flush()
+    expect(tray.value[0]).toMatchObject({ status: 'done', file: { id: 4 } })
+  })
+
   it('upload_progress_cancel_and_retry', async () => {
     const { started, upload } = controlledUploads()
     const uploads = createUploads({ upload })

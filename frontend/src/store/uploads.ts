@@ -58,7 +58,8 @@ export function createUploads({ upload = uploadFile }: { upload?: UploadFn } = {
     const source = sources.get(item.id)
     if (!source) return
     const transfer = upload(source, item.channelId, (fraction) => {
-      patch(key, item.id, fraction >= 1 ? { progress: 1, status: 'scanning' } : { progress: fraction })
+      // Below 1 it is (again, after a 419 re-send) sending bytes, whatever it said before.
+      patch(key, item.id, fraction >= 1 ? { progress: 1, status: 'scanning' } : { progress: fraction, status: 'uploading' })
     })
     running.set(item.id, transfer)
     transfer.promise.then(

@@ -5,7 +5,7 @@
  * (`ApiError`, with the server's `reason` for `file_rejected`).
  *
  * The server scans the file before answering, so "all bytes sent" is followed by a
- * wait: `onProgress(1)` then the answer.
+ * wait: `onProgress(1)` then the answer. A re-send after a 419 starts over at `onProgress(0)`.
  */
 import { ApiError, apiPath, ensureCsrfCookie, failure, noteOffline, noteOnline, parseJson, xsrfToken } from './client.ts'
 import type { FileInfo } from './types.ts'
@@ -52,6 +52,8 @@ export const uploadFile: UploadFn = (file, channelId, onProgress) => {
     if (aborted) throw new ApiError(0, 'aborted')
     let response = await attempt()
     if (response.status === 419) {
+      // The bytes go again from the start: progress says so (it is no longer "being checked").
+      onProgress(0)
       await ensureCsrfCookie(true)
       if (aborted) throw new ApiError(0, 'aborted')
       response = await attempt()
