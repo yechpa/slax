@@ -5,6 +5,7 @@ use App\Http\Controllers\DirectChannelController;
 use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\MeController;
 use App\Http\Controllers\MessageController;
+use App\Http\Controllers\PresenceController;
 use App\Http\Controllers\ReactionController;
 use Illuminate\Support\Facades\Route;
 
@@ -17,6 +18,9 @@ Route::prefix('v1')->group(function () {
         Route::post('/auth/logout', [GoogleAuthController::class, 'logout']);
         Route::get('/me', [MeController::class, 'show']);
         Route::patch('/me', [MeController::class, 'update']);
+
+        Route::post('/presence/heartbeat', [PresenceController::class, 'heartbeat'])->middleware('throttle:presence-heartbeat');
+        Route::get('/presence', [PresenceController::class, 'index']);
 
         Route::get('/channels', [ChannelController::class, 'index']);
         Route::post('/channels', [ChannelController::class, 'store']);

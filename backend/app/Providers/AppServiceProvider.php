@@ -36,6 +36,8 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('auth-start', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
         RateLimiter::for('auth-callback', fn (Request $request) => Limit::perMinute(20)->by($request->ip()));
         RateLimiter::for('dms', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
+        // One tab pings 2.4 times a minute; this leaves room for about eight.
+        RateLimiter::for('presence-heartbeat', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
         RateLimiter::for('messages', fn (Request $request) => Limit::perMinute(30)->by('user:'.$request->user()->id));
 
         // Ids are bigints: anything else is a 404, not a database error.
