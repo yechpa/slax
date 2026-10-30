@@ -20,6 +20,8 @@ class PresenceController extends Controller
         $request->validate(['active' => ['required', 'boolean']]);
 
         $this->presence->heartbeat($request->user()->id, $request->boolean('active'));
+        // Activity, as far as the demo's account expiry is concerned (one write per 15 minutes).
+        $request->user()->touchLastSeen();
 
         return response()->noContent();
     }

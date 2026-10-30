@@ -33,6 +33,16 @@ class UserFactory extends Factory
         return $this->state(['is_admin' => true]);
     }
 
+    /** A visitor's account on the public demo, last seen $daysAgo days ago. */
+    public function demo(int $daysAgo = 0): static
+    {
+        return $this->state(fn () => [
+            'account_type' => User::ACCOUNT_DEMO,
+            'last_seen_at' => now()->subDays($daysAgo),
+            'created_at' => now()->subDays($daysAgo + 1),
+        ]);
+    }
+
     public function banned(): static
     {
         return $this->state(['banned_at' => now()]);
