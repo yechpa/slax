@@ -29,6 +29,7 @@
   "action.close": "סגירה",
   "action.react": "הוספת אמוג'י",
   "action.reply": "תשובה בשרשור",
+  "action.copy": "העתקת הטקסט",
 
   "search.label": "חיפוש",
   "search.placeholder": "חיפוש הודעות ואנשים",
@@ -149,6 +150,7 @@
   "reaction.picker": "בחירת תגובה",
   "reaction.addTo": "הוספת תגובה",
   "message.more": "פעולות נוספות",
+  "message.copied": "הטקסט הועתק.",
   "message.editLabel": "עריכת ההודעה שלך",
   "message.editHint": "Enter לשמירה · Escape לביטול",
   "message.deleteTitle": "למחוק את ההודעה?",
@@ -157,6 +159,7 @@
   "error.editEmpty": "כדי לערוך הודעה צריך לכתוב בה טקסט.",
   "error.editGone": "ההודעה הזו כבר לא קיימת.",
   "error.deleteFailed": "לא ניתן היה למחוק את ההודעה. כדאי לנסות שוב.",
+  "error.copyFailed": "לא ניתן היה להעתיק את הטקסט.",
   "thread.title": "שרשור",
   "thread.in": "ב־{channel}",
   "thread.close": "סגירת השרשור",

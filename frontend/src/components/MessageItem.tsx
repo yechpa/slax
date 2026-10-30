@@ -3,11 +3,12 @@
  * tombstone (its thread stays reachable), or one of my messages still on its way.
  */
 import type { ComponentChildren } from 'preact'
-import { useContext, useRef, useState } from 'preact/hooks'
+import { useContext, useEffect, useRef, useState } from 'preact/hooks'
 import { isApiError } from '../api/client.ts'
 import type { LiveMessage, Message as ApiMessage } from '../api/types.ts'
 import { formatDay, formatTime, sameDay } from '../i18n/format.ts'
 import { t } from '../i18n/index.ts'
+import { onLongPress } from '../lib/longPress.ts'
 import { navigate, threadPath } from '../router.ts'
 import type { Entry } from '../store/merge.ts'
 import { me } from '../store/session.ts'
@@ -103,7 +104,11 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
   const [confirming, setConfirming] = useState<Confirm>(null)
   const [deleting, setDeleting] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
+  /** Counts long presses on the message: each opens its menu (MessageActions). */
+  const [menuRequest, setMenuRequest] = useState(0)
   const root = useRef<HTMLDivElement>(null)
+  const editingNow = useRef(editing)
+  editingNow.current = editing
   const mine = message.user.id === me.value?.id
   const moderator = me.value?.is_admin === true && !mine
   const canPost = place?.canPost ?? false
@@ -141,14 +146,35 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
     }
   }
 
+  /** The text to the clipboard: on a phone, a message's text is not selectable (chat.css), this is the way. */
+  const copy = () => {
+    // Called right in the tap (iOS wants the user's gesture), the answer comes later.
+    const done = (async () => navigator.clipboard.writeText(message.body))()
+    done.then(
+      () => showToast({ tone: 'success', text: t('message.copied'), key: 'copy' }),
+      () => showToast({ tone: 'error', text: t('error.copyFailed'), key: 'copy' }),
+    )
+  }
+
   // Someone who can do nothing with it (not a member, not theirs, not moderating) gets no toolbar at all.
+  const hasActions = Boolean(chat && place && (canPost || mine || moderator))
+  // A long press (a finger held on the message) opens its menu, as a hover shows the toolbar.
+  useEffect(() => {
+    const element = root.current
+    if (!hasActions || !element) return
+    return onLongPress(element, () => {
+      if (!editingNow.current) setMenuRequest((count) => count + 1)
+    })
+  }, [hasActions])
+
   const actions =
-    chat && place && (canPost || mine || moderator) ? (
+    chat && place && hasActions ? (
       <MessageActions
         canPost={canPost}
         mine={mine}
         onReply={place.inThread ? undefined : () => navigate(threadPath(place.channelId, message.id))}
         onReact={(emoji) => void chat.toggleReaction(message.id, emoji)}
+        onCopy={message.body !== '' ? copy : undefined}
         onEdit={() => setEditing(true)}
         onDelete={() => setConfirming({ kind: 'own' })}
         moderation={
@@ -161,6 +187,7 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
             : undefined
         }
         onOpenChange={setActionsOpen}
+        menuRequest={menuRequest}
       />
     ) : undefined
 

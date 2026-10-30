@@ -86,7 +86,7 @@ describe('administration', () => {
     expect(app.host.textContent).not.toContain('Administration')
 
     // Someone else's message: no moderation in its menu (there is no other item for a non-member either).
-    expect(await openMessageMenu(app.host)).toEqual(['Reply in thread', 'Add reaction'])
+    expect(await openMessageMenu(app.host)).toEqual(['Reply in thread', 'Add reaction', 'Copy text'])
     key(document.activeElement!, { key: 'Escape' })
     await settle()
 

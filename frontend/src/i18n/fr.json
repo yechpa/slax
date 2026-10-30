@@ -29,6 +29,7 @@
   "action.close": "Fermer",
   "action.react": "Ajouter une réaction",
   "action.reply": "Répondre dans le fil",
+  "action.copy": "Copier le texte",
 
   "search.label": "Rechercher",
   "search.placeholder": "Rechercher messages et personnes",
@@ -149,6 +150,7 @@
   "reaction.picker": "Choisir une réaction",
   "reaction.addTo": "Ajouter une réaction",
   "message.more": "Plus d'actions",
+  "message.copied": "Texte copié.",
   "message.editLabel": "Modifier votre message",
   "message.editHint": "Entrée pour enregistrer · Échap pour annuler",
   "message.deleteTitle": "Supprimer ce message ?",
@@ -157,6 +159,7 @@
   "error.editEmpty": "Un message modifié doit contenir du texte.",
   "error.editGone": "Ce message n'existe plus.",
   "error.deleteFailed": "Impossible de supprimer le message. Veuillez réessayer.",
+  "error.copyFailed": "Le texte n'a pas pu être copié.",
   "thread.title": "Fil",
   "thread.in": "dans {channel}",
   "thread.close": "Fermer le fil",

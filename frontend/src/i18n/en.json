@@ -29,6 +29,7 @@
   "action.close": "Close",
   "action.react": "Add reaction",
   "action.reply": "Reply in thread",
+  "action.copy": "Copy text",
 
   "search.label": "Search",
   "search.placeholder": "Search messages and people",
@@ -149,6 +150,7 @@
   "reaction.picker": "Pick a reaction",
   "reaction.addTo": "Add a reaction",
   "message.more": "More actions",
+  "message.copied": "Copied.",
   "message.editLabel": "Edit your message",
   "message.editHint": "Enter to save · Escape to cancel",
   "message.deleteTitle": "Delete this message?",
@@ -157,6 +159,7 @@
   "error.editEmpty": "A message needs some text to be edited.",
   "error.editGone": "This message no longer exists.",
   "error.deleteFailed": "Could not delete the message. Please try again.",
+  "error.copyFailed": "The text could not be copied.",
   "thread.title": "Thread",
   "thread.in": "in {channel}",
   "thread.close": "Close the thread",

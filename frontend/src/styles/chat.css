@@ -53,6 +53,30 @@
       margin-inline-end: calc(var(--space-2) * -1);
       color: var(--color-muted);
     }
+
+    /*
+     * A long press on a message opens its menu (MessageItem), which has "Copy text": the
+     * browser's own selection handles and callout would come up under it, so the message's
+     * text is not selectable here. Links and images keep their own long press (open, share,
+     * save); the inline editor stays an editor.
+     */
+    .message--menu .message__main,
+    .message--menu .message__main * {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    .message--menu .message__main :is(a[href], img) {
+      -webkit-touch-callout: default;
+    }
+
+    .message--menu .message-editor,
+    .message--menu .message-editor * {
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-touch-callout: default;
+    }
   }
 
   /* ── Popovers: menus and the emoji picker ────────────── */
