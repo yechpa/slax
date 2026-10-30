@@ -7,6 +7,12 @@
 {{- if ge (int $m.activeDeadlineSeconds) 60 }}
 {{- fail "monitor.activeDeadlineSeconds must be under 60 (a run must end before the next minute's)" }}
 {{- end }}
+{{- if gt (add $m.timeoutSeconds $m.telegramTimeoutSeconds 5) (int $m.budgetSeconds) }}
+{{- fail "monitor.budgetSeconds must leave room for the checks and one alert (timeoutSeconds + telegramTimeoutSeconds + 5)" }}
+{{- end }}
+{{- if gt (add $m.budgetSeconds 15) (int $m.activeDeadlineSeconds) }}
+{{- fail "monitor.budgetSeconds + 15 s (pod start-up) must not exceed monitor.activeDeadlineSeconds" }}
+{{- end }}
 # Uptime and disk watch from outside the app (deploy/monitoring/uptime.sh in the slax-backup
 # image), every minute: the web pod's /api/v1/health, Reverb's /up, PostgreSQL and Redis
 # (answering, no password sent) and, with monitor.checkPublicUrl, the public URL through the
@@ -57,7 +63,8 @@ spec:
         {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
     spec:
       backoffLimit: 0
-      # Shorter than the schedule's minute: two runs never overlap.
+      # Shorter than the schedule's minute: two runs never overlap. The script stops starting
+      # alerts at budgetSeconds, 15 s before this (pod start-up).
       activeDeadlineSeconds: {{ $m.activeDeadlineSeconds }}
       template:
         metadata:
@@ -94,6 +101,10 @@ spec:
                   value: {{ mul $m.disk.realertHours 3600 | quote }}
                 - name: MONITOR_TIMEOUT
                   value: {{ $m.timeoutSeconds | quote }}
+                - name: MONITOR_TELEGRAM_TIMEOUT
+                  value: {{ $m.telegramTimeoutSeconds | quote }}
+                - name: MONITOR_BUDGET_SECONDS
+                  value: {{ $m.budgetSeconds | quote }}
                 # The names pg_isready presents (no password: it never signs in).
                 - name: PGUSER
                   value: {{ .Values.postgres.username | quote }}

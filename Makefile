@@ -158,6 +158,8 @@ chart-lint: ## Lint, render and validate the Helm chart (dev and prod values)
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.APP_KEY=x > /dev/null 2>&1 || { echo 'rendered a secret in the ConfigMap'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.disk.recoverPercent=80 > /dev/null 2>&1 || { echo 'rendered a monitor without disk hysteresis'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.activeDeadlineSeconds=60 > /dev/null 2>&1 || { echo 'rendered monitor runs that can overlap'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.budgetSeconds=45 > /dev/null 2>&1 || { echo 'rendered a monitor budget past its deadline'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.timeoutSeconds=30 > /dev/null 2>&1 || { echo 'rendered monitor checks longer than its budget'; exit 1; }; \
 	echo '==> kubeconform'; \
 	$(KUBECONFORM) $(CHART_OUT)/dev.yaml $(CHART_OUT)/prod.yaml deploy/dev/deployer-rbac.yaml deploy/dev/cluster-issuer.example.yaml; \
 	echo '==> chart rules'; \

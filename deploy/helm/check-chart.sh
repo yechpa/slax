@@ -110,6 +110,12 @@ for env in dev prod; do
     expect "$env: the uptime monitor runs every minute, never two at once, each run ending within the minute" \
         "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | .spec.schedule + "/" + .spec.concurrencyPolicy + "/" + (.spec.startingDeadlineSeconds | tostring) + "/" + (.spec.jobTemplate.spec.backoffLimit | tostring) + "/" + ((.spec.jobTemplate.spec.activeDeadlineSeconds < 60) | tostring)' "$file")" \
         "* * * * */Forbid/30/0/true"
+    # MONITOR_TIMEOUT, MONITOR_TELEGRAM_TIMEOUT, MONITOR_BUDGET_SECONDS, activeDeadlineSeconds
+    budget="$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | .spec.jobTemplate.spec | ([.template.spec.containers[0].env[] | select(.name == "MONITOR_TIMEOUT" or .name == "MONITOR_TELEGRAM_TIMEOUT" or .name == "MONITOR_BUDGET_SECONDS") | .value] + [.activeDeadlineSeconds]) | join(" ")' "$file")"
+    # shellcheck disable=SC2086 # four numbers
+    set -- $budget
+    expect "$env: the uptime monitor's worst case fits: checks (in parallel) + one alert + 5 s <= budget, budget + 15 s <= the Job's deadline ($budget)" \
+        "$(($# == 4 && $1 + $2 + 5 <= $3 && $3 + 15 <= $4))" "1"
     expect "$env: the uptime monitor keeps one finished Job of each kind" \
         "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | (.spec.successfulJobsHistoryLimit | tostring) + "/" + (.spec.failedJobsHistoryLimit | tostring)' "$file")" \
         "1/1"

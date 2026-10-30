@@ -222,7 +222,13 @@ monitor:
   checkPublicUrl: false
   # A DOWN alert after this many failed checks in a row (one a minute).
   failThreshold: 3
+  # Time, per run: the checks run in parallel, each given timeoutSeconds; a Telegram call
+  # is given telegramTimeoutSeconds; no alert is started that could end after budgetSeconds
+  # (it waits for the next run). The chart requires timeoutSeconds + telegramTimeoutSeconds
+  # + 5 <= budgetSeconds and budgetSeconds + 15 <= activeDeadlineSeconds (pod start-up).
   timeoutSeconds: 10
+  telegramTimeoutSeconds: 5
+  budgetSeconds: 35
   disk:
     # Alert above this usage, again every realertHours while above; all clear below
     # recoverPercent (nothing in between).
