@@ -6,19 +6,27 @@
  *   `dir="ltr"` so a URL keeps its order inside a Hebrew sentence. Any other scheme
  *   (javascript:, data:, …) stays plain text. Trailing punctuation and unbalanced closing
  *   brackets are left out of the link ("(see https://x.test/a)." links https://x.test/a).
- * - `@name` becomes a Mention: sigil and name in one <bdi>.
+ * - `@name` becomes a Mention, and `#channel` (a valid channel name) a ChannelName: sigil
+ *   and name in one <bdi>, so a Hebrew sentence never shows "general#".
  */
+import { ChannelName } from './ui/ChannelName.tsx'
 import { Mention } from './ui/Mention.tsx'
 
-export type Token = { type: 'text'; text: string } | { type: 'link'; text: string; href: string } | { type: 'mention'; text: string; name: string }
+export type Token =
+  | { type: 'text'; text: string }
+  | { type: 'link'; text: string; href: string }
+  | { type: 'mention'; text: string; name: string }
+  | { type: 'channel'; text: string; name: string }
 
 // A scheme not glued to a preceding letter ("nohttps://"), then anything up to whitespace,
 // <>", or an invisible formatting character: zero-width spaces and joiners, bidi marks,
 // embeddings, overrides and isolates (an RLO inside a link would reorder what it shows),
 // and the BOM. One character class, so matching stays linear however long the text.
 const URL_PATTERN = /(?<![\p{L}\p{N}_])https?:\/\/[^\s<>"\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]+/giu
-// "@name" at the start, or after whitespace or an opening bracket/quote (not in "mail@example.test").
-const MENTION_PATTERN = /(?<=^|[\s([{"'«])@([\p{L}\p{N}][\p{L}\p{N}_.-]{0,39})/gu
+// "@name" or "#channel" at the start, or after whitespace or an opening bracket/quote (not in
+// "mail@example.test" or "a#b"). A channel reference is a whole channel name (backend rule:
+// lowercase letters, digits and dashes, 40 at most), not the start of a longer word.
+const REFERENCE_PATTERN = /(?<=^|[\s([{"'«])(?:@([\p{L}\p{N}][\p{L}\p{N}_.-]{0,39})|#([a-z0-9][a-z0-9-]{0,39})(?![\p{L}\p{N}_]))/gu
 const TRAILING = /[.,:;!?'"»…]$/u
 const PAIRS: Record<string, string> = { ')': '(', ']': '[', '}': '{' }
 
@@ -77,12 +85,17 @@ function safeHref(raw: string): string | null {
 function mentions(text: string): Token[] {
   const tokens: Token[] = []
   let last = 0
-  for (const match of text.matchAll(MENTION_PATTERN)) {
-    const name = match[1].replace(/[.\-_]+$/u, '')
-    if (!name) continue
+  for (const match of text.matchAll(REFERENCE_PATTERN)) {
+    let token: Token | null = null
+    if (match[2] !== undefined) token = { type: 'channel', text: `#${match[2]}`, name: match[2] }
+    else {
+      const name = (match[1] ?? '').replace(/[.\-_]+$/u, '')
+      if (name) token = { type: 'mention', text: `@${name}`, name }
+    }
+    if (!token) continue
     if (match.index > last) tokens.push({ type: 'text', text: text.slice(last, match.index) })
-    tokens.push({ type: 'mention', text: `@${name}`, name })
-    last = match.index + name.length + 1
+    tokens.push(token)
+    last = match.index + token.text.length
   }
   if (last < text.length) tokens.push({ type: 'text', text: text.slice(last) })
   return tokens
@@ -100,6 +113,7 @@ export function RichText({ text }: { text: string }) {
           )
         }
         if (token.type === 'mention') return <Mention key={index} name={token.name} />
+        if (token.type === 'channel') return <ChannelName key={index} name={token.name} />
         return token.text
       })}
     </>

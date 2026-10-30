@@ -71,6 +71,12 @@ describe('message bodies', () => {
     expect([...host.querySelectorAll('bdi.mention')].map((m) => m.textContent)).toEqual(['@נעם', '@dana'])
   })
 
+  it('isolates #channel references as one bidi unit, so a Hebrew sentence never shows general#', () => {
+    show('ראית את #general? גם (#ops-2) אבל לא a#b ולא #Caps או #-x')
+    expect([...host.querySelectorAll('bdi.channel-name')].map((m) => m.textContent)).toEqual(['#general', '#ops-2'])
+    expect(tokenize('see #release-notes-, then #a1.').filter((t) => t.type === 'channel').map((t) => t.text)).toEqual(['#release-notes-', '#a1'])
+  })
+
   it('shows tombstones and the edited marker', () => {
     render(<MessageItem entry={{ kind: 'server', key: 'm:1', message: live(1, { edited_at: '2026-10-30T10:00:00Z' }) }} />, host)
     expect(host.querySelector('.message__edited')?.textContent).toBe('(edited)')
