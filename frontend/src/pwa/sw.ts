@@ -24,7 +24,7 @@ sw.addEventListener('install', (event) => {
 
 sw.addEventListener('activate', (event) => {
   // Takes the open pages at once: the first install works offline without a second visit.
-  event.waitUntil(activate(deps, CACHE).then(() => sw.clients.claim()))
+  event.waitUntil(activate(deps, CACHE, FILES, sw.location.origin).then(() => sw.clients.claim()))
 })
 
 sw.addEventListener('fetch', (event) => {
@@ -36,6 +36,7 @@ sw.addEventListener('fetch', (event) => {
 sw.addEventListener('message', (event) => {
   const type = (event.data as { type?: unknown } | null)?.type
   if (type === 'SKIP_WAITING') void sw.skipWaiting()
-  // After a sign-out the app empties Cache Storage; the shell is fetched again for offline use.
+  // After a sign-out the app empties Cache Storage; each worker (the active one, and one waiting
+  // to take over) fetches its own shell again for offline use.
   if (type === 'PRECACHE') event.waitUntil(precache(deps, CACHE, FILES, sw.location.origin))
 })

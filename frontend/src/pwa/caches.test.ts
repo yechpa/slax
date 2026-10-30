@@ -24,6 +24,15 @@ describe('clearAppCaches', () => {
     expect(active.postMessage).toHaveBeenCalledWith({ type: 'PRECACHE' })
   })
 
+  it('a version waiting to take over refills its own cache too (else it would start with none)', async () => {
+    const caches = fakeCaches(['slax-shell-old', 'slax-shell-new'])
+    const active = { postMessage: vi.fn() }
+    const waiting = { postMessage: vi.fn() }
+    await clearAppCaches(caches as unknown as CacheStorage, { active, waiting } as unknown as ServiceWorkerRegistration)
+    expect(active.postMessage).toHaveBeenCalledWith({ type: 'PRECACHE' })
+    expect(waiting.postMessage).toHaveBeenCalledWith({ type: 'PRECACHE' })
+  })
+
   it('does nothing where Cache Storage does not exist (insecure origin, old browser)', async () => {
     await expect(clearAppCaches(undefined, null)).resolves.toBeUndefined()
   })

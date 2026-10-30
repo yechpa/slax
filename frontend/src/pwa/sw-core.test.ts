@@ -99,6 +99,10 @@ class FakeCaches {
     return [...this.stores.keys()]
   }
 
+  async has(name: string) {
+    return this.stores.has(name)
+  }
+
   async delete(name: string) {
     return this.stores.delete(name)
   }
@@ -124,9 +128,26 @@ describe('precache (install)', () => {
     }
   })
 
-  it('fails the install when a file is missing (a half-filled cache never becomes active)', async () => {
+  it('fails the install when a file is missing, and puts nothing (never a half-filled cache)', async () => {
     const d = deps(async (request) => (request.url.endsWith('.js') ? new Response('', { status: 404 }) : page('ok')))
     await expect(precache(d, 'slax-shell-v1', [SHELL_URL, '/assets/index-abc123.js'], ORIGIN)).rejects.toThrow(/index-abc123\.js.*404/)
+    expect(d.caches.stores.get('slax-shell-v1')?.size ?? 0).toBe(0)
+  })
+
+  it('a refill after a deploy (old files gone from the server) leaves the cache empty, never mixed', async () => {
+    // The old worker refills its own list: the new index.html answers, its old bundle is gone.
+    const d = deps(async (request) => (request.url.endsWith('.js') ? new Response('', { status: 404 }) : page('index of the NEW version')))
+    await expect(precache(d, 'slax-shell-v1', [SHELL_URL, '/assets/index-abc123.js'], ORIGIN)).rejects.toThrow()
+    expect(d.caches.stores.get('slax-shell-v1')?.size ?? 0).toBe(0)
+  })
+
+  it('a network failure midway puts nothing either', async () => {
+    const d = deps(async (request) => {
+      if (request.url.endsWith('.js')) throw new TypeError('Failed to fetch')
+      return page('ok')
+    })
+    await expect(precache(d, 'slax-shell-v1', [SHELL_URL, '/assets/index-abc123.js'], ORIGIN)).rejects.toThrow(TypeError)
+    expect(d.caches.stores.get('slax-shell-v1')?.size ?? 0).toBe(0)
   })
 
   it('refuses a redirected response (the shell must be the page itself)', async () => {
@@ -138,11 +159,31 @@ describe('precache (install)', () => {
 })
 
 describe('activate', () => {
+  const FILES = [SHELL_URL, '/assets/index-abc123.js']
+
   it('deletes every cache but the current version (old shells, anything else on the origin)', async () => {
     const d = deps(async () => page('x'))
     for (const name of ['slax-shell-v0', 'slax-shell-v1', 'slax-runtime', 'something-else']) await d.caches.open(name)
-    await activate(d, 'slax-shell-v1')
+    await (await d.caches.open('slax-shell-v1')).put(SHELL_URL, page('cached'))
+    await activate(d, 'slax-shell-v1', FILES, ORIGIN)
     expect(await d.caches.keys()).toEqual(['slax-shell-v1'])
+    // Its own cache was there: nothing fetched.
+    expect(d.fetch).not.toHaveBeenCalled()
+  })
+
+  it('refills its own cache when it is gone (emptied by a sign-out while this version waited)', async () => {
+    const d = deps(async (request) => page(`body of ${new URL(request.url).pathname}`))
+    await (await d.caches.open('slax-shell-v0')).put(SHELL_URL, page('old'))
+    await activate(d, 'slax-shell-v1', FILES, ORIGIN)
+    expect(await d.caches.keys()).toEqual(['slax-shell-v1'])
+    expect([...d.caches.stores.get('slax-shell-v1')!.keys()]).toEqual(FILES)
+  })
+
+  it('activates anyway when that refill fails (offline): online use does not need the cache', async () => {
+    const d = deps(async () => {
+      throw new TypeError('Failed to fetch')
+    })
+    await expect(activate(d, 'slax-shell-v1', FILES, ORIGIN)).resolves.toBeUndefined()
   })
 })
 

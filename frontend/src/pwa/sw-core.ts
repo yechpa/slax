@@ -51,26 +51,35 @@ export interface SwDeps {
 }
 
 /**
- * Install: every file of the build into the version's cache, fetched fresh (not from the HTTP
- * cache) and without cookies (the shell is public: nothing personal can end up in it). Any
- * failure fails the install, so a half-filled cache never becomes the active one.
+ * Install (and refill): every file of the build into the version's cache, fetched fresh (not
+ * from the HTTP cache) and without cookies (the shell is public: nothing personal can end up
+ * in it). All files are fetched before any is stored: one failure (a 404 because a deploy
+ * removed this version's bundle, the network gone midway) stores nothing, so the cache is
+ * never half-filled or mixed with another version's files, and the install fails.
  */
 export async function precache(deps: SwDeps, cacheName: string, urls: readonly string[], origin: string): Promise<void> {
-  const cache = await deps.caches.open(cacheName)
-  await Promise.all(
+  const responses = await Promise.all(
     urls.map(async (path) => {
       const response = await deps.fetch(new Request(new URL(path, origin), { cache: 'reload', credentials: 'omit' }))
       if (!response.ok) throw new Error(`precache ${path}: HTTP ${response.status}`)
       if (response.redirected) throw new Error(`precache ${path}: redirected`)
-      await cache.put(path, response)
+      return [path, response] as const
     }),
   )
+  const cache = await deps.caches.open(cacheName)
+  await Promise.all(responses.map(([path, response]) => cache.put(path, response)))
 }
 
-/** Activate: only the current version's cache stays (older shells, anything else on the origin go). */
-export async function activate(deps: SwDeps, cacheName: string): Promise<void> {
+/**
+ * Activate: only the current version's cache stays (older shells, anything else on the origin
+ * go). If its own cache is gone (a sign-out emptied Cache Storage while this version waited),
+ * it is filled again; offline, that fails quietly (the app works online without it).
+ */
+export async function activate(deps: SwDeps, cacheName: string, urls: readonly string[], origin: string): Promise<void> {
   const names = await deps.caches.keys()
   await Promise.all(names.filter((name) => name !== cacheName).map((name) => deps.caches.delete(name)))
+  if (await deps.caches.has(cacheName)) return
+  await precache(deps, cacheName, urls, origin).catch(() => undefined)
 }
 
 /** The answer to a request routed `shell` or `precache`. */
