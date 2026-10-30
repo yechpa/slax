@@ -279,6 +279,19 @@ monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/k -e MONITOR_DISKS=volumes=/dis
 check "readable again, below 75 %: the all-clear still comes (the flag was kept)" \
     matches "$(last_alert)" '\[Prod\] DISK OK: volumes disk back to 1[01]% \(below 75%\)\.'
 
+echo "== a run already at its budget does not start reading the disks"
+# bash takes SECONDS from the environment: this run starts as if 31 s had gone already.
+before="$(alerts)"
+preload s disk.volumes.alerted=1 "disk.volumes.last=$clock"
+fill 1024
+monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/s -e MONITOR_DISKS=volumes=/disk -e SECONDS=31 -e MONITOR_BUDGET_SECONDS=35
+check "no df within 5 s of the budget: skipped, said, exit 0" has "$out" 'disk:volumes=skipped'
+check "... with a warning" has "$out" 'WARNING: no time left to read disk "volumes" in this run: skipped\.'
+check "... nothing sent" test "$(alerts)" = "$before"
+monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/s -e MONITOR_DISKS=volumes=/disk
+check "the next run reads it, its state kept (10 %: the all-clear for the alert of before)" \
+    matches "$(last_alert)" '\[Prod\] DISK OK: volumes disk back to 1[01]% \(below 75%\)\.'
+
 echo "== the real timeouts: everything hangs, Telegram too; the run still ends in time"
 # Five checks that never answer, at the chart's timeouts (10 s per check, 5 s per Telegram
 # call, a 35 s budget, the Job's deadline 50 s), each at its 3rd failure, two disks over

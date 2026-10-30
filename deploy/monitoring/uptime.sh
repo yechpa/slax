@@ -35,7 +35,8 @@
 # Time: a run must end before the Job's deadline. The checks run in parallel (the probe
 # phase costs one MONITOR_TIMEOUT); each Telegram call is capped at MONITOR_TELEGRAM_TIMEOUT;
 # an alert is attempted only if it can finish within MONITOR_BUDGET_SECONDS of the start,
-# otherwise it is left for the next run (logged as deferred, not lost). The chart keeps
+# otherwise it is left for the next run (logged as deferred, not lost); a disk is read (df,
+# 5 s at most) only if that ends within the budget too, otherwise skipped for this run. The chart keeps
 # MONITOR_BUDGET_SECONDS under the Job's activeDeadlineSeconds.
 #
 # Environment:
@@ -291,6 +292,13 @@ declare -A filesystems=()
 disk() {
     local name="$1" path="$2" fs total used avail percent alerted last k sent=0
     k="disk.$name"
+    # df may take its full 5 s: not started when that would end past the budget (a run late
+    # already, e.g. after slow probes and alerts). Its previous state stays as it is.
+    if [ $((SECONDS + 5)) -gt "$MONITOR_BUDGET_SECONDS" ]; then
+        summary+=("disk:$name=skipped")
+        log "WARNING: no time left to read disk \"$name\" in this run: skipped."
+        return 0
+    fi
     # (Unreadable: its previous state stays as it is, copied into `next` at the start.)
     if ! read -r fs total used avail < <(timeout 5 df -Pk "$path" 2> /dev/null | awk 'NR == 2 { print $1, $2, $3, $4 }') ||
         ! is_count "$total" || ! is_count "$used" || ! is_count "$avail" || [ $((used + avail)) -eq 0 ]; then
