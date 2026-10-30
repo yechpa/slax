@@ -503,7 +503,14 @@ are kept. By hand: `kubectl -n slax exec deploy/slax-scheduler -- php artisan sl
    A failed first boot (`/var/log/slax-bootstrap.log` ends without "bootstrap done"): fix the
    cause, then `tailscale ssh ubuntu@slax-prod -- sudo bash /usr/local/sbin/slax-bootstrap.sh`
    (every step is safe to repeat). If Tailscale itself never came up, use the break-glass
-   shell below and run the same command there.
+   shell below and run the same command there. If `tailscale up` failed *after* reaching
+   Tailscale (the log shows it, or the key is marked used in the admin console), the
+   single-use key is spent: create a new one (§3.2), and in the break-glass shell run
+   `sudo install -d -m 700 /run/slax-bootstrap`, write the key to
+   `/run/slax-bootstrap/ts-authkey` (`sudo sh -c 'umask 077; cat > /run/slax-bootstrap/ts-authkey'`,
+   paste, Ctrl-D), then
+   `sudo tailscale up --auth-key=file:/run/slax-bootstrap/ts-authkey --hostname=slax-prod --advertise-tags=tag:slax-prod --ssh`
+   and `sudo bash /usr/local/sbin/slax-bootstrap.sh` (it shreds the file).
 4. Node unreachable on the tailnet too: AWS console → the instance → *Reboot*. Still nothing:
    *Get system log* / *Get instance screenshot*. Break-glass shell without opening a port:
    attach the managed policy `AmazonSSMManagedInstanceCore` to the role `slax-prod-instance`
@@ -531,8 +538,12 @@ value (or remove the key: `kubectl -n slax patch secret slax-secrets --type json
 
 ### S3 errors (uploads or downloads fail, backups fail at "upload")
 
-1. The role reaches the pods: `kubectl -n slax exec deploy/slax-queue -- php artisan tinker --execute 'echo json_encode(Storage::disk("s3")->files("", false));'`.
-   `Credentials ... not found` / timeouts to 169.254.169.254: the instance metadata options
+1. Probe the bucket with the pods' own credentials:
+   `kubectl -n slax exec deploy/slax-queue -- php artisan slax:s3-probe` → `PASS`, or
+   `FAIL at <step> (…): <AWS error code> (<class>)`. The app's disks run with `throw => false`,
+   so a refused write only shows up as a failed upload (no AWS error in the logs): the probe
+   forces errors on and names them. Without a running release, use the one-off pod of §7
+   item 7. `CredentialsException` / timeouts to 169.254.169.254: the instance metadata options
    (`aws ec2 describe-instances … MetadataOptions`: HttpTokens required, hop limit **2**;
    provision.sh re-applies them) or the instance profile is missing.
 2. `AccessDenied` (on uploads: also check `s3:PutObjectAcl` is in the files statement, Flysystem
@@ -647,13 +658,26 @@ no AWS access). Tick each item.
 6. [ ] From outside the tailnet: `nc -vz -w 5 <Elastic IP> 22` and `… 6443` time out; on the
    tailnet `kubectl get nodes` works through the MagicDNS name.
 7. [ ] **Before tagging v0.1.0** (moto and MinIO enforce no IAM, so nothing local proves the
-   role's policy): once the cluster is up, write and read an object on the real bucket with
-   the instance role, from the queue pod:
-   `kubectl -n slax exec deploy/slax-queue -- php artisan tinker --execute 'var_dump(Storage::disk("s3")->put("checks/acl-probe.txt", "ok"), Storage::disk("s3")->get("checks/acl-probe.txt"), Storage::disk("s3")->delete("checks/acl-probe.txt"));'`
-   → `bool(true) string(2) "ok" bool(true)`. An `AccessDenied` on the put means the role lacks
-   `s3:PutObjectAcl` (Flysystem sends `x-amz-acl: private`): re-run provision.sh. Then an
-   actual upload in the app (item 4). Also `kubectl -n slax exec deploy/slax-scheduler -- php artisan backups:check-freshness`
-   after the first backup → "The newest backup is N hours old".
+   role's policy). No Slax pod exists yet, so use a one-off pod of the very image you are about
+   to release (a `main` sha whose Images run is green; it contains `slax:s3-probe`). It runs in
+   the `default` namespace on purpose: no Pod Security restriction, no network policy, and the
+   instance role is reachable as from the app (IMDSv2, hop limit 2); `--rm` deletes it:
+
+   ```sh
+   tailscale ssh ubuntu@slax-prod -- sudo k3s kubectl run slax-s3-probe -n default --rm -i --restart=Never \
+     --image=ghcr.io/yechpa/slax-app:<sha> \
+     --env=AWS_DEFAULT_REGION=eu-central-1 --env=AWS_BUCKET=slax-files-<suffix> --env=LOG_CHANNEL=stderr \
+     -- php artisan slax:s3-probe
+   ```
+
+   → `PASS: put, get and delete of files/probe/slax-s3-probe-….txt in bucket slax-files-<suffix>`.
+   The probe writes through Flysystem exactly as uploads do (same `x-amz-acl: private` header,
+   same bucket, under `files/`) with the disk's `throw` forced on (the app's default
+   `throw => false` turns a refusal into a silent `false`). `FAIL at put (…): AccessDenied
+   (Aws\S3\Exception\S3Exception)` means the role policy is wrong (for instance without
+   `s3:PutObjectAcl`): re-run provision.sh and probe again. After the first release and the
+   first backup, also `kubectl -n slax exec deploy/slax-scheduler -- php artisan backups:check-freshness`
+   → "The newest backup is N hours old", then an actual upload in the app (item 4).
 7a. [ ] All four packages are public: logged out (`DOCKER_CONFIG=$(mktemp -d)`),
    `docker buildx imagetools inspect ghcr.io/yechpa/slax-backup:<sha>` works (§3.9).
 7b. [ ] On the node: `sudo slax-edge-guard status` → `ens5 guarded`; `systemctl is-active slax-edge-guard k3s caddy`.

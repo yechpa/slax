@@ -150,7 +150,9 @@ receives the channel's events until it disconnects.
 - **The app, queue, scheduler and backup pods can use the instance role** (IMDSv2 with hop limit 2, so containers
   reach the metadata service); Reverb, PostgreSQL, Redis and the migration Job are denied 169.254.169.254 by egress
   policies, the scanner has no egress at all. The role reaches only the two Slax buckets and cannot delete backups;
-  a compromised app pod could still read or delete uploaded files. Pods allowed to reach the metadata service can
+  a compromised app pod could still read or delete uploaded files, and a compromised app, queue or scheduler pod
+  could read the database dumps in the backups bucket (the role may read `pg/`, for the backup jobs and the
+  freshness check). Pods allowed to reach the metadata service can
   also read the instance's user data, with its spent single-use Tailscale key.
 - **Uploads carry an ACL header.** Flysystem always sends `x-amz-acl: private`, so the role has `s3:PutObjectAcl`
   on the files objects. The bucket enforces the owner (ACLs disabled) and blocks public access, so the ACL changes
