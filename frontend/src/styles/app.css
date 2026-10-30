@@ -313,6 +313,57 @@
     list-style: decimal;
   }
 
+  /* Notifications on this device (pwa/PushSettings.tsx), in the account menu. */
+  .push {
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+  }
+
+  .push__title {
+    color: var(--color-muted);
+  }
+
+  .push__toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-block-size: var(--control-height);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .push__switch {
+    flex: none;
+    inline-size: 1.125rem;
+    block-size: 1.125rem;
+    margin: 0;
+    accent-color: var(--color-accent);
+    cursor: inherit;
+  }
+
+  /* Dimmed with a token that keeps 4.5:1 (no opacity: contrast.test.ts measures tokens). */
+  .push__toggle:has(.push__switch:disabled) {
+    color: var(--color-text-dim);
+    cursor: default;
+  }
+
+  .push__hint {
+    color: var(--color-text-dim);
+  }
+
+  .push__test {
+    justify-self: start;
+  }
+
+  /* A finger needs 44 px: the whole line is the target. */
+  @media (pointer: coarse) {
+    .push__toggle {
+      min-block-size: 2.75rem;
+    }
+  }
+
   .user-menu__toggle {
     display: flex;
     align-items: center;

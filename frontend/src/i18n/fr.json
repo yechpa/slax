@@ -363,5 +363,15 @@
   "pwa.install.ios.title": "Ajouter Slax à l'écran d'accueil",
   "pwa.install.ios.step1": "Touchez le bouton Partager (un carré avec une flèche ; selon la version, il est sous le bouton •••).",
   "pwa.install.ios.step2": "Choisissez « Sur l'écran d'accueil ».",
-  "pwa.install.ios.step3": "Touchez « Ajouter » : Slax s'ouvre ensuite depuis son icône, comme une app."
+  "pwa.install.ios.step3": "Touchez « Ajouter » : Slax s'ouvre ensuite depuis son icône, comme une app.",
+
+  "push.title": "Notifications",
+  "push.toggle": "Notifications sur cet appareil",
+  "push.hint": "Messages directs, mentions et réponses dans vos fils, quand Slax est fermé. Jamais le texte d'un message.",
+  "push.test": "Envoyer un test",
+  "push.testSent": "Test envoyé : il devrait s'afficher d'ici quelques secondes.",
+  "push.testFailed": "Le test n'a pas pu être envoyé. Réessayez dans une minute.",
+  "push.failed": "Les notifications n'ont pas pu être activées sur cet appareil.",
+  "push.blocked": "Les notifications de Slax sont bloquées dans les réglages de ce navigateur. Autorisez-les là, puis revenez ici.",
+  "push.installFirst": "Sur iPhone et iPad, les notifications ne fonctionnent que dans l'application installée (iOS 16.4 ou plus récent) : ajoutez d'abord Slax à l'écran d'accueil, puis ouvrez-le depuis son icône."
 }

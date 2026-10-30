@@ -9,6 +9,7 @@ import type { Me } from './api/types.ts'
 import { isLocale, plural, setLocale, t } from './i18n/index.ts'
 import { LAST_CHANNEL_KEY, readPref, removePref } from './lib/prefs.ts'
 import { clearAppCaches } from './pwa/caches.ts'
+import { dropPushLocally } from './pwa/push.ts'
 import { navigate, route } from './router.ts'
 import { resetChannels } from './store/channels.ts'
 import { resetTimelines } from './store/messages.ts'
@@ -58,7 +59,8 @@ function syncPreferences(me: Me): void {
 
 /**
  * Back to the sign-in screen, everything of the previous session forgotten: the stores, the
- * last open channel and Cache Storage (the device's language and theme stay).
+ * last open channel, Cache Storage and the browser's push subscription (the device's language
+ * and theme stay).
  */
 export function endSession(error: AuthErrorCode | null): void {
   removePref(LAST_CHANNEL_KEY)
@@ -69,6 +71,7 @@ export function endSession(error: AuthErrorCode | null): void {
     signedOut(error)
   })
   void clearAppCaches()
+  dropPushLocally()
   if (route.peek().name !== 'home') navigate('/', { replace: true })
 }
 

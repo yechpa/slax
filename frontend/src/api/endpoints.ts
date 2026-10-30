@@ -68,6 +68,17 @@ export const api = {
   presence: (userIds: number[], signal?: AbortSignal) =>
     request<Record<string, PresenceState>>(apiPath('/presence'), { query: { 'user_ids[]': userIds }, signal, quiet: true }),
 
+  /** Web Push on this device (pwa/push.ts). 404 `push_disabled` when the server has no VAPID keys. */
+  push: {
+    publicKey: () => request<{ public_key: string }>(apiPath('/push/public-key'), { quiet: true }),
+    /** Upsert by endpoint: also refreshes the keys and the language of an existing device. */
+    subscribe: (subscription: { endpoint: string; keys: { p256dh: string; auth: string }; locale: Locale }) =>
+      request<void>(apiPath('/push/subscriptions'), { method: 'POST', body: subscription, quiet: true }),
+    unsubscribe: (endpoint: string) => request<void>(apiPath('/push/subscriptions'), { method: 'DELETE', body: { endpoint }, quiet: true }),
+    /** 202 {devices}: a test notification to each of this account's devices. */
+    test: () => request<{ devices: number }>(apiPath('/push/test'), { method: 'POST' }),
+  },
+
   /** Administrators only (403 for everyone else): moderation, audit log, service status. */
   admin: {
     status: (signal?: AbortSignal) => request<AdminStatus>(apiPath('/admin/status'), { signal }),

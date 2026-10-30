@@ -1,7 +1,9 @@
 /**
  * The account menu at the foot of the sidebar: who is signed in, language and theme
  * (applied at once, remembered on this device and saved to the account), installing the app
- * (where the browser can, see pwa/install.ts), administration (administrators only), sign out.
+ * (where the browser can, see pwa/install.ts), notifications on this device (pwa/push.ts),
+ * administration (administrators only), sign out (which first removes this device's
+ * notifications from the account).
  * A disclosure: the button toggles the panel above it; Escape or a click elsewhere
  * closes it and focus returns to the button.
  */
@@ -13,6 +15,8 @@ import { useLocale } from '../i18n/useLocale.ts'
 import { ADMIN_PATH } from '../router.ts'
 import { endSession } from '../session.ts'
 import { InstallPrompt } from '../pwa/InstallPrompt.tsx'
+import { forgetPushOnSignOut, refreshPush } from '../pwa/push.ts'
+import { PushSettings } from '../pwa/PushSettings.tsx'
 import { me } from '../store/session.ts'
 import { navOpen, showToast } from '../store/ui.ts'
 import { Avatar } from './ui/Avatar.tsx'
@@ -63,6 +67,8 @@ export function UserMenu() {
 
   const signOut = async () => {
     setLeaving(true)
+    // While still signed in: a shared device must stop getting this person's notifications.
+    await forgetPushOnSignOut()
     try {
       await api.logout()
     } catch (error) {
@@ -83,9 +89,15 @@ export function UserMenu() {
           {t('user.signedInAs', { name: user.name })}
           <bdi class="user-menu__email">{user.email}</bdi>
         </p>
-        <LocaleSwitcher onChange={(locale) => save({ locale })} />
+        <LocaleSwitcher
+          onChange={(locale) => {
+            save({ locale })
+            void refreshPush()
+          }}
+        />
         <ThemeSwitcher onChange={(theme) => save({ theme })} />
         <InstallPrompt />
+        <PushSettings />
         {user.is_admin && (
           <a
             class="user-menu__admin"
