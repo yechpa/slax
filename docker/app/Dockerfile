@@ -25,12 +25,15 @@ FROM ${COMPOSER_IMAGE} AS composer
 FROM ${EXTENSION_INSTALLER_IMAGE} AS extension-installer
 
 # PHP with the extensions the backend uses (the same list as the development image,
-# docker/php/Dockerfile), compiled for the build's own architecture. fcgi: cgi-fcgi, for
-# the PHP-FPM health check. tini: PID 1, so a stop signal reaches the process (PHP as PID 1
-# would ignore SIGTERM unless it handles it, and wait for the kill).
+# docker/php/Dockerfile), compiled for the build's own architecture. `apk upgrade`: Alpine's
+# security fixes published since the base image was built (CI's Trivy gate fails on fixable
+# critical ones). fcgi: cgi-fcgi, for the PHP-FPM health check. tini: PID 1, so a stop
+# signal reaches the process (PHP as PID 1 ignores SIGTERM unless it handles it, and would
+# wait for the kill).
 FROM ${PHP_IMAGE} AS php
 RUN --mount=type=bind,from=extension-installer,source=/usr/bin/install-php-extensions,target=/usr/local/bin/install-php-extensions \
     install-php-extensions pdo_pgsql redis pcntl bcmath intl zip opcache \
+    && apk upgrade --no-cache \
     && apk add --no-cache fcgi tini \
     && rm -rf /tmp/* /var/cache/apk/*
 
