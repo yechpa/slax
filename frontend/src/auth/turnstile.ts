@@ -7,11 +7,13 @@
  * Cloudflare needs the person to click. Each attempt renders a fresh widget (a token is
  * single use) and removes it once it answered.
  *
- * The site key comes from VITE_TURNSTILE_SITE_KEY (in development, Cloudflare's public
- * always-pass test key). Content-Security-Policy needs challenges.cloudflare.com in
- * script-src and frame-src.
+ * The site key comes with the page in a deployment (`<meta name="slax:turnstile-site-key">`,
+ * see lib/publicConfig.ts), else from VITE_TURNSTILE_SITE_KEY (in development, Cloudflare's
+ * public always-pass test key). Content-Security-Policy needs challenges.cloudflare.com in
+ * script-src and frame-src (docker/web/entrypoint.sh).
  */
 import type { Locale } from '../i18n/index.ts'
+import { publicConfig } from '../lib/publicConfig.ts'
 import type { Theme } from '../theme.ts'
 
 const SCRIPT_URL = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
@@ -100,7 +102,7 @@ export const cloudflareTurnstile: TurnstileClient = {
       container.replaceChildren()
       startClock()
       const widgetId = turnstile.render(container, {
-        sitekey: import.meta.env.VITE_TURNSTILE_SITE_KEY || TEST_SITE_KEY,
+        sitekey: publicConfig('turnstile-site-key') ?? (import.meta.env.VITE_TURNSTILE_SITE_KEY || TEST_SITE_KEY),
         action: 'login',
         appearance: 'interaction-only',
         size: 'flexible',

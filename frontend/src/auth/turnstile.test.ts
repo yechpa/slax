@@ -60,4 +60,22 @@ describe('Turnstile client', () => {
     widget.callback('the-token')
     expect(await interactive).toBe('the-token')
   })
+
+  it("uses the deployment's site key from the page, else the build's (Cloudflare's test key in development)", async () => {
+    const sitekeys: unknown[] = []
+    window.turnstile = { render: (_: HTMLElement, o: Record<string, unknown>) => (sitekeys.push(o.sitekey), 'w1'), remove: vi.fn() }
+    const { cloudflareTurnstile } = await freshModule()
+
+    void cloudflareTurnstile.token(document.createElement('div'), options).catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(0) // rendered
+    const tag = document.createElement('meta')
+    tag.name = 'slax:turnstile-site-key'
+    tag.content = '0x4AAAAAAA-deployed'
+    document.head.append(tag)
+    void cloudflareTurnstile.token(document.createElement('div'), options).catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(0)
+    tag.remove()
+
+    expect(sitekeys).toEqual([import.meta.env.VITE_TURNSTILE_SITE_KEY || '1x00000000000000000000AA', '0x4AAAAAAA-deployed'])
+  })
 })

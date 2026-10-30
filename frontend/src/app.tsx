@@ -10,13 +10,16 @@ import { SignedOut } from './components/SignedOut.tsx'
 import { Workspace, type ConnectRealtime } from './components/Workspace.tsx'
 import { t } from './i18n/index.ts'
 import { useLocale } from './i18n/useLocale.ts'
+import { publicConfig } from './lib/publicConfig.ts'
 import { connectRealtime } from './realtime/echo.ts'
 import { interceptLinks } from './router.ts'
 import { boot } from './session.ts'
 import { session } from './store/session.ts'
 import { useTheme } from './useTheme.ts'
 
-const defaultConnect: ConnectRealtime = () => connectRealtime(import.meta.env.VITE_REVERB_APP_KEY || 'slax-local-key')
+// A deployment's key comes with the page (publicConfig); development and e2e builds have it from Vite.
+const defaultConnect: ConnectRealtime = () =>
+  connectRealtime(publicConfig('reverb-app-key') ?? (import.meta.env.VITE_REVERB_APP_KEY || 'slax-local-key'))
 
 type Props = {
   connect?: ConnectRealtime
