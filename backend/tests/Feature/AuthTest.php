@@ -84,13 +84,9 @@ test('start returns a google url carrying the state and nonce kept in session', 
 test('callback_rejects_wrong_state', function () {
     $oauth = startLogin();
 
-    callback($oauth, ['state' => 'forged'])
-        ->assertUnprocessable()
-        ->assertExactJson(['error' => 'invalid_state']);
+    callback($oauth, ['state' => 'forged'])->assertRedirect('/?auth_error=invalid_state');
 
-    test()->getJson('/auth/google/callback?code=x&state=anything')
-        ->assertUnprocessable()
-        ->assertExactJson(['error' => 'invalid_state']);
+    test()->getJson('/auth/google/callback?code=x&state=anything')->assertRedirect('/?auth_error=invalid_state');
 
     expect(User::count())->toBe(0);
 });
@@ -99,7 +95,7 @@ test('callback_rejects_wrong_nonce', function () {
     $oauth = startLogin();
     identity()->expectNonce('a-nonce-the-provider-did-not-sign');
 
-    callback($oauth)->assertUnprocessable()->assertExactJson(['error' => 'invalid_token']);
+    callback($oauth)->assertRedirect('/?auth_error=invalid_token');
 
     expect(User::count())->toBe(0);
 });
@@ -118,8 +114,26 @@ test('callback fails closed when the provider throws', function () {
     $oauth = startLogin();
     identity()->throws(new IdentityProviderException('boom'));
 
-    callback($oauth)->assertUnprocessable()->assertExactJson(['error' => 'invalid_token']);
+    callback($oauth)->assertRedirect('/?auth_error=invalid_token');
     test()->assertGuest('web');
+});
+
+test('callback_failures_redirect_to_the_spa_with_a_stable_code', function () {
+    // Google sends the user back with ?error=… (consent refused) and no code.
+    $oauth = startLogin();
+    callback($oauth, ['code' => null, 'error' => 'access_denied'])->assertRedirect('/?auth_error=provider_error');
+    test()->assertGuest('web');
+
+    $oauth = startLogin();
+    callback($oauth, ['code' => ''])->assertRedirect('/?auth_error=provider_error');
+
+    // A plain browser navigation (Accept: text/html) gets the same redirect, never JSON.
+    $oauth = startLogin();
+    test()->withSession(['google_oauth' => $oauth])
+        ->get('/auth/google/callback?'.http_build_query(['code' => 'c', 'state' => 'forged']))
+        ->assertRedirect('/?auth_error=invalid_state');
+
+    expect(User::count())->toBe(0);
 });
 
 test('callback state and nonce are single use', function () {
@@ -131,14 +145,14 @@ test('callback state and nonce are single use', function () {
 
     test()->flushSession();
     test()->getJson('/auth/google/callback?'.http_build_query(['code' => 'c', 'state' => $oauth['state']]))
-        ->assertUnprocessable();
+        ->assertRedirect('/?auth_error=invalid_state');
 });
 
 test('unverified_google_email_refused', function () {
     $oauth = startLogin();
     identity()->returns(googleProfile(['emailVerified' => false]));
 
-    callback($oauth)->assertForbidden()->assertExactJson(['error' => 'email_not_verified']);
+    callback($oauth)->assertRedirect('/?auth_error=email_unverified');
 
     expect(User::count())->toBe(0);
     test()->assertGuest('web');
@@ -191,7 +205,7 @@ test('banned_user_cannot_login', function () {
     User::factory()->create(['google_sub' => 'google-sub-1', 'banned_at' => now()]);
     identity()->returns(googleProfile());
 
-    callback(startLogin())->assertForbidden()->assertExactJson(['error' => 'account_banned']);
+    callback(startLogin())->assertRedirect('/?auth_error=banned');
 
     test()->assertGuest('web');
 });
@@ -216,10 +230,11 @@ test('start_is_rate_limited_10_per_minute_per_ip', function () {
 
 test('callback is rate limited per ip', function () {
     foreach (range(1, 20) as $_) {
-        test()->getJson('/auth/google/callback?code=x&state=y')->assertUnprocessable();
+        test()->getJson('/auth/google/callback?code=x&state=y')->assertRedirect('/?auth_error=invalid_state');
     }
 
-    test()->getJson('/auth/google/callback?code=x&state=y')->assertTooManyRequests();
+    // A browser navigation: the SPA explains it, never a raw error page.
+    test()->get('/auth/google/callback?code=x&state=y')->assertRedirect('/?auth_error=rate_limited');
 });
 
 test('me requires a session', function () {

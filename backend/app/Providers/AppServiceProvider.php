@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Broadcasting\ReverbBroadcaster;
 use App\Contracts\IdentityProvider;
+use App\Http\Controllers\GoogleAuthController;
 use App\Services\FakeScannerClient;
 use App\Services\FakeTurnstile;
 use App\Services\Identity\FakeIdentityProvider;
@@ -38,7 +39,9 @@ class AppServiceProvider extends ServiceProvider
         JsonResource::withoutWrapping();
 
         RateLimiter::for('auth-start', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
-        RateLimiter::for('auth-callback', fn (Request $request) => Limit::perMinute(20)->by($request->ip()));
+        // The callback is a browser navigation: a refusal goes back to the SPA, which explains it.
+        RateLimiter::for('auth-callback', fn (Request $request) => Limit::perMinute(20)->by($request->ip())
+            ->response(fn () => GoogleAuthController::failed('rate_limited')));
         RateLimiter::for('dms', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
         // One tab pings 2.4 times a minute; this leaves room for about eight.
         RateLimiter::for('presence-heartbeat', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));

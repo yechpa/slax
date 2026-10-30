@@ -44,8 +44,13 @@ class GoogleAuthController extends Controller
         return response()->json(['redirect_url' => $this->google->authorizationUrl($state, $nonce)]);
     }
 
-    /** GET /auth/google/callback?code&state (the browser comes back from Google) */
-    public function callback(Request $request): RedirectResponse|JsonResponse
+    /**
+     * GET /auth/google/callback?code&state (the browser comes back from Google).
+     *
+     * This is a browser navigation, so every failure redirects to the SPA with a stable
+     * code (`/?auth_error=…`) that it translates, instead of showing a raw error page.
+     */
+    public function callback(Request $request): RedirectResponse
     {
         // Single use, whatever the outcome.
         $expected = $request->session()->pull(self::SESSION_KEY);
@@ -53,26 +58,27 @@ class GoogleAuthController extends Controller
         $code = $request->query('code');
 
         if (! is_array($expected) || ! is_string($state) || ! hash_equals((string) ($expected['state'] ?? ''), $state)) {
-            return $this->error('invalid_state', 422);
+            return $this->failed('invalid_state');
         }
+        // Google answers ?error=access_denied (and no code) when the user declines.
         if (! is_string($code) || $code === '') {
-            return $this->error('invalid_code', 422);
+            return $this->failed('provider_error');
         }
 
         try {
             $profile = $this->google->exchange($code, (string) $expected['nonce']);
         } catch (IdentityProviderException) {
-            return $this->error('invalid_token', 422);
+            return $this->failed('invalid_token');
         }
 
         if (! $profile->emailVerified) {
-            return $this->error('email_not_verified', 403);
+            return $this->failed('email_unverified');
         }
 
         [$user, $created] = $this->findOrCreateUser($profile);
 
         if ($user->isBanned()) {
-            return $this->error('account_banned', 403);
+            return $this->failed('banned');
         }
 
         Auth::guard('web')->login($user);
@@ -139,5 +145,14 @@ class GoogleAuthController extends Controller
     private function error(string $code, int $status): JsonResponse
     {
         return response()->json(['error' => $code], $status);
+    }
+
+    /**
+     * Back to the SPA's sign-in screen with one of: invalid_state, provider_error,
+     * invalid_token, email_unverified, banned (and rate_limited, see AppServiceProvider).
+     */
+    public static function failed(string $code): RedirectResponse
+    {
+        return redirect('/?'.http_build_query(['auth_error' => $code]));
     }
 }
