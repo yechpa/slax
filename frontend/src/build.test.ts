@@ -20,8 +20,12 @@ async function buildInto(mode?: string): Promise<string> {
 afterAll(() => outDirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })))
 
 describe('production build', () => {
+  // One production build for the two tests below (builds are slow, and Vitest runs files in parallel).
+  let production: Promise<string> | undefined
+  const productionBuild = () => (production ??= buildInto())
+
   it('ships the app but not the design-system kitchen sink', async () => {
-    const out = await buildInto()
+    const out = await productionBuild()
     expect(existsSync(join(out, 'index.html'))).toBe(true)
     expect(existsSync(join(out, 'design-system.html'))).toBe(false)
     expect(existsSync(join(out, 'app-preview.html'))).toBe(false)
@@ -29,7 +33,7 @@ describe('production build', () => {
   }, 60_000)
 
   it('ships the service worker at /sw.js: a classic script carrying its versioned precache list', async () => {
-    const out = await buildInto()
+    const out = await productionBuild()
     const sw = readFileSync(join(out, 'sw.js'), 'utf8')
     // A classic script (registered without type: 'module', for every browser): no import/export.
     expect(sw).not.toMatch(/^\s*(import|export)\b/m)
@@ -81,10 +85,5 @@ describe('production build', () => {
     expect(existsSync(join(out, 'app-preview.html'))).toBe(true)
     // No service worker for the screenshots' build.
     expect(existsSync(join(out, 'sw.js'))).toBe(false)
-  }, 60_000)
-
-  it('ships the service worker in the end-to-end build too (pwa.spec.ts)', async () => {
-    const out = await buildInto('e2e')
-    expect(existsSync(join(out, 'sw.js'))).toBe(true)
   }, 60_000)
 })
