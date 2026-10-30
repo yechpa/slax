@@ -112,6 +112,18 @@ services:
     depends_on:
       - minio
 
+  # One-shot: keeps the bucket private (no anonymous access). Files are only ever
+  # reached through presigned URLs handed out by the API after an access check.
+  minio-private:
+    image: cgr.dev/chainguard/minio-client:latest
+    restart: on-failure
+    environment:
+      MC_HOST_local: "http://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@minio:9000"
+    command: ["anonymous", "set", "none", "local/${AWS_BUCKET}"]
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
   # Upload validation (services/scanner), called by the app at http://scanner:8000.
   # Deliberately no published port: only reachable on the compose network.
   scanner:

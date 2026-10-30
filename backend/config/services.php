@@ -25,6 +25,11 @@ return [
         'secret' => env('TURNSTILE_SECRET'),
     ],
 
+    // Upload validation service (services/scanner), internal network only.
+    'scanner' => [
+        'url' => env('SCANNER_URL', 'http://scanner:8000'),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],
