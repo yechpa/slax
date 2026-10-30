@@ -21,9 +21,14 @@ export async function boot(): Promise<void> {
   try {
     signIn(await api.me())
   } catch (error) {
-    if (isApiError(error, 'unauthenticated')) signedOut()
-    else if (isApiError(error, 'account_banned')) signedOut('banned')
-    else session.value = { status: 'unreachable' }
+    // No session (or a banned one): nothing personal of an earlier one stays on the device.
+    if (isApiError(error, 'unauthenticated')) {
+      removePref(LAST_CHANNEL_KEY)
+      signedOut()
+    } else if (isApiError(error, 'account_banned')) {
+      removePref(LAST_CHANNEL_KEY)
+      signedOut('banned')
+    } else session.value = { status: 'unreachable' }
   }
 }
 
