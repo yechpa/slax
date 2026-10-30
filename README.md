@@ -33,6 +33,8 @@ address is the target, not a promise.
 - Installable as an app (PWA) on Android, iPhone and desktop: Install from the account menu
   (or the Add to Home Screen steps on iOS), the app shell opens offline, a new version is
   announced with a Reload button.
+- Push notifications (Web Push, VAPID) for direct messages, mentions and thread replies, while
+  the app is closed: sender and channel only, never the text. Off without keys (dev, e2e).
 
 ## How it is built
 

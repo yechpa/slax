@@ -285,7 +285,8 @@ Hidden prompts: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TURNSTILE_SITE_KEY`
 `TURNSTILE_SECRET`, then optional `ADMIN_EMAILS` (administrators: personal data, so here and
 never in values), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (the same bot and chat as dev:
 production messages start with `[Prod]`). Generated: `APP_KEY`, `DB_PASSWORD`,
-`REDIS_PASSWORD`, `REVERB_APP_KEY`, `REVERB_APP_SECRET`. Check:
+`REDIS_PASSWORD`, `REVERB_APP_KEY`, `REVERB_APP_SECRET` and the Web Push pair
+`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (`PUSH_KEYS=none` to leave push off; see 4.11). Check:
 `sudo k3s kubectl -n slax get secret slax-secrets -o jsonpath='{.data}' | tr ',' '\n' | cut -d'"' -f2`
 lists the key names (no `AWS_*`).
 
@@ -472,6 +473,8 @@ Data written since that backup is lost: say so on the site first if anyone uses 
 - Telegram bot token: BotFather `/revoke`, then `set TELEGRAM_BOT_TOKEN` (prod and dev) and
   the GitHub secrets of both environments.
 - AWS: there is no static key to rotate; the instance role's credentials rotate by themselves.
+- Web Push (VAPID) pair: `sudo bash /tmp/create-secrets.sh vapid`, then restart. Every device
+  must turn notifications on again (4.11).
 
 ### 4.6 Ban, unban, moderate
 
@@ -577,6 +580,48 @@ What it cannot see: the node itself dead or cut from the Internet (nothing runs 
 the Sunday "restore check OK" and Telegram's silence are then the signal. An external
 pinger (a free uptime service polling `/api/v1/health`) would cover that; none is set up
 (docs/known-limitations.md).
+
+### 4.11 Push notifications
+
+Web Push (VAPID) from the queue worker to the browsers' push services (FCM for Chrome and
+Android, Apple for Safari and iOS, Mozilla, Microsoft). **Real delivery to these services was
+NOT tested here** (no automated run reaches them; see docs/known-limitations.md, "Push
+notifications", for the checklist the family runs on real devices).
+
+- **Keys.** One P-256 pair per environment, in the Secret only: `VAPID_PUBLIC_KEY`,
+  `VAPID_PRIVATE_KEY` (both optional: without them push is off, the endpoints answer 404 and the
+  app hides its switch). `create-secrets.sh` generates the pair (3.8). Another way to get one:
+  `kubectl -n slax exec deploy/slax-app -c php -- php artisan slax:push-keys` prints two lines
+  and writes nothing; put each value in with `create-secrets.sh set VAPID_PUBLIC_KEY` and
+  `set VAPID_PRIVATE_KEY`, then restart. Never in values, `config.extraEnv` (refused) or the
+  repository. `VAPID_SUBJECT` (ConfigMap) is `push.subject` (a `mailto:` or `https:` URL),
+  else the public URL.
+- **Check it is on.** In the app, account menu: "Notifications on this device" appears (on an
+  iPhone, in the installed app only; in Safari the menu says to install first). Or
+  `curl -s https://slax.yechpa.com/api/v1/push/public-key` with a session (404
+  `push_disabled` means off).
+- **Test.** Turn the switch on, then "Send a test": every device of your account gets
+  "Notifications work on this device." within seconds. Nothing: see the queue's log
+  (`kubectl -n slax logs deploy/slax-queue | grep -i push`): "refused by the push service"
+  with a status (403: the keys or the subject; 400/413: the device's keys or the payload) or
+  "dropped after retries" (the push service unreachable).
+- **Rotate.** `sudo bash /tmp/create-secrets.sh vapid`, then
+  `kubectl -n slax rollout restart deployment`. Rotation invalidates every subscription: old
+  devices are deleted at their next push, the app shows the switch off, and everyone turns
+  notifications on again (tell the family first). Rotate only if the private key leaked.
+- **iPhone and iPad.** iOS 16.4 or later, Slax added to the Home Screen and opened from its
+  icon, then the switch, then "Allow". Notifications can be managed afterwards in iOS Settings →
+  Notifications → Slax.
+- **Dead subscriptions** clean themselves: a 404/410 from the push service deletes the device;
+  429, 5xx or no answer are retried after 30 s, 2 min and 10 min, then dropped (a warning in
+  the queue's log, no alert); a ban deletes all of the account's devices; an account keeps ten
+  devices at most. To see them: `kubectl -n slax exec deploy/slax-app -c php -- php artisan
+  tinker --execute 'echo App\Models\PushSubscription::count();'`. To turn push off
+  everywhere at once: delete both keys from the Secret and restart (the devices stay, unused,
+  until the keys come back or the accounts go).
+- **Privacy.** A notification carries the sender's and the channel's names and a generic line
+  ("New message", "You were mentioned", "New reply"), never the text, an e-mail address or a
+  file name; it is encrypted for the browser, the push service cannot read it.
 
 ## 5. Incident playbook
 

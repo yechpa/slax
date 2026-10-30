@@ -230,6 +230,55 @@ receives the channel's events until it disconnects.
   Chrome's text selection, and, with the keyboard up (the message field focused), open a message's menu and the
   reaction picker: neither may close by itself as the keyboard goes away.
 
+## Push notifications (Web Push)
+
+**Where:** `backend/app/Services/Push/`, `backend/app/Jobs/SendPushNotification.php`,
+`backend/app/Http/Controllers/PushSubscriptionController.php`, `backend/lang/*/push.php`, `frontend/src/pwa/push.ts`,
+`PushSettings.tsx`, `sw-push.ts`, `e2e/tests/push.spec.ts`; operations in `docs/runbook.md` 4.11.
+
+- **Real delivery was NOT tested.** No automated run reaches Apple, Google (FCM), Mozilla or Microsoft: Pest uses a
+  fake sender, the real sender (encryption, VAPID signature, how each answer is treated) is tested against a mocked
+  HTTP client, and the e2e stack has no VAPID keys (push off; a second e2e test shows the switch with a stubbed key
+  and a stubbed browser push service). Whether a notification actually appears, how it looks, and what a tap does on
+  each platform must be tried on the family's real devices: turn notifications on (account menu), press "Send a
+  test", then close the app and have someone send a DM, an @mention and a reply in a thread you wrote in; tap each
+  notification (it must open that conversation, or that thread); sign out and check nothing arrives any more.
+- **iPhone and iPad: iOS 16.4 or later, installed app only.** Safari has no Web Push in a tab: outside the installed
+  app the menu explains to add Slax to the Home Screen first. Older iOS shows nothing. Safari on macOS 13+ supports
+  push in a tab (the switch shows); Firefox and Chromium browsers everywhere else.
+- **"Using Slax right now" means a presence heartbeat in the last 60 s.** The server cannot know whether a tab is
+  visible, so nobody is notified while any tab of theirs is open, visible or not (open tabs ping every 25 s, hidden
+  ones every 50 s): a desktop tab left open in the background keeps the phone silent, and after leaving the app it
+  can take up to a minute before pushes start. The rule errs towards fewer notifications.
+- **What notifies:** a new message in a DM or group conversation; an @mention, in any channel (the first name,
+  "@dana", or the whole name without spaces, "@DanaCohen", case ignored: two people sharing a first name are both
+  notified); a reply in a thread the person started or replied in. One notification per person per message. Not:
+  ordinary room messages, reactions, edits, being added to a channel. Never the author, a banned account, a
+  non-member (membership is checked again when the job runs), or anyone using Slax right now.
+- **What a notification says:** the sender and the channel ("Dana in #family", "Dana (direct message)", also for a
+  group conversation) and a generic line ("New message", "You were mentioned", "New reply") in the language of the
+  device (the app's language when it subscribed or last opened). Never the text, an e-mail address or a file name.
+  The payload is end-to-end encrypted to the browser (RFC 8291); the push service sees the endpoint, the time and the
+  size only.
+- **Key rotation invalidates every subscription.** A device subscribed with the old public key is deleted at its next
+  push instead of being retried, and the app shows the switch off at its next opening: everyone turns notifications
+  on again.
+- **Dead and failing subscriptions:** a 404 or 410 deletes the device; no answer, 429 or 5xx is tried three more times
+  (after 30 s, 2 min, 10 min), then dropped with a warning in the queue's log; any other refusal is dropped at once.
+  None of this alerts the administrators, and none of it can fail sending a message. There is no periodic cleanup:
+  a device that silently stopped working stays until something is pushed to it; an account keeps ten devices at
+  most, an eleventh replaces the one that went longest without a push.
+- **Sign-out removes this device** (DELETE, then the browser's unsubscribe, three seconds at most even offline). A
+  session that ends otherwise (expiry, ban) unsubscribes the browser only; the server deletes the device at its next
+  push (410), and a ban deletes all of the account's devices at once.
+- **The browser renewing a subscription by itself** (`pushsubscriptionchange`) is not handled in the service worker,
+  which cannot authenticate (no CSRF token there): the app sends the current subscription again each time it opens.
+- **One queue worker.** Push jobs share it with broadcasts (each push has a 5 s timeout): a burst of notifications to
+  a slow push service could delay realtime events by a few seconds.
+- **Endpoints are restricted to the push services** (FCM, Mozilla, Apple, WNS; https, port 443): the queue worker
+  POSTs to them, so a user cannot aim it at an internal address. A new browser vendor's push service would need its
+  host added to `config/slax.php`.
+
 ## Administration, alerts and the demo reset
 
 **Where:** `backend/app/Services/Moderation.php`, `backend/app/Services/UserSessions.php`,

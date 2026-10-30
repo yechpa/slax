@@ -59,7 +59,7 @@ flowchart LR
 | nginx | Serves the SPA, sets the CSP and the other headers, routes `/api`, `/auth`, `/sanctum`, `/broadcasting` to PHP-FPM on the pod's loopback (never stored by the browser: `no-store`) and `/app` to Reverb; `/apps` (Reverb's HTTP API) is never public; `/sw.js` always revalidated | `ghcr.io/yechpa/slax-web` |
 | Laravel API | Accounts, channels, messages, threads, reactions, files, presence, moderation, audit log, channel authorization | `ghcr.io/yechpa/slax-app` |
 | Reverb | Laravel's WebSocket server (Pusher protocol); presence channel for the workspace, private channel per conversation | `slax-app` |
-| Queue worker | Broadcasts (after the transaction commits), channel revocations, one worker so their order holds | `slax-app` |
+| Queue worker | Broadcasts (after the transaction commits), channel revocations, one worker so their order holds; Web Push notifications to the browsers' push services | `slax-app` |
 | Scheduler | Demo reset (prod), audit pruning, orphan files, backup freshness check | `slax-app` |
 | Scanner | Upload validation: type by signature (allowlist), size, hash, zip bombs and unsafe paths; reads nothing and calls nothing | `ghcr.io/yechpa/slax-scanner` |
 | PostgreSQL, Redis | Data; sessions, cache, queue, presence | upstream, pinned by digest |
@@ -134,6 +134,17 @@ on 50 sockets, with nothing lost or doubled ([load-test-results.md](load-test-re
   left at once; the heartbeat state is the truth for everyone else.
 - "X is typing…" is a client event (whisper) on the conversation's private channel, sent at
   most every few seconds by the client; the server never stores it.
+
+### Push notifications
+
+- A device turns notifications on from the account menu (`POST /api/v1/push/subscriptions`,
+  the browser's push endpoint and keys; a push service's host only). After a message commits,
+  a listener picks who to notify (DM members, @mentioned members, the thread's people; never
+  the author, a banned account, a non-member or anyone with a heartbeat in the last 60 s)
+  and queues one job per device. The job checks again, encrypts `{type, title, body, url,
+  tag}` (names and a generic line, never the text) for the browser and signs it with the
+  VAPID key (minishlink/web-push); 404/410 deletes the device. Without VAPID keys all of it
+  is off. The service worker shows every push and opens the conversation on a tap.
 
 ## 3. Sign-in
 
@@ -218,7 +229,8 @@ redeploy of the previous image without undoing the schema.
 | Account takeover, bots | Google only (no password to steal or reset), `state` and `nonce`, verified e-mail only, Turnstile before the flow, rate limits on sign-in | A Google account is as strong as its owner keeps it |
 | Reading what one should not | Every channel, message, file and subscription checked on the server (membership, live at subscription); private channels; files by channel membership | A removed member's own client may keep a socket briefly (known limitations) |
 | Abuse of the public demo | Rate limits (messages 30/min, uploads 20/min, DMs, searches), quotas, administrators can ban, delete, lock; the nightly reset; banned accounts kept so they cannot sign up again | – |
-| A shared device after sign-out, or an old app after a deploy | The service worker caches the public shell only, never the API, sign-in or another origin; a session's end empties Cache Storage; API responses are `no-store`; a new version waits and is announced on every screen until the person reloads, and navigations are network first, so a reload always gets the newest page | Offline, only the shell opens; an unsent draft is lost by the update's reload |
+| A shared device after sign-out, or an old app after a deploy | The service worker caches the public shell only, never the API, sign-in or another origin; a session's end empties Cache Storage; API responses are `no-store`; a new version waits and is announced on every screen until the person reloads, and navigations are network first, so a reload always gets the newest page; sign-out removes the device's push subscription (server and browser) | Offline, only the shell opens; an unsent draft is lost by the update's reload |
+| Push notifications leaking messages, or the queue aimed at an internal host | Payloads carry names and a generic line, never text, addresses or file names, end-to-end encrypted to the browser; subscription endpoints must be a known push service (https, port 443); banned, non-member and connected people are never notified | Real delivery checked by hand only; names are visible on a lock screen |
 | Admin actions without trace | Audit log of sensitive actions with the visitor's real IP (Caddy replaces any client `X-Forwarded-For`; nginx believes the pod network only), kept 180 days | – |
 | A compromised pod | Pod Security *restricted* (non-root, read-only root, no capability, seccomp), default-deny network policies (the scanner reaches nothing; PostgreSQL and Redis admit named pods only), no Kubernetes API token in any pod, the instance metadata service denied to pods without AWS needs | App, queue and scheduler can use the instance role (the two buckets only; it cannot delete backups) |
 | Infrastructure exposure | Only TCP 80/443 public (security group and a host firewall); SSH and the Kubernetes API over Tailscale only; dev not reachable outside the tailnet; no SSH daemon in prod | – |
@@ -273,6 +285,10 @@ Short records: the choice, why, and what it costs.
     the offline shell, and states plainly what it never touches; Workbox or vite-plugin-pwa
     would add a dependency on the newest Vite/rolldown for features Slax does not use.
     Cost: no runtime caching or background sync to switch on later without writing it.
+14. **Web Push with VAPID from the queue, no third-party notification service.** The browsers'
+    own push services, a maintained library (minishlink/web-push), keys in the Secret; no
+    Firebase project, no new service, no cost. Payloads name the sender and the channel only.
+    Cost: iPhones need iOS 16.4+ and the installed app; real delivery is checked by hand.
 
 ## 7. Cost
 
