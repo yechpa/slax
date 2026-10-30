@@ -102,6 +102,17 @@ app:
 reverb:
   # Public identifier of the Reverb app (the key and secret are in the Secret).
   appId: slax
+  # Sockets at once, all users together. Beyond, a new socket is refused (pusher error 4004)
+  # and pusher-js does not retry it: the page shows the connection banner until reloaded.
+  maxConnections: 500
+  # Per socket, every frame counts (subscriptions, pings, typing whispers): at most maxAttempts
+  # per decaySeconds; beyond, each frame is refused (pusher error 4301) and dropped, the socket
+  # stays (terminateOnLimit false). A reconnection re-subscribing 30 channels and the presence
+  # channel, then a minute of typing, uses about a sixth of it (reverb-e2e test, PresenceTest.php).
+  rateLimit:
+    maxAttempts: 300
+    decaySeconds: 60
+    terminateOnLimit: false
   resources:
     requests: { cpu: 20m, memory: 96Mi }
     limits: { cpu: 500m, memory: 256Mi }
