@@ -101,7 +101,8 @@ e2e: env deps ## Run the Playwright end-to-end suite on a fresh, separate stack 
 	echo '==> Building the e2e bundle'; \
 	$(DCE) run --rm -T --no-deps -e NPM_CONFIG_UPDATE_NOTIFIER=false frontend npx vite build --mode e2e --logLevel warn; \
 	echo '==> Starting the e2e stack'; \
-	$(DCE) up -d --build --quiet-build --wait app reverb queue web scanner minio; \
+	$(DCE) build --quiet app scanner; \
+	$(DCE) up -d --wait app reverb queue web scanner minio; \
 	$(DCE) run --rm -T minio-private; \
 	$(DCE) exec -T app php artisan migrate --force --no-interaction --quiet; \
 	$(DCE) exec -T app php artisan db:seed --class=DefaultWorkspaceSeeder --force --no-interaction --quiet; \
