@@ -19,7 +19,7 @@ import { isApiError } from '../api/client.ts'
 import type { Api } from '../api/endpoints.ts'
 import type { Message, Reaction } from '../api/types.ts'
 import { t } from '../i18n/index.ts'
-import { applyKnown, changedSince, findMessage, liveMark, updateMessage } from './messages.ts'
+import { applyKnown, changedSince, findMessage, liveMark, notOlderThanStore, updateMessage } from './messages.ts'
 import { showToast } from './ui.ts'
 
 /** backend MessageResource::MAX_REACTION_USER_IDS */
@@ -105,7 +105,8 @@ export function createReactions({ api, meId, alive }: { api: Api; meId: () => nu
     try {
       const answer = await (on ? api.react(messageId, emoji) : api.unreact(messageId, emoji))
       pending.delete(key)
-      if (still() && !changedSince(messageId, mark)) applyKnown(overlay(answer))
+      // (No snapshot since: the answer, with any thread summary move since laid over it.)
+      if (still() && !changedSince(messageId, mark)) applyKnown(overlay(notOlderThanStore(answer, mark)))
     } catch (error) {
       pending.delete(key)
       if (!still() || op.confirmed) return

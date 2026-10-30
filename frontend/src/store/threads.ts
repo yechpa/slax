@@ -14,14 +14,25 @@
  *   Known limit: removing the latest reply of a thread that is not loaded keeps the old
  *   "last reply" time until the next refresh (the previous reply's time is not known).
  * - After a reconnection the open thread is refetched; the others are stale until opened.
- * - A summary moved by a reply is a live change: a page asked for before it does not take it
- *   back (see liveMark in messages.ts).
+ * - A summary moved by a reply is a live change: a page asked for before it gets that move laid
+ *   over its own summary, never the other way round (see liveMark in messages.ts).
  */
 import { isApiError } from '../api/client.ts'
 import type { Api } from '../api/endpoints.ts'
 import type { Message } from '../api/types.ts'
 import { fresher, mergeMessages, oldestId, resetTo } from './merge.ts'
-import { liveMark, noteLiveChange, notOlderThanStore, peekTimeline, threadKey, timelineKeys, updateMessage, updateTimeline, type Timeline } from './messages.ts'
+import {
+  liveMark,
+  noteSummaryChange,
+  notOlderThanStore,
+  peekTimeline,
+  threadKey,
+  timelineKeys,
+  updateMessage,
+  updateTimeline,
+  withSummaryDelta,
+  type Timeline,
+} from './messages.ts'
 
 export const REPLIES_PAGE = 50
 /** Reply ids whose effect on their parent's summary is applied (bounded). */
@@ -41,15 +52,6 @@ interface Deps {
 export type Threads = ReturnType<typeof createThreads>
 
 const withEntries = (t: Timeline, entries: Timeline['entries']): Timeline => (entries === t.entries ? t : { ...t, entries })
-
-/** The summary moved by one reply: +1 (at `at`) or -1. */
-export function withSummaryDelta(message: Message, delta: number, at: string): Message {
-  const count = Math.max(0, message.reply_count + delta)
-  let last = message.last_reply_at
-  if (delta > 0 && (last === null || Date.parse(at) > Date.parse(last))) last = at
-  if (count === 0) last = null
-  return count === message.reply_count && last === message.last_reply_at ? message : { ...message, reply_count: count, last_reply_at: last }
-}
 
 export function createThreads({ api, meId, alive, prepare }: Deps) {
   const loads = new Map<number, AbortController>()
@@ -191,7 +193,7 @@ export function createThreads({ api, meId, alive, prepare }: Deps) {
       delta = wasHeld ? 0 : -1
     }
     if (delta !== 0) {
-      noteLiveChange(parentId)
+      noteSummaryChange(parentId, delta, reply.created_at)
       updateMessage(parentId, (m) => withSummaryDelta(m, delta, reply.created_at))
     }
     recount(parentId)

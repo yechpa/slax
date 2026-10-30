@@ -110,20 +110,34 @@ export function applyKnown(message: Message): void {
  * Live changes against REST answers. A REST answer (a page, the answer to my reaction, edit
  * or post) is a snapshot taken when the server handled the request; a broadcast that arrived
  * while it was on its way may be newer (someone reacted just after), and replacing the
- * event's copy with the answer's would undo it. Every live change (an event, a thread summary
- * moved) is numbered; a request notes the number when it starts (`liveMark`), and its answer
- * gives way, for each message changed since (`changedSince`), to the copy the store holds.
+ * event's copy with the answer's would undo it. Live changes are numbered, and a request
+ * notes the number when it starts (`liveMark`). Two kinds:
+ * - a snapshot (an event carrying the whole message: created, edited, deleted, reactions):
+ *   the answer gives way, for that message, to the copy the store holds (`changedSince`);
+ * - a thread summary moved by a reply (the server pushes the reply, not its parent): a delta
+ *   on whatever copy the store had, possibly stale itself (a catch-up repairs it). The answer
+ *   is kept, and the deltas since the request started are laid over it again: a new reply
+ *   counts unless the answer's last reply is as recent (it saw it already); a deletion is
+ *   assumed seen by the answer (as for events held during a page load, see threads.ts).
  * Nothing is lost by that: every change is broadcast to every member, the requester included,
  * so the answer's own change is in an event that came, or will come. While no event arrives
  * (socket down), answers apply as they are.
  */
 let liveClock = 0
 const changedAt = new Map<number, number>()
+interface SummaryChange {
+  clock: number
+  delta: number
+  /** The reply's creation time. */
+  at: string
+}
+const summaryChanges = new Map<number, SummaryChange[]>()
 const CHANGED_LIMIT = 5000
+const SUMMARY_CHANGES_KEPT = 100
 
 export const liveMark = (): number => liveClock
 
-/** A live change (an event, a summary moved) reached message `id`. */
+/** A live snapshot of message `id` (an event carrying the whole message) arrived. */
 export function noteLiveChange(id: number): void {
   liveClock += 1
   changedAt.delete(id)
@@ -131,18 +145,49 @@ export function noteLiveChange(id: number): void {
   if (changedAt.size > CHANGED_LIMIT) changedAt.delete(changedAt.keys().next().value!)
 }
 
-/** Did a live change reach message `id` after `mark` (a request's start)? */
+/** A reply created at `at` moved the summary of `parentId` by `delta` (+1 or -1). */
+export function noteSummaryChange(parentId: number, delta: number, at: string): void {
+  liveClock += 1
+  const list = summaryChanges.get(parentId) ?? []
+  list.push({ clock: liveClock, delta, at })
+  if (list.length > SUMMARY_CHANGES_KEPT) list.shift()
+  summaryChanges.delete(parentId)
+  summaryChanges.set(parentId, list)
+  if (summaryChanges.size > CHANGED_LIMIT) summaryChanges.delete(summaryChanges.keys().next().value!)
+}
+
+/** Did a live snapshot of message `id` arrive after `mark` (a request's start)? */
 export const changedSince = (id: number, mark: number): boolean => (changedAt.get(id) ?? 0) > mark
 
+/** The summary moved by one reply: +1 (at `at`) or -1. */
+export function withSummaryDelta(message: Message, delta: number, at: string): Message {
+  const count = Math.max(0, message.reply_count + delta)
+  let last = message.last_reply_at
+  if (delta > 0 && (last === null || Date.parse(at) > Date.parse(last))) last = at
+  if (count === 0) last = null
+  return count === message.reply_count && last === message.last_reply_at ? message : { ...message, reply_count: count, last_reply_at: last }
+}
+
 /**
- * A message of a REST answer asked for at `mark`: the store's copy when a live change came
- * since. A tombstone is final, never older than anything: it is always taken.
+ * A message of a REST answer asked for at `mark`: the store's copy when a live snapshot came
+ * since; otherwise the answer, with the summary deltas since then laid over it. A tombstone
+ * is final, never older than anything: it is always taken as it is.
  */
 export function notOlderThanStore(message: Message, mark: number): Message {
-  return !message.deleted && changedSince(message.id, mark) ? (findMessage(message.id) ?? message) : message
+  if (message.deleted) return message
+  if (changedSince(message.id, mark)) return findMessage(message.id) ?? message
+  let result: Message = message
+  for (const change of summaryChanges.get(message.id) ?? []) {
+    if (change.clock <= mark || change.delta < 0) continue
+    // The answer already counts a reply no later than its own last one.
+    if (result.last_reply_at !== null && Date.parse(change.at) <= Date.parse(result.last_reply_at)) continue
+    result = withSummaryDelta(result, change.delta, change.at)
+  }
+  return result
 }
 
 export function resetTimelines(): void {
   timelines.clear()
   changedAt.clear()
+  summaryChanges.clear()
 }

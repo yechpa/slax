@@ -509,7 +509,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     const message = await api.editMessage(messageId, body)
     if (!still()) return
     if (!changedSince(messageId, mark)) {
-      applyKnown(reactions.overlay(message))
+      applyKnown(reactions.overlay(notOlderThanStore(message, mark)))
       return
     }
     if (message.deleted || message.edited_at === null) return

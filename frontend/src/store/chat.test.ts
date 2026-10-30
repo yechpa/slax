@@ -117,6 +117,62 @@ describe('REST answers older than live events', () => {
     expect(first()).toMatchObject({ reply_count: 1, last_reply_at: '2026-10-30T10:00:30.000Z' })
   })
 
+  /** A catch-up whose latest page answers `latest` while a live event (or two) arrives. */
+  async function catchUpWith(during: () => void, latest: Message) {
+    const answer = deferred<FakeReply>()
+    let reconnected = false
+    const { chat } = setup({
+      'GET /api/v1/channels/7/messages': ({ query }) => {
+        if (!reconnected) return { body: { data: [live(1, { reply_count: 1, last_reply_at: '2026-10-30T09:00:00.000Z' })], has_more: false } }
+        if (query.get('after') === '1') return { body: { data: [], has_more: false } }
+        return answer.promise
+      },
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+    realtime.drop()
+    reconnected = true
+    realtime.reconnect()
+    await flush()
+    during()
+    answer.resolve({ body: { data: [latest], has_more: false } })
+    await flush()
+  }
+  const replyAt = (id: number, at: string) => live(id, { parent_id: 1, created_at: at })
+
+  it('a reply during a catch-up adds to the repaired summary, never replaces it', async () => {
+    // Two replies were missed while away (1 -> 3, the latest at 10:00:20); one more comes during the catch-up.
+    await catchUpWith(
+      () => {
+        realtime.emit('private-channel.7', 'message.created', replyAt(5, '2026-10-30T10:00:30.000Z'))
+        expect(first()).toMatchObject({ reply_count: 2 })
+      },
+      live(1, { reply_count: 3, last_reply_at: '2026-10-30T10:00:20.000Z' }),
+    )
+    expect(first()).toMatchObject({ reply_count: 4, last_reply_at: '2026-10-30T10:00:30.000Z' })
+  })
+
+  it('a reply the catch-up page already counts is not counted twice', async () => {
+    await catchUpWith(
+      () => realtime.emit('private-channel.7', 'message.created', replyAt(5, '2026-10-30T10:00:30.000Z')),
+      live(1, { reply_count: 4, last_reply_at: '2026-10-30T10:00:30.000Z' }),
+    )
+    expect(first()).toMatchObject({ reply_count: 4, last_reply_at: '2026-10-30T10:00:30.000Z' })
+  })
+
+  it('an edit snapshot during the catch-up wins over the older page, summary included', async () => {
+    const edited = { body: 'edited', edited_at: '2026-10-30T10:00:40.000Z', reply_count: 3, last_reply_at: '2026-10-30T10:00:20.000Z' }
+    await catchUpWith(
+      () => {
+        realtime.emit('private-channel.7', 'message.updated', live(1, edited))
+        realtime.emit('private-channel.7', 'message.created', replyAt(5, '2026-10-30T10:00:50.000Z'))
+      },
+      live(1, { reply_count: 3, last_reply_at: '2026-10-30T10:00:20.000Z' }),
+    )
+    expect(first()).toMatchObject({ body: 'edited', reply_count: 4, last_reply_at: '2026-10-30T10:00:50.000Z' })
+  })
+
   it('a deletion in a page is final, even after a live event', async () => {
     const latest = deferred<FakeReply>()
     let reconnected = false
