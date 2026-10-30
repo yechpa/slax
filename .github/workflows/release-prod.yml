@@ -1,0 +1,260 @@
+# Release to production (k3s on the AWS node, slax.yechpa.com) when a version tag v* is
+# pushed. docs/runbook.md, "Deploy a release".
+#
+#   check   (no secrets) the tag is vX.Y.Z on a commit of main, and the images
+#           ghcr.io/yechpa/slax-{app,web,scanner,backup}:<sha> exist (main's Images run built
+#           and scanned them; the tag run of Images only adds the vX.Y.Z alias). Anything
+#           else fails here, before anyone is asked to approve.
+#   deploy  environment `production`: waits for a required reviewer's approval, joins the
+#           tailnet as an ephemeral tag:ci node, then `helm upgrade --install --atomic` with
+#           the immutable <sha> images (a failing upgrade rolls itself back). Then it checks
+#           the public site: health, CSP, HSTS, the new image actually running. If those
+#           checks fail, it rolls back explicitly (`helm rollback slax <previous revision>`).
+#           Success, failure and rollback go to the administrators' Telegram chat, "[Prod] …";
+#           a Telegram problem never turns a deployment red.
+#
+# Environment `production` (Settings > Environments; docs/runbook.md): required reviewers,
+# deployment tags v* only. Secrets: TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET, PROD_KUBECONFIG
+# (base64, the namespace-scoped deployer of deploy/dev/deployer-rbac.yaml), TELEGRAM_BOT_TOKEN,
+# TELEGRAM_CHAT_ID. Variables: SLAX_FILES_BUCKET, SLAX_BACKUPS_BUCKET (printed by
+# deploy/aws/provision.sh).
+name: Release prod
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# One release at a time; a newer tag waits, never cancels a rollout midway.
+concurrency:
+  group: release-prod
+  cancel-in-progress: false
+
+env:
+  HELM_VERSION: v3.22.1
+  HELM_SHA256: 896cf63684a42a723d61c980369d6e588330927deb13676ca0d85006dd6da0ea # helm-v3.22.1-linux-amd64.tar.gz
+  PROD_URL: https://slax.yechpa.com
+  IMAGE_PREFIX: ghcr.io/yechpa/slax
+
+jobs:
+  check:
+    name: check ${{ github.ref_name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: The tag is vX.Y.Z on a commit of main
+        run: |
+          set -euo pipefail
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tags are vMAJOR.MINOR.PATCH (got '$GITHUB_REF_NAME'). Nothing deployed."
+            exit 1
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main. Only merged, tested commits are released. Nothing deployed."
+            exit 1
+          fi
+          echo "$GITHUB_REF_NAME = $GITHUB_SHA, on main."
+
+      - name: The images of that commit exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          missing=0
+          for image in app web scanner backup; do
+            ref="$IMAGE_PREFIX-$image:$GITHUB_SHA"
+            if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+              echo "found $ref"
+            else
+              echo "::error::$ref does not exist: the Images run of this commit on main has not finished or failed. Wait for it (or fix it), then re-run this workflow."
+              missing=1
+            fi
+          done
+          docker logout ghcr.io >/dev/null
+          exit "$missing"
+
+  deploy:
+    name: deploy ${{ github.ref_name }}
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://slax.yechpa.com
+    permissions:
+      contents: read
+    env:
+      SHA: ${{ github.sha }}
+      SLAX_FILES_BUCKET: ${{ vars.SLAX_FILES_BUCKET }}
+      SLAX_BACKUPS_BUCKET: ${{ vars.SLAX_BACKUPS_BUCKET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Production settings are there
+        run: |
+          set -euo pipefail
+          for name in SLAX_FILES_BUCKET SLAX_BACKUPS_BUCKET; do
+            value="${!name}"
+            if ! [[ "$value" =~ ^slax-(files|backups)-[a-z0-9]{4,20}$ ]]; then
+              echo "::error::The production environment variable $name is missing or malformed (deploy/aws/provision.sh prints it)."
+              exit 1
+            fi
+          done
+
+      - name: Install Helm ${{ env.HELM_VERSION }} (checksum verified)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o helm.tgz "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz"
+          echo "$HELM_SHA256  helm.tgz" | sha256sum -c -
+          tar -xzf helm.tgz linux-amd64/helm
+          sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+          helm version --short
+
+      - name: Join the tailnet (ephemeral, tag:ci)
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Kubeconfig (namespace-scoped deployer)
+        env:
+          PROD_KUBECONFIG: ${{ secrets.PROD_KUBECONFIG }}
+        run: |
+          set +x -euo pipefail
+          umask 077
+          printf '%s' "$PROD_KUBECONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      # The revision to go back to if the site is unhealthy after a successful upgrade.
+      - name: Current release
+        id: before
+        run: |
+          set -euo pipefail
+          revision="$(helm status slax --namespace slax --output json 2>/dev/null | jq -r '.version // empty' || true)"
+          echo "revision=${revision}" >> "$GITHUB_OUTPUT"
+          echo "Deployed revision before this release: ${revision:-none (first install)}"
+
+      - name: helm upgrade --install (image tag ${{ github.sha }})
+        id: helm
+        run: |
+          helm upgrade --install slax deploy/helm/slax \
+            --namespace slax \
+            -f deploy/helm/slax/values-prod.yaml \
+            --set image.tag="$SHA" \
+            --set s3.bucket="$SLAX_FILES_BUCKET" \
+            --set backup.bucket="$SLAX_BACKUPS_BUCKET" \
+            --atomic --wait --timeout 15m
+
+      - name: Post-deploy checks (health, headers, version)
+        id: verify
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 20 --retry-delay 5 --retry-all-errors \
+            --max-time 10 "$PROD_URL/api/v1/health"
+          echo
+          headers="$(curl --fail --silent --show-error --max-time 10 -o /dev/null -D - "$PROD_URL/" | tr -d '\r')"
+          fail=0
+          expect() { # description, extended regex the response headers must match
+            if printf '%s\n' "$headers" | grep -qiE "$2"; then echo "ok:   $1"; else echo "::error::missing: $1"; fail=1; fi
+          }
+          expect "HTTP 200 on /" '^HTTP/[0-9.]+ 200'
+          expect "Content-Security-Policy" "^content-security-policy: default-src 'self';"
+          expect "Strict-Transport-Security (one year)" '^strict-transport-security: max-age=31536000'
+          expect "X-Content-Type-Options: nosniff" '^x-content-type-options: nosniff'
+          apps="$(curl --silent --max-time 10 -o /dev/null -w '%{http_code}' "$PROD_URL/apps/x")"
+          if [ "$apps" = 404 ]; then echo "ok:   /apps/ is closed"; else echo "::error::/apps/ answered $apps"; fail=1; fi
+          images="$(kubectl --namespace slax get deployment slax-app -o jsonpath='{.spec.template.spec.containers[*].image}')"
+          for image in $images; do
+            if [ "${image##*:}" = "$SHA" ]; then echo "ok:   $image"; else echo "::error::slax-app runs $image, not $SHA"; fail=1; fi
+          done
+          exit "$fail"
+
+      # Helm succeeded but the site is not right: back to the previous revision.
+      - name: Roll back (post-deploy checks failed)
+        id: rollback
+        if: always() && steps.helm.outcome == 'success' && steps.verify.outcome == 'failure'
+        env:
+          PREVIOUS: ${{ steps.before.outputs.revision }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PREVIOUS" ]; then
+            echo "::error::First install: there is no previous revision to roll back to. The release stays as it is; see docs/runbook.md."
+            echo "result=none" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          helm rollback slax "$PREVIOUS" --namespace slax --wait --timeout 10m
+          if curl --fail --silent --retry 12 --retry-delay 5 --retry-all-errors --max-time 10 -o /dev/null "$PROD_URL/api/v1/health"; then
+            echo "result=healthy" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=unhealthy" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Rolled back to revision $PREVIOUS."
+
+      - name: Remove the kubeconfig
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kubeconfig"
+
+      # The version, the short SHA and a link to this run: never a secret or any user data.
+      # Same technique as deploy-dev.yml: the token is masked, passed through the environment
+      # and handed to curl in a config read from stdin (never on a command line or in the log).
+      - name: Telegram release alert
+        if: always()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OUTCOME: ${{ job.status }}
+          HELM_OUTCOME: ${{ steps.helm.outcome }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          ROLLBACK: ${{ steps.rollback.outputs.result }}
+          PREVIOUS: ${{ steps.before.outputs.revision }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set +x -eu
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram is not configured: no release alert."
+            exit 0
+          fi
+          echo "::add-mask::$TELEGRAM_BOT_TOKEN"
+          echo "::add-mask::$TELEGRAM_CHAT_ID"
+          release="${GITHUB_REF_NAME} (${SHA:0:7})"
+          if [ "$OUTCOME" = success ]; then
+            text="[Prod] Release ${release} is live on slax.yechpa.com."
+          elif [ "$HELM_OUTCOME" = failure ]; then
+            text="[Prod] Release ${release} FAILED during helm upgrade: Helm rolled back by itself (--atomic); the previous version is still serving."
+          elif [ "$VERIFY_OUTCOME" = failure ] && [ "$ROLLBACK" = healthy ]; then
+            text="[Prod] Release ${release} FAILED its post-deploy checks: ROLLED BACK to revision ${PREVIOUS}, site healthy again."
+          elif [ "$VERIFY_OUTCOME" = failure ] && [ "$ROLLBACK" = unhealthy ]; then
+            text="[Prod] Release ${release} FAILED its post-deploy checks; rolled back to revision ${PREVIOUS} but the site is STILL UNHEALTHY. Act now: docs/runbook.md."
+          elif [ "$VERIFY_OUTCOME" = failure ]; then
+            text="[Prod] Release ${release} FAILED its post-deploy checks and was NOT rolled back (${ROLLBACK:-rollback failed}). Act now: docs/runbook.md."
+          else
+            text="[Prod] Release ${release} FAILED before deploying (${OUTCOME}): nothing changed in production."
+          fi
+          if printf '%s\n' \
+            "url = \"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage\"" \
+            "data-urlencode = \"chat_id=${TELEGRAM_CHAT_ID}\"" |
+            curl --silent --fail --max-time 15 --output /dev/null --config - \
+              --data-urlencode "text=${text}"$'\n'"${RUN_URL}" \
+              --data-urlencode "disable_web_page_preview=true"; then
+            echo "Release alert sent (${OUTCOME})."
+          else
+            echo "::warning::The Telegram release alert could not be sent (curl exit $?)."
+            exit 1
+          fi
