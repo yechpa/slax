@@ -825,6 +825,19 @@
     border-color: var(--color-warn);
   }
 
+  .admin__badge--member {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  /* A finger needs 44 px on any touch screen, a tablet's wide administration included. */
+  @media (pointer: coarse) {
+    .admin__tab,
+    .admin .btn {
+      min-block-size: 2.75rem;
+    }
+  }
+
   .admin-status,
   .admin-list {
     display: grid;

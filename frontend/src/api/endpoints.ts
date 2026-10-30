@@ -3,6 +3,7 @@ import type { Locale } from '../i18n/index.ts'
 import type { Theme } from '../theme.ts'
 import { apiPath, request, requestWithStatus } from './client.ts'
 import type {
+  AdminAccount,
   AdminChannel,
   AdminStatus,
   AuditPage,
@@ -83,6 +84,9 @@ export const api = {
   admin: {
     status: (signal?: AbortSignal) => request<AdminStatus>(apiPath('/admin/status'), { signal }),
     audit: (page: number, signal?: AbortSignal) => request<AuditPage>(apiPath('/admin/audit'), { query: { page }, signal }),
+    accounts: (signal?: AbortSignal) => request<{ data: AdminAccount[] }>(apiPath('/admin/users'), { signal }),
+    setAccountType: (userId: number, accountType: AdminAccount['account_type']) =>
+      request<AdminAccount>(apiPath(`/admin/users/${userId}/account-type`), { method: 'POST', body: { account_type: accountType } }),
     banned: (signal?: AbortSignal) => request<{ data: ModeratedUser[] }>(apiPath('/admin/users/banned'), { signal }),
     /** Idempotent; `false` lifts the ban. */
     ban: (userId: number, banned: boolean) => request<ModeratedUser>(apiPath(`/admin/users/${userId}/ban`), { method: 'POST', body: { banned } }),

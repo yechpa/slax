@@ -2,12 +2,14 @@
  * Administration (/admin), for administrators only: the server refuses every admin call to
  * anyone else (403), and this page shows nothing to them either.
  *
- * Three tabs (a tablist: arrows move between them, in reading order in either direction):
+ * Four tabs (a tablist: arrows move between them, in reading order in either direction):
  *  - Status: each service ok or degraded, with its probe's time;
  *  - Audit: the audit log, newest first, a page at a time;
  *  - Moderation: ban someone picked from the people directory (confirmed first), lift a
  *    ban, lock or unlock a channel. Deleting a message or a file as a moderator is in the
- *    message's own menu.
+ *    message's own menu;
+ *  - Accounts: who signs in, most recently seen first; a relative is made a member (their
+ *    content survives the nightly demo reset) or a demo account again, confirmed first.
  *
  * Errors are shown translated, never as raw codes. Each part follows a change of language
  * (useLocale): components without props are not re-rendered by their parent otherwise.
@@ -16,7 +18,7 @@ import type { Ref } from 'preact'
 import { useEffect, useId, useRef, useState } from 'preact/hooks'
 import { isApiError } from '../api/client.ts'
 import { api } from '../api/endpoints.ts'
-import type { AdminChannel, AdminStatus, AuditPage, ModeratedUser, UserSummary } from '../api/types.ts'
+import type { AdminAccount, AdminChannel, AdminStatus, AuditPage, ModeratedUser, UserSummary } from '../api/types.ts'
 import { formatDay, formatTime } from '../i18n/format.ts'
 import { t } from '../i18n/index.ts'
 import { useLocale } from '../i18n/useLocale.ts'
@@ -30,8 +32,8 @@ import { EmptyState } from './ui/EmptyState.tsx'
 import { NavToggle } from './NavToggle.tsx'
 import { PeoplePicker } from './PeoplePicker.tsx'
 
-type Tab = 'status' | 'audit' | 'moderation'
-const TABS: readonly Tab[] = ['status', 'audit', 'moderation']
+type Tab = 'status' | 'audit' | 'moderation' | 'accounts'
+const TABS: readonly Tab[] = ['status', 'audit', 'moderation', 'accounts']
 
 type Props = {
   navOpen: boolean
@@ -115,6 +117,7 @@ function AdminTabs() {
         {tab === 'status' && <StatusPanel />}
         {tab === 'audit' && <AuditPanel />}
         {tab === 'moderation' && <ModerationPanel />}
+        {tab === 'accounts' && <AccountsPanel />}
       </div>
     </div>
   )
@@ -466,6 +469,101 @@ function LockSection() {
           </li>
         ))}
       </ul>
+    </section>
+  )
+}
+
+/**
+ * Members and demo accounts. Everyone who signs up is a demo account (deleted with their
+ * content by the nightly reset of the public demo); a relative is made a member so that what
+ * they write stays. Either change is confirmed first, saying what it means.
+ */
+function AccountsPanel() {
+  useLocale()
+  const [loaded, reload] = useLoad<{ data: AdminAccount[] }>((signal) => api.admin.accounts(signal), [])
+  const [list, setList] = useState<AdminAccount[]>([])
+  const [confirming, setConfirming] = useState<AdminAccount | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+
+  useEffect(() => {
+    if (loaded.status === 'ready') setList(loaded.data.data)
+  }, [loaded])
+
+  const target = confirming?.account_type === 'member' ? 'demo' : 'member'
+
+  const change = async () => {
+    if (!confirming) return
+    setBusy(true)
+    setError(null)
+    try {
+      const account = await api.admin.setAccountType(confirming.id, target)
+      setList((current) => current.map((a) => (a.id === account.id ? account : a)))
+      showToast({
+        tone: 'success',
+        text: t(account.account_type === 'member' ? 'admin.accounts.madeMember' : 'admin.accounts.madeDemo', { name: account.name }),
+        key: 'admin-account',
+      })
+    } catch (failure) {
+      if (!isApiError(failure, 'rate_limited')) setError(failure)
+    } finally {
+      setBusy(false)
+      setConfirming(null)
+    }
+  }
+
+  return (
+    <section class="admin__section" aria-labelledby="admin-accounts-title">
+      <h3 class="admin__heading" id="admin-accounts-title">
+        {t('admin.accounts.title')}
+      </h3>
+      <p class="admin__note">{t('admin.accounts.hint')}</p>
+      {error !== null && (
+        <p class="admin__error" role="alert">
+          {adminError(error)}
+        </p>
+      )}
+      {loaded.status === 'loading' && <p class="admin__note" aria-busy="true">{t('admin.loading')}</p>}
+      {loaded.status === 'error' && <Failure error={loaded.error} onRetry={reload} />}
+      {loaded.status === 'ready' && list.length === 0 && <p class="admin__note">{t('admin.accounts.none')}</p>}
+      <ul class="admin-list">
+        {list.map((account) => (
+          <li key={account.id} class="admin-list__row">
+            <bdi class="admin-list__name">{account.name}</bdi>
+            <span class={account.administrator || account.account_type === 'member' ? 'admin__badge admin__badge--member' : 'admin__badge'}>
+              {t(account.administrator ? 'admin.accounts.admin' : account.account_type === 'member' ? 'admin.accounts.member' : 'admin.accounts.demo')}
+            </span>
+            {account.banned && <span class="admin__muted">{t('admin.accounts.banned')}</span>}
+            <span class="admin__muted">
+              {account.last_seen_at ? t('admin.accounts.seen', { time: when(account.last_seen_at) }) : t('admin.accounts.never')}
+            </span>
+            {!account.administrator && (
+              <Button variant="secondary" size="sm" onClick={() => setConfirming(account)} disabled={busy}>
+                {t(account.account_type === 'member' ? 'admin.accounts.makeDemo' : 'admin.accounts.makeMember')}
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {confirming && (
+        <Dialog
+          role="alertdialog"
+          title={t(target === 'member' ? 'admin.accounts.memberTitle' : 'admin.accounts.demoTitle', { name: confirming.name })}
+          description={t(target === 'member' ? 'admin.accounts.memberBody' : 'admin.accounts.demoBody')}
+          onClose={() => !busy && setConfirming(null)}
+          footer={
+            <>
+              <Button variant="secondary" data-autofocus onClick={() => setConfirming(null)} disabled={busy}>
+                {t('action.cancel')}
+              </Button>
+              <Button variant={target === 'member' ? 'primary' : 'danger'} onClick={() => void change()} disabled={busy}>
+                {t(target === 'member' ? 'admin.accounts.makeMember' : 'admin.accounts.makeDemo')}
+              </Button>
+            </>
+          }
+        />
+      )}
     </section>
   )
 }

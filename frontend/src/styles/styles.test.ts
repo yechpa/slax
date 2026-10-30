@@ -161,6 +161,16 @@ describe('styles', () => {
     }
   })
 
+  it('gives the administration\'s tabs and buttons a 44 px target on touch screens, whatever the width', () => {
+    const css = files.map((file) => stripComments(readFileSync(file, 'utf8'))).join('\n')
+    const coarse = [...css.matchAll(/@media\s*\(pointer:\s*coarse\)\s*\{((?:[^{}]*\{[^}]*\})*)\s*\}/g)].map((m) => m[1]).join('\n')
+    const rules = [...coarse.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    for (const control of ['.admin__tab', '.admin .btn']) {
+      const covering = rules.filter(([, selector]) => selector.split(',').some((s) => s.trim() === control))
+      expect(covering.some(([, , body]) => /min-block-size:\s*2\.75rem/.test(body)), control).toBe(true)
+    }
+  })
+
   it('reads the safe areas from env() once, the inline pair swapped for right to left', () => {
     const tokens = stripComments(readFileSync(join(STYLES, 'tokens.css'), 'utf8'))
     const block = (selector: string) => new RegExp(String.raw`${selector.replace(/[[\]]/g, '\\$&')}\s*\{([^}]*)\}`).exec(tokens)?.[1] ?? ''
