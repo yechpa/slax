@@ -19,13 +19,13 @@ use function Illuminate\Support\defer;
  *    otherwise (production opts in with `Prod`).
  *  - Context is sanitised by AlertContext (allowlist; no bodies, names or addresses).
  *  - Alerts are grouped by what failed and where: level, title, and the context's exception
- *    class, location, route and method (not ids, counts or the message digest, which still
+ *    class, location, route, method and log channel (not ids, counts or the message digest, which still
  *    show in the text). One per group goes out per 5 minutes; the duplicates held back are
  *    counted and reported as "×N" with the next one.
  *  - Grouping lives in Redis. Redis unavailable (and then left alone for 30 s by this
  *    process, a circuit breaker): the same grouping on the local file cache, and at most
- *    FALLBACK_PER_MINUTE alerts a minute in all, so an outage cannot turn every failing
- *    request into a post. Neither available: the alert is dropped (logged locally).
+ *    about FALLBACK_PER_MINUTE alerts a minute in all (critical ones excepted), so an outage
+ *    cannot turn every failing request into a post. Neither available: the alert is dropped (logged locally).
  *  - Sending never throws and never holds a request: during HTTP requests it runs after the
  *    response is sent (deferred), elsewhere (commands, workers) inline, with short timeouts.
  *    A failure is logged locally at `warning`, below what the `telegram` log channel relays,
@@ -46,7 +46,7 @@ class TelegramNotifier implements AdminNotifier
     public const REDIS_RETRY_SECONDS = 30;
 
     /** Context keys that tell one problem from another (see the class comment). */
-    private const GROUP_KEYS = ['exception', 'location', 'route', 'method'];
+    private const GROUP_KEYS = ['exception', 'location', 'route', 'method', 'log_channel'];
 
     /** Until when (microtime) this process skips Redis. */
     private static float $redisDownUntil = 0.0;
@@ -72,7 +72,7 @@ class TelegramNotifier implements AdminNotifier
 
             $group = array_intersect_key($context, array_flip(self::GROUP_KEYS));
             ksort($group);
-            $heldBack = $this->claim(hash('sha256', json_encode([$level, $title, $group], JSON_THROW_ON_ERROR)));
+            $heldBack = $this->claim(hash('sha256', json_encode([$level, $title, $group], JSON_THROW_ON_ERROR)), $level);
             if ($heldBack === null) {
                 return;
             }
@@ -102,7 +102,7 @@ class TelegramNotifier implements AdminNotifier
      * when it must be held back; otherwise the number of duplicates held back since the last
      * one sent. Times are compared on the application clock as well as by TTL.
      */
-    private function claim(string $hash): ?int
+    private function claim(string $hash, string $level): ?int
     {
         $now = Carbon::now()->getTimestamp();
 
@@ -115,7 +115,7 @@ class TelegramNotifier implements AdminNotifier
             }
         }
 
-        return $this->claimWithoutRedis($hash, $now);
+        return $this->claimWithoutRedis($hash, $now, $level);
     }
 
     private function claimInRedis(string $hash, int $now): ?int
@@ -139,23 +139,39 @@ class TelegramNotifier implements AdminNotifier
         return $held;
     }
 
-    /** The same grouping on the file cache (shared by the processes of one host), with a cap. */
-    private function claimWithoutRedis(string $hash, int $now): ?int
+    /**
+     * The same grouping on the file cache (shared by the processes of one host), with a cap.
+     * An alert the cap holds back is not marked as sent, so it goes out once the minute is
+     * over; critical ones are never capped. The file cache has no atomic add or increment
+     * across processes, so the cap is approximate: a few more may pass under contention.
+     */
+    private function claimWithoutRedis(string $hash, int $now, string $level): ?int
     {
         try {
             $store = Cache::store('file');
+            $sentKey = "alerts:sent:{$hash}";
             $heldKey = "alerts:held:{$hash}";
 
-            if (! $store->add("alerts:sent:{$hash}", $now, self::DEDUPE_SECONDS)) {
+            if ($store->has($sentKey)) {
                 $store->add($heldKey, 0, 86400);
                 $store->increment($heldKey);
 
                 return null;
             }
 
-            $minute = 'alerts:fallback:'.intdiv($now, 60);
-            $store->add($minute, 0, 120);
-            if ((int) $store->increment($minute) > self::FALLBACK_PER_MINUTE) {
+            if ($level !== 'critical') {
+                $minute = 'alerts:fallback:'.intdiv($now, 60);
+                $store->add($minute, 0, 120);
+                if ((int) $store->increment($minute) > self::FALLBACK_PER_MINUTE) {
+                    return null;
+                }
+            }
+
+            if (! $store->add($sentKey, $now, self::DEDUPE_SECONDS)) {
+                // Another process sent it in the meantime.
+                $store->add($heldKey, 0, 86400);
+                $store->increment($heldKey);
+
                 return null;
             }
 
@@ -182,7 +198,7 @@ class TelegramNotifier implements AdminNotifier
             };
         }
         if ($heldBack > 0) {
-            $lines[] = "×{$heldBack} identical alert(s) held back since the last one";
+            $lines[] = "×{$heldBack} similar alert(s) held back since the last one";
         }
 
         return mb_substr(implode("\n", $lines), 0, self::MAX_TEXT);

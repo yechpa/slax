@@ -25,6 +25,9 @@ beforeEach(function () {
     $this->withoutDefer();
 });
 
+// A static: no test may leave it set for the next one, whichever file that is in.
+afterEach(fn () => TelegramNotifier::resetCircuitBreaker());
+
 function telegram(string $label = 'Dev'): TelegramNotifier
 {
     config(['slax.alerts.env_label' => $label]);
@@ -224,9 +227,16 @@ test('relayed errors are grouped by what failed and where, not by their message'
     // Another class, or another place, is another alert.
     Log::channel('telegram')->error('Other', ['exception' => new LogicException('x')]);
     expect(sentTexts())->toHaveCount(2);
+
+    // Without an exception: grouped by log channel, whatever the message.
+    Log::channel('telegram')->error('Queue backlog at 120');
+    Log::channel('telegram')->error('Queue backlog at 340');
+    expect(sentTexts())->toHaveCount(3);
 });
 
 test('with Redis unreachable, duplicates are still grouped and an outage cannot flood the chat', function () {
+    // One minute bucket for the whole test, whatever the wall clock does.
+    $this->freezeTime();
     Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
     breakRedis();
     $notifier = telegram();
@@ -242,12 +252,19 @@ test('with Redis unreachable, duplicates are still grouped and an outage cannot 
     }
     expect(sentTexts())->toHaveCount(TelegramNotifier::FALLBACK_PER_MINUTE);
 
+    // A critical alert is never held back by the cap.
+    $notifier->notify('critical', 'Database lost');
+    expect(sentTexts())->toHaveCount(TelegramNotifier::FALLBACK_PER_MINUTE + 1)
+        ->and(last(sentTexts()))->toContain('Database lost');
+
     // Another process sees the same file-based guard (a fresh notifier, same storage).
     (new TelegramNotifier(FAKE_BOT_TOKEN, FAKE_CHAT_ID, app('redis')))->notify('error', 'Redis down', ['service' => 'redis']);
-    expect(sentTexts())->toHaveCount(TelegramNotifier::FALLBACK_PER_MINUTE);
-
-    // The next minute lets a few through again.
-    $this->travel(61)->seconds();
-    $notifier->notify('error', 'Failure 21');
     expect(sentTexts())->toHaveCount(TelegramNotifier::FALLBACK_PER_MINUTE + 1);
+
+    // An alert the cap dropped was not sent, so it is not a duplicate: the next minute delivers it.
+    $this->travel(61)->seconds();
+    $notifier->notify('error', 'Failure 20');
+    expect(sentTexts())->toHaveCount(TelegramNotifier::FALLBACK_PER_MINUTE + 2)
+        ->and(last(sentTexts()))->toContain('Failure 20')
+        ->and(last(sentTexts()))->not->toContain('×');
 });

@@ -84,8 +84,11 @@ receives the channel's events until it disconnects.
   (Tasks 12/13). Elsewhere the command refuses unless `--force`; `make up` still seeds the demo content.
 - **Banned demo accounts are kept** by the reset (their content goes): deleting one would let the person sign up
   again with the same Google account.
-- **Alert grouping without Redis** is per host (file cache) and capped at 5 alerts a minute: during a Redis outage,
-  some distinct alerts are dropped (they stay in the local log).
+- **Alert grouping without Redis** is per host (file cache) and capped at about 5 alerts a minute, critical ones
+  excepted: during a Redis outage, an alert over the cap waits for the next minute, and later ones keep being
+  grouped. This fallback writes to `storage/framework/cache/data`, which must be writable by the PHP user; the
+  production images run as non-root, so the deployment (Tasks 12/13) must provide a writable path there. Without
+  it, alerts are silently dropped during a Redis outage (only the local log has them).
 - **Audit retention.** Entries are kept 180 days (`SLAX_AUDIT_RETENTION_DAYS`), then pruned daily; refused sends
   are recorded once per sender and channel per 10 minutes.
 - **The nightly demo reset is not pushed either.** Clients open at 03:00 keep showing the deleted messages until
