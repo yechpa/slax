@@ -4,6 +4,12 @@
 
 > Note for the maintainer: the Hebrew part is a draft written without a native speaker. Review
 > it (wording, and the button names against the app in Hebrew) before you share this guide.
+> The same goes for the Hebrew strings added with the Accounts tab in
+> `frontend/src/i18n/he.json`: `admin.tab.accounts`, every `admin.accounts.*` key (title,
+> hint, member, demo, admin, banned, seen, never, none, makeMember, makeDemo, memberTitle,
+> memberBody, demoTitle, demoBody, madeMember, madeDemo), `admin.error.cannot_change_admin`,
+> `admin.error.cannot_change_seed`, `admin.action.user.made_member` and
+> `admin.action.user.made_demo`.
 
 <a id="english"></a>
 
@@ -58,6 +64,11 @@ blocked, allow them for Slax in the phone's or the browser's settings, then come
   (#general and the others with a #): write family things in the family's **private channel**
   or in direct messages. A conversation with one of those strangers is **erased every night**,
   your messages in it too.
+- Those strangers can also **see your real Google name and photo, and whether you are online**
+  (in the list of people), and can **send you a direct message**; its notification shows the
+  name the stranger chose for themselves. Also erased at 03:00 every night: your replies in a
+  thread a stranger started, your messages in a channel a stranger created, and your reactions
+  on the demo's sample messages.
 
 ### 5. Signing out on a shared device
 
@@ -137,6 +148,10 @@ notifications arriving. That is exactly what you are helping to check.
 - Slax הוא גם הדגמה ציבורית שזרים יכולים לנסות. הם יכולים לקרוא את **הערוצים הציבוריים**
   (‎#general והאחרים עם #): ענייני משפחה כותבים ב**ערוץ הפרטי** של המשפחה או בהודעות ישירות.
   שיחה עם אחד הזרים האלה **נמחקת בכל לילה**, כולל ההודעות שלכם בה.
+- הזרים האלה גם **רואים את השם והתמונה האמיתיים שלכם מ־Google, והאם אתם מחוברים** (ברשימת
+  האנשים), ויכולים **לשלוח לכם הודעה ישירה**; ההתראה עליה מציגה את השם שהזר בחר לעצמו. עוד נמחק
+  בכל לילה ב־03:00: התגובות שלכם בשרשור שזר פתח, ההודעות שלכם בערוץ שזר יצר, והתגובות (אימוג׳י)
+  שלכם על הודעות הדוגמה של ההדגמה.
 
 ### 5. התנתקות במכשיר משותף
 
@@ -222,6 +237,11 @@ du navigateur, puis revenez.
   **canaux publics** (#general et les autres avec un #) : écrivez les affaires de famille dans
   le **canal privé** de la famille ou en messages directs. Une conversation avec l'un de ces
   inconnus est **effacée chaque nuit**, vos messages compris.
+- Ces inconnus peuvent aussi **voir votre vrai nom Google, votre photo et si vous êtes en
+  ligne** (dans la liste des personnes), et **vous envoyer un message direct** ; sa notification
+  affiche le nom que l'inconnu s'est choisi. Effacés aussi chaque nuit à 3 h : vos réponses dans
+  un fil lancé par un inconnu, vos messages dans un canal créé par un inconnu, et vos réactions
+  sur les messages d'exemple de la démo.
 
 ### 5. Se déconnecter sur un appareil partagé
 
