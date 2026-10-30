@@ -68,6 +68,9 @@
   "error.forbidden": "Vous n'avez pas accès à ce canal.",
   "error.notFound": "Ce canal n'existe plus.",
 
+  "time.today": "aujourd'hui",
+  "divider.unread": "nouveaux messages",
+
   "empty.channel": "Aucun message pour l'instant. Lancez la conversation dans {channel}.",
   "empty.dms": "Aucun message direct pour l'instant.",
   "empty.search": "Aucun résultat pour {query}.",
@@ -97,7 +100,7 @@
   "ds.sidebar": "Barre latérale",
   "ds.messages": "Messages",
   "ds.bidi": "Texte bidirectionnel",
-  "ds.bidiNote": "Chaque corps de message est en dir=auto et chaque nom d'utilisateur est isolé dans bdi : l'hébreu, l'anglais et les liens gardent leur ordre.",
+  "ds.bidiNote": "Chaque corps de message est en dir=auto et chaque nom d'utilisateur est isolé dans bdi : l'hébreu, l'anglais et les liens gardent leur ordre.",
   "ds.composer": "Zone de saisie",
   "ds.presence": "Présence",
   "ds.feedback": "États et retours",

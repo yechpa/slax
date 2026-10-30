@@ -125,6 +125,17 @@
     color: var(--color-accent);
   }
 
+  /* A lone glyph (×, +) needs no brackets: it gets a frame on hover instead. */
+  .btn--quiet.btn--icon::before,
+  .btn--quiet.btn--icon::after {
+    content: none;
+  }
+
+  .btn--quiet.btn--icon:hover:not(:disabled) {
+    background: var(--color-hover);
+    box-shadow: inset 0 0 0 var(--border-width) var(--color-control-border);
+  }
+
   .btn--danger {
     border-color: var(--color-danger);
     color: var(--color-danger);
@@ -207,18 +218,8 @@
     display: block;
   }
 
-  .search__prompt {
-    position: absolute;
-    inset-block: 0;
-    inset-inline-start: var(--space-3);
-    display: grid;
-    place-items: center;
-    color: var(--color-muted);
-    pointer-events: none;
-  }
-
   .search .input {
-    padding-inline: calc(var(--space-3) + 2ch) calc(var(--space-3) + 3ch);
+    padding-inline-end: calc(var(--space-2) + 3ch);
   }
 
   .search__key {
@@ -423,8 +424,10 @@
     text-align: center;
   }
 
+  /* Sized to its text (not stretched): a <bdi> holding a Hebrew name is itself RTL,
+     so a stretched one would push the name to the far side of an LTR sidebar. */
   .nav-item__label {
-    flex: 1;
+    flex: 0 1 auto;
     min-inline-size: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -449,6 +452,11 @@
 
   .nav-item--muted {
     color: var(--color-muted);
+  }
+
+  .nav-item__badge,
+  .nav-item__tag {
+    margin-inline-start: auto;
   }
 
   .nav-item__badge {
@@ -514,7 +522,15 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /*
+   * Shrink-wrapped, capped body: placed at the UI's start (next to the author)
+   * whatever its own direction, while its lines still align to their own
+   * start. A Hebrew message in an English UI (or the reverse) neither floats
+   * mid-row nor drifts to the far edge.
+   */
   .message__body {
+    inline-size: fit-content;
+    max-inline-size: min(100%, 76ch);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     text-align: start;
@@ -873,6 +889,7 @@
   /* ── Composer ────────────────────────────────────────── */
   .composer {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
     background: var(--color-raised);
@@ -964,11 +981,9 @@
   .composer__hint {
     flex: 1;
     min-inline-size: 0;
-    overflow: hidden;
     color: var(--color-muted);
     font-size: var(--text-2xs);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: var(--leading-tight);
   }
 
   /* ── Empty state ─────────────────────────────────────── */
@@ -990,11 +1005,12 @@
   }
 
   /* ── Application shell ───────────────────────────────── */
+  /* Flex, not grid: the narrow layout is a container query, and a container
+     query can only restyle the container's descendants, never the container. */
   .shell {
     container: shell / inline-size;
     position: relative;
-    display: grid;
-    grid-template-columns: var(--sidebar-size) minmax(0, 1fr);
+    display: flex;
     min-block-size: 0;
     overflow: hidden;
     background: var(--color-bg);
@@ -1010,8 +1026,14 @@
     pointer-events: none;
   }
 
+  .shell > .sidebar {
+    flex: 0 0 var(--sidebar-size);
+  }
+
   .shell__main {
+    flex: 1;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
     min-inline-size: 0;
     min-block-size: 0;
@@ -1049,7 +1071,7 @@
   }
 
   .channel-header__search {
-    flex: 0 1 16rem;
+    flex: 0 1 21rem;
   }
 
   .channel-header__nav {
@@ -1085,15 +1107,12 @@
 
   .shell__footer {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-1);
     padding: var(--space-1) var(--space-4) var(--space-4);
   }
 
   @container shell (inline-size < 44rem) {
-    .shell {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
     .shell > .sidebar {
       display: none;
     }

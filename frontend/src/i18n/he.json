@@ -68,6 +68,9 @@
   "error.forbidden": "אין לך גישה לערוץ הזה.",
   "error.notFound": "הערוץ הזה כבר לא קיים.",
 
+  "time.today": "היום",
+  "divider.unread": "הודעות חדשות",
+
   "empty.channel": "עדיין אין כאן הודעות. אפשר לפתוח את השיחה ב־{channel}.",
   "empty.dms": "עדיין אין הודעות ישירות.",
   "empty.search": "לא נמצאו תוצאות עבור {query}.",

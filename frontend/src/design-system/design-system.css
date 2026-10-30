@@ -1,0 +1,279 @@
+/* Layout of the kitchen-sink page only. Real components live in src/styles/components.css. */
+@layer components {
+  .ds-topbar {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-2) var(--space-6);
+    background: var(--color-surface);
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border-strong);
+  }
+
+  .ds-topbar__title {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+  }
+
+  .ds-topbar__title::before {
+    content: '/ ';
+  }
+
+  .ds-topbar__controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-6);
+    margin-inline-start: auto;
+  }
+
+  .ds-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-8);
+    max-inline-size: 84rem;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-6) var(--space-16);
+  }
+
+  .ds-intro {
+    display: grid;
+    gap: var(--space-2);
+    max-inline-size: 48rem;
+  }
+
+  .ds-intro h1 {
+    font-size: var(--text-2xl);
+  }
+
+  .ds-intro h1::before {
+    content: '# ';
+    color: var(--color-muted);
+  }
+
+  .ds-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
+    gap: var(--space-10) var(--space-8);
+    align-items: start;
+  }
+
+  .ds-section {
+    display: grid;
+    gap: var(--space-4);
+    min-inline-size: 0;
+  }
+
+  .ds-section--wide {
+    grid-column: 1 / -1;
+  }
+
+  .ds-section__title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-accent);
+    letter-spacing: var(--tracking-label);
+  }
+
+  .ds-section__title::before {
+    content: '##';
+    color: var(--color-muted);
+  }
+
+  .ds-section__title::after {
+    content: '';
+    flex: 1;
+    border-block-start: var(--border-width) var(--rule-style) var(--color-border-strong);
+  }
+
+  .ds-shell {
+    block-size: 39rem;
+  }
+
+  .ds-caption {
+    color: var(--color-muted);
+    font-size: var(--text-2xs);
+  }
+
+  .ds-note {
+    font-size: var(--text-sm);
+    max-inline-size: 60ch;
+  }
+
+  .ds-rows {
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  .ds-gap-4 {
+    --cluster-gap: var(--space-4);
+  }
+
+  .ds-gap-6 {
+    --cluster-gap: var(--space-6);
+  }
+
+  /* Type */
+  .ds-type {
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .ds-type__row {
+    display: grid;
+    grid-template-columns: 5rem minmax(0, 1fr);
+    align-items: baseline;
+    gap: var(--space-3);
+  }
+
+  .ds-type__sample {
+    line-height: var(--leading-tight);
+  }
+
+  .ds-specimen {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--space-4);
+    border: var(--border-width) var(--rule-style) var(--color-border-strong);
+    background: var(--paper, none), var(--color-surface);
+    background-size: auto;
+  }
+
+  .ds-specimen__line {
+    font-size: var(--text-lg);
+    line-height: var(--leading-tight);
+    color: var(--color-text);
+  }
+
+  .ds-specimen__line--strong {
+    font-weight: var(--weight-strong);
+    color: var(--color-accent);
+    text-shadow: var(--glow);
+  }
+
+  /* Tokens */
+  .ds-swatches {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .ds-swatch-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+    gap: var(--space-1) var(--space-3);
+  }
+
+  .ds-swatch {
+    display: grid;
+    grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      'chip name ratio'
+      'chip value ratio';
+    column-gap: var(--space-2);
+    align-items: center;
+    font-size: var(--text-2xs);
+    line-height: 1.35;
+  }
+
+  .ds-swatch__chip {
+    grid-area: chip;
+    block-size: 1.5rem;
+    border: var(--border-width) solid var(--color-border-strong);
+  }
+
+  .ds-swatch__name {
+    grid-area: name;
+    color: var(--color-text-dim);
+  }
+
+  .ds-swatch__value {
+    grid-area: value;
+    color: var(--color-muted);
+  }
+
+  .ds-swatch__ratio {
+    grid-area: ratio;
+    color: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ds-scales {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-6);
+    align-items: end;
+  }
+
+  .ds-spaces {
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .ds-space {
+    display: grid;
+    grid-template-columns: 5.5rem auto;
+    align-items: center;
+    font-size: var(--text-2xs);
+    color: var(--color-muted);
+  }
+
+  .ds-space__bar {
+    block-size: 0.5rem;
+    background: var(--color-accent);
+    opacity: 0.7;
+  }
+
+  .ds-radii {
+    display: flex;
+    gap: var(--space-3);
+  }
+
+  .ds-radius {
+    display: grid;
+    place-items: end start;
+    inline-size: 4.5rem;
+    block-size: 3rem;
+    padding: var(--space-1) var(--space-2);
+    border: var(--border-width) solid var(--color-accent);
+    color: var(--color-muted);
+    font-size: var(--text-2xs);
+  }
+
+  .ds-sidebar-sample {
+    display: grid;
+    max-inline-size: 18rem;
+    padding: var(--space-2);
+    background: var(--color-surface);
+    border: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .ds-messages {
+    display: grid;
+    padding-block: var(--space-2);
+    border: var(--border-width) var(--rule-style) var(--color-border);
+    background-color: var(--color-bg);
+    background-image: var(--paper);
+  }
+
+  .ds-typing {
+    display: grid;
+  }
+
+  @media (width < 40rem) {
+    .ds-topbar {
+      padding-inline: var(--space-4);
+    }
+
+    .ds-main {
+      padding-inline: var(--space-4);
+    }
+
+    .ds-shell {
+      block-size: 34rem;
+    }
+  }
+}

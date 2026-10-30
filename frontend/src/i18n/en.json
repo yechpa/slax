@@ -68,6 +68,9 @@
   "error.forbidden": "You don't have access to this channel.",
   "error.notFound": "This channel no longer exists.",
 
+  "time.today": "today",
+  "divider.unread": "new messages",
+
   "empty.channel": "No messages yet. Start the conversation in {channel}.",
   "empty.dms": "No direct messages yet.",
   "empty.search": "No results for {query}.",

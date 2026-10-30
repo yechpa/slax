@@ -67,9 +67,17 @@
 
   /* Code is left-to-right even in a Hebrew sentence. */
   code,
-  pre,
-  kbd {
+  pre {
     direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  /*
+   * Key caps are isolated but keep the page direction: logical insets resolve
+   * against an element's own direction, so a forced-LTR kbd positioned with
+   * inset-inline-end would land on the wrong side in Hebrew.
+   */
+  kbd {
     unicode-bidi: isolate;
   }
 
