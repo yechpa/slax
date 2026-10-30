@@ -74,19 +74,21 @@ spec:
         - port: 8080
           protocol: TCP
 {{- if .Values.networkPolicy.denyInstanceMetadata }}
+{{- range $component := list "reverb" "postgres" "redis" "migrate" }}
 ---
-# Reverb needs no AWS credentials: everything but the EC2 instance metadata service, so it
-# can never borrow the instance role.
+# {{ $component }} needs no AWS credentials: everything but the EC2 instance metadata service,
+# so it can never borrow the instance role. (Pods that may: app, queue, scheduler, backup,
+# restore-check; the scanner has no egress at all.)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "slax.name" (dict "ctx" . "component" "reverb-egress") }}
+  name: {{ include "slax.name" (dict "ctx" $ctx "component" (printf "%s-no-metadata" $component)) }}
   labels:
-    {{- include "slax.componentLabels" (dict "ctx" . "component" "reverb") | nindent 4 }}
+    {{- include "slax.componentLabels" (dict "ctx" $ctx "component" $component) | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "slax.selectorLabels" (dict "ctx" . "component" "reverb") | nindent 6 }}
+      {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" $component) | nindent 6 }}
   policyTypes: ["Egress"]
   egress:
     - to:
@@ -94,6 +96,7 @@ spec:
             cidr: 0.0.0.0/0
             except:
               - 169.254.169.254/32
+{{- end }}
 {{- end }}
 ---
 # Upload scanner: only the app and queue pods may call it, and it calls nothing (no egress,

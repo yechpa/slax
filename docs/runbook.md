@@ -22,7 +22,7 @@ Contents: [1. Architecture](#1-architecture) · [2. Sizing and cost](#2-sizing-a
  │                                 ▼                                                       │
  │  Caddy (systemd)  TLS (Let's Encrypt HTTP-01/TLS-ALPN), HSTS, X-Forwarded-For := peer, │
  │                   /apps → 404, HTTP/1.1 + HTTP/2                                        │
- │                                 │ http://10.43.10.80:80 (Service slax-app, fixed IP)   │
+ │                                 │ http://10.43.0.80:80 (Service slax-app, fixed IP)    │
  │  k3s v1.36 (no Traefik, no ServiceLB)                namespace slax, PSS restricted    │
  │   ┌─ pod slax-app ───────────────────┐   ┌ slax-reverb (WebSocket /app) ┐              │
  │   │ nginx (slax-web): SPA, CSP,      │──▶│ Pusher protocol, Redis        │              │
@@ -483,7 +483,7 @@ are kept. By hand: `kubectl -n slax exec deploy/slax-scheduler -- php artisan sl
    running (`aws ec2 describe-instance-status --instance-ids <id>`)?
 2. On the node: `systemctl is-active caddy k3s`; `journalctl -u caddy -n 50`.
    502 from Caddy = the cluster side: `kubectl -n slax get pods`; `kubectl -n slax get svc slax-app`
-   (ClusterIP must be 10.43.10.80); describe the failing pod.
+   (ClusterIP must be 10.43.0.80); describe the failing pod.
 3. A bad release: roll back (4.2). Memory: `free -m`, `journalctl -k | grep -i oom` → §4.9.
 4. Node unreachable on the tailnet too: AWS console → the instance → *Reboot*. Still nothing:
    *Get system log* / *Get instance screenshot*. Break-glass shell without opening a port:

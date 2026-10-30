@@ -126,9 +126,9 @@ echo "== prod: Caddy on the host in front, real S3 through the instance role"
 empty "prod: no Ingress (no ingress controller; Caddy on the host)" "$(yq ea -N 'select(.kind == "Ingress" or .kind == "Middleware") | .metadata.name' "$prod")"
 expect "prod: the web Service has the fixed address Caddy proxies to (deploy/aws/Caddyfile)" \
     "$(yq ea -N 'select(.kind == "Service" and .metadata.name == "slax-app") | .spec.type + " " + .spec.clusterIP + ":" + (.spec.ports[0].port | tostring)' "$prod")" \
-    "ClusterIP 10.43.10.80:80"
+    "ClusterIP 10.43.0.80:80"
 caddy_upstream="$(grep -Eo 'SLAX_UPSTREAM:[0-9.]+:[0-9]+' deploy/aws/Caddyfile 2>/dev/null | head -1)"
-expect "prod: the Caddyfile's default upstream is that address" "$caddy_upstream" "SLAX_UPSTREAM:10.43.10.80:80"
+expect "prod: the Caddyfile's default upstream is that address" "$caddy_upstream" "SLAX_UPSTREAM:10.43.0.80:80"
 expect "prod: no pod may connect to the web pod (only the node: Caddy, probes)" \
     "$(yq ea -N 'select(.kind == "NetworkPolicy" and .metadata.name == "slax-app") | (.spec.policyTypes | join(",")) + "/" + (.spec.ingress | length | tostring)' "$prod")" \
     "Ingress/0"
@@ -140,9 +140,16 @@ expect "prod: S3 on AWS itself in eu-central-1 (no endpoint override)" \
 expect "prod: previews come from the bucket's own host (CSP img-src = presigned URL host)" \
     "$(yq ea -N 'select(.kind == "Deployment" and .metadata.name == "slax-app") | .spec.template.spec.containers[] | select(.name == "web") | .env[] | select(.name == "SLAX_FILES_ORIGIN") | .value' "$prod")" \
     "https://slax-files-example.s3.eu-central-1.amazonaws.com"
-expect "prod: Reverb cannot reach the instance metadata service (no instance-role credentials)" \
-    "$(yq ea -N 'select(.kind == "NetworkPolicy" and .metadata.name == "slax-reverb-egress") | .spec.podSelector.matchLabels["app.kubernetes.io/component"] + " " + (.spec.egress[0].to[0].ipBlock.except | join(","))' "$prod")" \
-    "reverb 169.254.169.254/32"
+expect "prod: only app, queue, scheduler, backup and restore-check may reach the instance metadata service" \
+    "$(yq e -N 'select(.kind == "NetworkPolicy" and (.spec.policyTypes | any_c(. == "Egress"))) | .spec.podSelector.matchLabels["app.kubernetes.io/component"] + ":" + ((.spec.egress[0].to[0].ipBlock.except // ["none"]) | join(","))' "$prod" | sort | tr '\n' ' ')" \
+    "migrate:169.254.169.254/32 postgres:169.254.169.254/32 redis:169.254.169.254/32 reverb:169.254.169.254/32 scanner:none "
+expect "prod: the app's scheduler knows the backups bucket (backups:check-freshness)" \
+    "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SLAX_BACKUP_BUCKET + " " + .data.SLAX_BACKUP_PREFIX' "$prod")" \
+    "slax-backups-example pg"
+empty "dev: no backups bucket configured" "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SLAX_BACKUP_BUCKET // ""' "$dev")"
+expect "prod: the Service address is in the static band (10.43.0.0-10.43.0.255), not .1 or .10" \
+    "$(yq e -N 'select(.kind == "Service" and .metadata.name == "slax-app") | .spec.clusterIP' "$prod" | grep -Ex '10\.43\.0\.([1-9]?[0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-4])' | grep -vEx '10\.43\.0\.(0|1|10)' | sed 's/.*/true/')" \
+    "true"
 expect "prod: daily backup at 02:30 and weekly restore check Sunday 03:30, Jerusalem time, never overlapping" \
     "$(yq e -N 'select(.kind == "CronJob") | .metadata.name + "=" + .spec.schedule + "@" + .spec.timeZone + "/" + .spec.concurrencyPolicy' "$prod" | sort | tr '\n' ' ')" \
     "slax-backup=30 2 * * *@Asia/Jerusalem/Forbid slax-restore-check=30 3 * * 0@Asia/Jerusalem/Forbid "

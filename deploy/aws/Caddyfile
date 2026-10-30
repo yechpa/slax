@@ -1,7 +1,7 @@
 # Slax production front proxy: Caddy on the EC2 host (systemd unit `caddy`, installed by
 # deploy/aws/cloud-init.yaml, which writes this file to /etc/caddy/Caddyfile).
 #
-#   Internet --443/80--> Caddy (host) --http--> 10.43.10.80:80 (Service slax-app, a fixed
+#   Internet --443/80--> Caddy (host) --http--> 10.43.0.80:80 (Service slax-app, a fixed
 #   ClusterIP: values-prod.yaml app.service.clusterIP) --> nginx (slax-web) --> PHP-FPM / Reverb
 #
 # - TLS: Let's Encrypt, HTTP-01/TLS-ALPN-01 on 80/443 (the only ports the security group
@@ -24,7 +24,7 @@
 #
 # Environment overrides (only the local test uses them; production runs with the defaults):
 #   SLAX_SITE_ADDRESS  slax.yechpa.com
-#   SLAX_UPSTREAM      10.43.10.80:80
+#   SLAX_UPSTREAM      10.43.0.80:80
 #   SLAX_TLS           acme (Let's Encrypt) or internal (Caddy's own CA, for the test)
 {
 	# No e-mail address: Let's Encrypt does not require one.
@@ -65,7 +65,7 @@
 	@reverbApi path /apps /apps/*
 	respond @reverbApi 404
 
-	reverse_proxy {$SLAX_UPSTREAM:10.43.10.80:80} {
+	reverse_proxy {$SLAX_UPSTREAM:10.43.0.80:80} {
 		# X-Forwarded-For, -Proto and -Host are set by Caddy from the connection itself.
 		header_up X-Real-IP {remote_host}
 		stream_close_delay 5m

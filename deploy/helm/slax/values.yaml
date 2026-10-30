@@ -85,6 +85,8 @@ app:
   service:
     # A fixed address in k3s's service network (10.43.0.0/16) for a proxy outside the
     # cluster: production's Caddy, on the host, proxies to http://<clusterIP>:80. Empty: any.
+    # Pick it in the static band (10.43.0.0-10.43.0.255 for a /16), which Kubernetes never
+    # hands out automatically; k3s itself uses .1 (kubernetes) and .10 (kube-dns) there.
     clusterIP: ""
   php:
     resources:

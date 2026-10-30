@@ -163,6 +163,10 @@ SANCTUM_STATEFUL_DOMAINS: {{ $host | quote }}
 SLAX_ENV_LABEL: {{ required "envLabel is required (Dev or Prod)" .Values.envLabel | quote }}
 SLAX_DEMO_RESET_ENABLED: {{ ternary "true" "false" .Values.demo.resetEnabled | quote }}
 SLAX_AUDIT_RETENTION_DAYS: {{ .Values.config.auditRetentionDays | quote }}
+{{- if .Values.backup.enabled }}
+SLAX_BACKUP_BUCKET: {{ .Values.backup.bucket | quote }}
+SLAX_BACKUP_PREFIX: {{ .Values.backup.prefix | quote }}
+{{- end }}
 {{- range $key, $value := .Values.config.extraEnv }}
 {{- if has $key (list "APP_ENV" "APP_DEBUG" "APP_KEY") }}
 {{- fail (printf "config.extraEnv cannot set %s" $key) }}

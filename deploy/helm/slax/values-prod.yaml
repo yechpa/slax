@@ -38,10 +38,11 @@ s3:
   bucket: ""
   useInstanceRole: true
 
-# Caddy on the host proxies to this address (deploy/aws/Caddyfile); no Ingress.
+# Caddy on the host proxies to this address (deploy/aws/Caddyfile); no Ingress. In the
+# service network's static band, so no other Service can take it first.
 app:
   service:
-    clusterIP: 10.43.10.80
+    clusterIP: 10.43.0.80
   php:
     resources:
       requests: { cpu: 50m, memory: 128Mi }
