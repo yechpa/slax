@@ -239,6 +239,29 @@ describe('realtime events', () => {
 })
 
 describe('reading', () => {
+  it('counts what arrived unseen in the open channel once it is left', async () => {
+    const { chat } = setup({
+      'GET /api/v1/channels': () => ({ body: [channel(CHANNEL, { last_read_message_id: 1 })] }),
+      'GET /api/v1/channels/7/messages': () => ({ body: { data: [live(1)], has_more: false } }),
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+    // The reader is scrolled up: nothing marks these read.
+    realtime.emit('private-channel.7', 'message.created', live(2))
+    realtime.emit('private-channel.7', 'message.created', live(3))
+    realtime.emit('private-channel.7', 'message.created', live(4, { user: { id: ME.id, name: ME.name, avatar_url: null } }))
+    expect(channelById.value.get(CHANNEL)?.unread_count).toBe(0)
+    chat.closeChannel(CHANNEL)
+    expect(channelById.value.get(CHANNEL)?.unread_count).toBe(2)
+
+    // Left right after reading at the bottom: read at once, no badge in between.
+    chat.openChannel(CHANNEL)
+    chat.noteReadable(CHANNEL)
+    chat.closeChannel(CHANNEL)
+    expect(channelById.value.get(CHANNEL)).toMatchObject({ unread_count: 0, last_read_message_id: 4 })
+  })
+
   it('marks the newest message read after a quiet second', async () => {
     vi.useFakeTimers()
     const { chat, server } = setup({

@@ -55,6 +55,10 @@ function patch(id: number, change: (channel: Channel) => Channel): void {
   channels.value = next
 }
 
+export function setUnread(id: number, count: number): void {
+  patch(id, (c) => (c.unread_count === count ? c : { ...c, unread_count: count }))
+}
+
 export function bumpUnread(id: number): void {
   patch(id, (c) => ({ ...c, unread_count: c.unread_count + 1 }))
 }

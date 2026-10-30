@@ -20,7 +20,7 @@ import { isApiError } from '../api/client.ts'
 import type { Api } from '../api/endpoints.ts'
 import type { Channel, Message } from '../api/types.ts'
 import type { Realtime } from '../realtime/echo.ts'
-import { bumpUnread, channelById, channels, markReadLocally, setChannels, upsertChannel } from './channels.ts'
+import { bumpUnread, channelById, channels, markReadLocally, setChannels, setUnread, upsertChannel } from './channels.ts'
 import {
   addPending,
   findPending,
@@ -139,8 +139,27 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     if (!t || t.status === 'idle' || t.status === 'error' || t.stale) void loadLatest(channelId)
   }
 
+  /**
+   * Leaving a channel: messages that arrived while it was open but were never scrolled to
+   * (no read pointer move) become its unread count, computed from what is loaded.
+   */
   function closeChannel(channelId: number): void {
     if (current === channelId) current = null
+    // The reader was at the bottom a moment ago: that read counts now, not a second later.
+    const pendingRead = readTimers.get(channelId)
+    if (pendingRead !== undefined) {
+      clearTimeout(pendingRead)
+      readTimers.delete(channelId)
+      void markRead(channelId)
+      return
+    }
+    const channel = channelById.peek().get(channelId)
+    const t = peekTimeline(channelKey(channelId))
+    if (!channel?.is_member || !t || t.status !== 'ready') return
+    const pointer = channel.last_read_message_id ?? 0
+    const id = meId()
+    const unseen = t.entries.filter((e) => e.kind === 'server' && !e.message.deleted && e.message.id > pointer && e.message.user.id !== id).length
+    if (unseen > channel.unread_count) setUnread(channelId, unseen)
   }
 
   async function loadLatest(channelId: number): Promise<void> {
