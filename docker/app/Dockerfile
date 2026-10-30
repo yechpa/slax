@@ -26,11 +26,12 @@ FROM ${EXTENSION_INSTALLER_IMAGE} AS extension-installer
 
 # PHP with the extensions the backend uses (the same list as the development image,
 # docker/php/Dockerfile), compiled for the build's own architecture. fcgi: cgi-fcgi, for
-# the PHP-FPM health check.
+# the PHP-FPM health check. tini: PID 1, so a stop signal reaches the process (PHP as PID 1
+# would ignore SIGTERM unless it handles it, and wait for the kill).
 FROM ${PHP_IMAGE} AS php
 RUN --mount=type=bind,from=extension-installer,source=/usr/bin/install-php-extensions,target=/usr/local/bin/install-php-extensions \
     install-php-extensions pdo_pgsql redis pcntl bcmath intl zip opcache \
-    && apk add --no-cache fcgi \
+    && apk add --no-cache fcgi tini \
     && rm -rf /tmp/* /var/cache/apk/*
 
 # Dependencies without the development tools, an optimized autoloader, and the caches that
@@ -67,10 +68,12 @@ RUN mkdir -p storage/app/private storage/framework/cache/data storage/framework/
     && chown -R slax:slax storage \
     && php -m | grep -qx pdo_pgsql
 
+# HOME: tools that keep state (tinker's history) write under /tmp, the only writable place.
 ENV APP_ENV=production \
     APP_DEBUG=false \
     LOG_CHANNEL=stderr \
-    APP_CONFIG_CACHE=/tmp/slax/config.php
+    APP_CONFIG_CACHE=/tmp/slax/config.php \
+    HOME=/tmp
 
 USER 10001:10001
 EXPOSE 9000
@@ -78,5 +81,5 @@ EXPOSE 9000
 HEALTHCHECK --interval=15s --timeout=3s --retries=3 \
     CMD SCRIPT_NAME=/fpm-ping SCRIPT_FILENAME=/fpm-ping REQUEST_METHOD=GET \
         cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q pong || exit 1
-ENTRYPOINT ["slax-entrypoint"]
+ENTRYPOINT ["/sbin/tini", "--", "slax-entrypoint"]
 CMD ["php-fpm"]
