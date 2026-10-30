@@ -147,20 +147,29 @@ receives the channel's events until it disconnects.
 - **One small node.** t4g.small (2 GiB) holds k3s and every pod with a few hundred MiB to spare and a 2 GiB swap
   file; Task 14's load test decides whether t4g.medium is needed (runbook §2). A reboot (security updates at
   02:00 UTC when needed) or a resize is a minute or two of downtime.
-- **Every pod can use the instance role** (IMDSv2 with hop limit 2, so containers reach the metadata service),
-  except Reverb (an egress policy denies 169.254.169.254) and the scanner (no egress at all). The role reaches only
-  the two Slax buckets and cannot delete backups; a compromised app pod could still read or delete uploaded files.
+- **The app, queue, scheduler and backup pods can use the instance role** (IMDSv2 with hop limit 2, so containers
+  reach the metadata service); Reverb, PostgreSQL, Redis and the migration Job are denied 169.254.169.254 by egress
+  policies, the scanner has no egress at all. The role reaches only the two Slax buckets and cannot delete backups;
+  a compromised app pod could still read or delete uploaded files. Pods allowed to reach the metadata service can
+  also read the instance's user data, with its spent single-use Tailscale key.
+- **Uploads carry an ACL header.** Flysystem always sends `x-amz-acl: private`, so the role has `s3:PutObjectAcl`
+  on the files objects. The bucket enforces the owner (ACLs disabled) and blocks public access, so the ACL changes
+  nothing; that S3 accepts it is to be confirmed on the real bucket before the first release (runbook §7 item 7).
 - **The web pod admits only its node**, relying on k3s's network policy engine (kube-router) always admitting
   node-local traffic (the same rule that lets kubelet probes in). Proven for probes in the dev k3s test; the Caddy
   path through the fixed ClusterIP is to be confirmed on the real node (runbook §7).
-- **The node's Tailscale auth key stays in the instance's user data** (readable with `ec2:DescribeInstanceAttribute`).
-  It is single use and short-lived, so it is worthless once the node has joined.
+- **The node's Tailscale auth key stays in the instance's user data** (readable with `ec2:DescribeInstanceAttribute`,
+  through the metadata service, and in cloud-init's root-only copy on disk). It is single use and short-lived, so it
+  is worthless once the node has joined.
+- **Two firewalls, both static**: the security group (TCP 80/443 only) and `slax-edge-guard` on the host (drops k3s's
+  and SSH's ports on the public interface; k3s requires it, so stopping the guard stops k3s).
 - **Caddy and k3s are pinned** (the `.deb` and the install script are checked against checksums at first boot) and
   are not updated by unattended-upgrades: updating them is a manual step. Tailscale updates itself.
 - **No HTTP/3**: the security group opens TCP 80/443 only, so Caddy serves HTTP/1.1 and HTTP/2.
 - **Backups are logical dumps, daily**: up to a day of data can be lost; there is no point-in-time recovery. The
-  restore check restores only the newest dump. Backup alerts reach Telegram only while the cluster runs: a dead
-  node sends nothing (the missing Sunday "restore check OK" message is the signal).
+  restore check restores only the newest dump. Besides the backup jobs' own alerts (failures, SIGTERM), the app
+  checks every morning that the newest dump is under 30 hours old. All of these run in the cluster: a dead node
+  sends nothing (the missing Sunday "restore check OK" message is the signal).
 - **A release's checks run before approval only for the tag and the images**; Telegram is told about failed
   deployments, not about a tag refused by the `check` job (visible in GitHub Actions).
 - **The release's post-deploy checks look at the public site**: an outage of Caddy or DNS during a release also

@@ -47,7 +47,8 @@ What runs where, and why:
 | Region | **eu-central-1 (Frankfurt)**: the owner's other EC2 instance is already there, t4g and every service used are available, it is not an opt-in region, and prices are among Europe's lowest. il-central-1 (Tel Aviv) would cut latency from Israel (≈50 ms → ≈5 ms) but is an opt-in region, generally pricier, and latency does not matter for a chat demo. |
 | Front door | **Caddy on the host.** It terminates TLS (automatic Let's Encrypt), sets HSTS (`max-age=31536000; includeSubDomains`, no `preload`), replaces any client `X-Forwarded-For`/`X-Real-IP` with the real peer address, and proxies to the web pod's Service on a fixed ClusterIP. k3s runs without Traefik and ServiceLB: nothing in the cluster listens on a public port, and ServiceLB's source-address rewriting does not exist. nginx in the web pod believes `X-Forwarded-For` only from the pod network, and the web pod's network policy admits no pod (only its node). Laravel trusts no proxy itself. Proven by `make proxy-test`. |
 | Files | **Presigned S3 URLs, straight from the bucket** (`https://<bucket>.s3.eu-central-1.amazonaws.com`): a cross-site origin of the bucket's own, so an uploaded file can never run with the app's cookies or origin. The presigned request forces the stored type (`response-content-type`, from the scanner's allowlist: PNG/JPEG/GIF/WebP/PDF/text/zip) and the disposition (`attachment` for everything but images and PDFs). `nosniff` cannot be added to S3 responses; forcing the type covers it (browsers never sniff an `image/*` into HTML). No `files.slax.yechpa.com` record, no CloudFront, no CORS (uploads go through the app; `<img>` needs no CORS). The CSP's `img-src` names exactly that host. |
-| AWS credentials | **The EC2 instance role**, through IMDSv2 with hop limit 2 so pods can reach it. The chart references no AWS key at all in production (`s3.useInstanceRole`). Reverb is denied the metadata service; the scanner has no egress. The role can touch only the two buckets, and cannot delete backups. |
+| AWS credentials | **The EC2 instance role**, through IMDSv2 with hop limit 2 so pods can reach it. The chart references no AWS key at all in production (`s3.useInstanceRole`). Only app, queue, scheduler and the backup jobs may reach the metadata service (Reverb, PostgreSQL, Redis and the migration Job are denied it; the scanner has no egress). The role can touch only the two buckets, and cannot delete backups. Flysystem sends `x-amz-acl: private` with every upload, so the role has `s3:PutObjectAcl` on the files objects; the ACL itself is inert (with *bucket owner enforced*, S3 accepts only ACLs equivalent to `bucket-owner-full-control`; `private` written by the bucket's own account grants exactly the owner full control, and is how Laravel apps write to such buckets; Block Public Access on top). Confirmed on real S3 only by checklist item 7, so the backend config is left as is. |
+| Host firewall | Besides the security group (TCP 80/443 only), `slax-edge-guard` drops TCP 22/6443/10250/10256 and UDP 8472 arriving on the public interface (k3s requires it); 80/443, `tailscale0` and the pod network are untouched. |
 | TLS for the cluster API | k3s's own certificate, `tls-san` = the Tailscale address and names. Port 6443 is closed to the Internet; CI and you reach it over the tailnet. |
 | Backups | `pg_dump -Fc` daily to S3 (SSE-S3), weekly full restore into a throwaway PostgreSQL inside the check's pod (never the production server). Telegram: failures, and the weekly "restore check OK". |
 | Releases | A `vX.Y.Z` tag on a commit of `main` → check → approval in GitHub → `helm upgrade --atomic` with the `<sha>` images already tested on dev → public checks → explicit `helm rollback` if they fail. |
@@ -107,7 +108,9 @@ Do the steps in this order. Each one says what proves it worked.
 - An AWS account with the AWS CLI **v2** logged in (`aws sso login` with IAM Identity Center,
   or an IAM user with MFA) with enough rights to create EC2, IAM and S3 resources. Check:
   `aws sts get-caller-identity` and `aws --version` (`aws-cli/2.…`).
-- The region: `export AWS_REGION=eu-central-1`.
+- The region: `export AWS_REGION=eu-central-1`. provision.sh refuses any other unless
+  `--allow-region-override` (then set `s3.region` in values-prod.yaml first: the CSP names
+  the bucket's regional host).
 - The account has its default VPC in that region (`aws ec2 describe-vpcs --filters Name=is-default,Values=true`).
   The script never creates networks.
 - `tailscale` on your machine, logged in to your tailnet; `kubectl`, `helm` 3.22.1, `gh`.
@@ -143,9 +146,10 @@ Do the steps in this order. Each one says what proves it worked.
 
    (`grants` syntax for the CI rule: `{"src": ["tag:ci"], "dst": ["tag:slax-prod"], "ip": ["tcp:6443"]}`.)
 
-2. The node's auth key. It ends up in the instance's user data, which anyone allowed
-   `ec2:DescribeInstanceAttribute` can read for the instance's whole life, so it must be
-   worthless once used: **single use** (not reusable), **pre-approved**, **tagged
+2. The node's auth key. It ends up in the instance's user data, which stays readable for the
+   instance's whole life: through the EC2 API (`ec2:DescribeInstanceAttribute`), through the
+   instance metadata service (the node and the pods allowed to reach it) and in cloud-init's
+   root-only copy on the disk. So it must be worthless once used: **single use** (not reusable), **pre-approved**, **tagged
    `tag:slax-prod`**, **not ephemeral** (an ephemeral node is removed from the tailnet after
    going offline; a server must survive reboots), and as short-lived as possible. The admin
    console's shortest expiry is one day; single use already makes it dead after the node
@@ -266,8 +270,13 @@ lists the key names (no `AWS_*`).
 
 ### 3.9 Images public
 
-After the first `Images` run on `main` that includes `slax-backup`, make that package public
-like the other three (deploy/dev/BOOTSTRAP.md §9.3): k3s pulls without credentials.
+**YOU DO THIS** after the first `Images` run on `main` that includes `slax-backup`: make that
+package **public** like the other three (github.com/yechpa?tab=packages → `slax-backup` →
+Package settings → Change visibility → Public; deploy/dev/BOOTSTRAP.md §9.3). A new GHCR
+package is private, and k3s pulls without credentials: dev never uses this image, so nothing
+else would notice before the first backup at 02:30. The release workflow's `check` job probes
+all four images anonymously and refuses to deploy while one is private. Check, logged out:
+`docker buildx imagetools inspect ghcr.io/yechpa/slax-backup:<sha>`.
 
 ### 3.10 GitHub: environment `production`
 
@@ -352,6 +361,12 @@ older code runs on the newer schema).
   Asia/Jerusalem, kept 35 days (+7 days as a non-current version). Telegram says nothing on a
   successful backup; it says `[Prod] Backup FAILED at step "…"` on a failure, and every Sunday
   `[Prod] Weekly restore check OK: …` (or `FAILED`). **No Sunday message = investigate.**
+  A SIGTERM (deadline, eviction) says `TERMINATED at step …`.
+- Independently, the app checks the bucket every morning at 09:00 Asia/Jerusalem
+  (`backups:check-freshness`, the scheduler pod): a newest dump older than 30 hours, none at
+  all, or a listing error raise a critical `[Prod]` alert ("Database backup is stale",
+  "No database backup found", "Database backups cannot be listed"). By hand:
+  `kubectl -n slax exec deploy/slax-scheduler -- php artisan backups:check-freshness`.
 - Run one now: `kubectl -n slax create job --from=cronjob/slax-backup slax-backup-manual-$(date +%s)`;
   a restore check now: `kubectl -n slax create job --from=cronjob/slax-restore-check slax-restore-check-manual-$(date +%s)`;
   logs: `kubectl -n slax logs -l app.kubernetes.io/component=backup --tail=50` (or `restore-check`).
@@ -485,6 +500,10 @@ are kept. By hand: `kubectl -n slax exec deploy/slax-scheduler -- php artisan sl
    502 from Caddy = the cluster side: `kubectl -n slax get pods`; `kubectl -n slax get svc slax-app`
    (ClusterIP must be 10.43.0.80); describe the failing pod.
 3. A bad release: roll back (4.2). Memory: `free -m`, `journalctl -k | grep -i oom` → §4.9.
+   A failed first boot (`/var/log/slax-bootstrap.log` ends without "bootstrap done"): fix the
+   cause, then `tailscale ssh ubuntu@slax-prod -- sudo bash /usr/local/sbin/slax-bootstrap.sh`
+   (every step is safe to repeat). If Tailscale itself never came up, use the break-glass
+   shell below and run the same command there.
 4. Node unreachable on the tailnet too: AWS console → the instance → *Reboot*. Still nothing:
    *Get system log* / *Get instance screenshot*. Break-glass shell without opening a port:
    attach the managed policy `AmazonSSMManagedInstanceCore` to the role `slax-prod-instance`
@@ -516,7 +535,8 @@ value (or remove the key: `kubectl -n slax patch secret slax-secrets --type json
    `Credentials ... not found` / timeouts to 169.254.169.254: the instance metadata options
    (`aws ec2 describe-instances … MetadataOptions`: HttpTokens required, hop limit **2**;
    provision.sh re-applies them) or the instance profile is missing.
-2. `AccessDenied`: the role policy (`aws iam get-role-policy --role-name slax-prod-instance --policy-name slax-prod-s3`)
+2. `AccessDenied` (on uploads: also check `s3:PutObjectAcl` is in the files statement, Flysystem
+   sends `x-amz-acl: private`): the role policy (`aws iam get-role-policy --role-name slax-prod-instance --policy-name slax-prod-s3`)
    names other buckets than the deployed `s3.bucket` / `backup.bucket`. Re-run provision.sh.
 3. Downloads blocked in the browser: the CSP `img-src` must be the bucket's host
    (`curl -sI https://slax.yechpa.com | grep -i content-security-policy`).
@@ -542,21 +562,43 @@ Only for retiring production. Every command targets ids found by the tag `Projec
 **and** a `slax-*` name; print them and read them before going on. Nothing here may touch
 the `wa-bot` instance or anything without that tag.
 
-**YOU DO THIS**:
+**YOU DO THIS**. First look, read-only:
 
 ```sh
 export AWS_REGION=eu-central-1
-SUFFIX=<the bucket suffix>
+aws ec2 describe-instances --filters Name=tag:Project,Values=slax Name=tag:Name,Values=slax-prod \
+  --query 'Reservations[].Instances[].[InstanceId,State.Name,Tags[?Key==`Name`].Value|[0]]' --output text
+aws ec2 describe-addresses --filters Name=tag:Project,Values=slax --query 'Addresses[].[AllocationId,PublicIp]' --output text
+aws ec2 describe-security-groups --filters Name=tag:Project,Values=slax --query 'SecurityGroups[].[GroupId,GroupName]' --output text
+aws s3api list-buckets --query "Buckets[?starts_with(Name, 'slax-')].Name" --output text
+```
+
+Then the teardown, in a subshell that stops at the first problem (it never closes your
+terminal): it looks the ids up again by tag and name, and refuses unless each lookup gives
+exactly one well-formed id. Set `SUFFIX` to the bucket suffix shown above.
+
+```sh
+SUFFIX=<the bucket suffix> bash -euo pipefail <<'TEARDOWN'
+export AWS_REGION=eu-central-1
+one() { # KIND PATTERN VALUE: exactly one id of that shape, or stop
+  [[ "$3" =~ ^$2$ ]] || { echo "REFUSED: expected exactly one $1 id, got '$3'" >&2; exit 1; }
+}
+[[ "${SUFFIX:-}" =~ ^[a-z0-9]{4,20}$ ]] || { echo "REFUSED: SUFFIX not set" >&2; exit 1; }
 ID=$(aws ec2 describe-instances --filters Name=tag:Project,Values=slax Name=tag:Name,Values=slax-prod \
      Name=instance-state-name,Values=pending,running,stopping,stopped --query 'Reservations[].Instances[].InstanceId' --output text)
 ALLOC=$(aws ec2 describe-addresses --filters Name=tag:Project,Values=slax Name=tag:Name,Values=slax-prod --query 'Addresses[].AllocationId' --output text)
 SG=$(aws ec2 describe-security-groups --filters Name=tag:Project,Values=slax Name=group-name,Values=slax-prod --query 'SecurityGroups[].GroupId' --output text)
-echo "instance=$ID eip=$ALLOC sg=$SG"      # one id each, nothing else; stop here if not
+one instance 'i-[0-9a-f]{8,17}' "$ID"
+one elastic-ip 'eipalloc-[0-9a-f]{8,17}' "$ALLOC"
+one security-group 'sg-[0-9a-f]{8,17}' "$SG"
+echo "Deleting instance $ID, Elastic IP $ALLOC, security group $SG, role slax-prod-instance, buckets slax-*-$SUFFIX"
+read -r -p "Type 'delete slax-prod' to go ahead: " answer </dev/tty
+[ "$answer" = "delete slax-prod" ] || { echo "not confirmed" >&2; exit 1; }
 
-# 0. Keep a last backup somewhere else if the data matters (aws s3 cp of the newest dump).
+# 0. Keep a last backup elsewhere first if the data matters (aws s3 cp of the newest dump).
 # 1. The instance (and its root volume, DeleteOnTermination).
 aws ec2 modify-instance-attribute --instance-id "$ID" --no-disable-api-termination
-aws ec2 terminate-instances --instance-ids "$ID" && aws ec2 wait instance-terminated --instance-ids "$ID"
+aws ec2 terminate-instances --instance-ids "$ID" >/dev/null && aws ec2 wait instance-terminated --instance-ids "$ID"
 # 2. The Elastic IP (billed while it exists), then the security group.
 aws ec2 release-address --allocation-id "$ALLOC"
 aws ec2 delete-security-group --group-id "$SG"
@@ -565,13 +607,20 @@ aws iam remove-role-from-instance-profile --instance-profile-name slax-prod-inst
 aws iam delete-instance-profile --instance-profile-name slax-prod-instance
 aws iam delete-role-policy --role-name slax-prod-instance --policy-name slax-prod-s3
 aws iam delete-role --role-name slax-prod-instance
-# 4. Buckets: files (not versioned), then backups (versioned: every version and delete marker).
-aws s3 rm "s3://slax-files-$SUFFIX" --recursive && aws s3api delete-bucket --bucket "slax-files-$SUFFIX"
+# 4. Buckets: files (not versioned), then backups (every version and delete marker, 1000 at a time).
+aws s3 rm "s3://slax-files-$SUFFIX" --recursive --only-show-errors
+aws s3api delete-bucket --bucket "slax-files-$SUFFIX"
 B="slax-backups-$SUFFIX"
-aws s3api list-object-versions --bucket "$B" --output json \
-  --query '{Objects: [Versions[].{Key: Key, VersionId: VersionId}, DeleteMarkers[].{Key: Key, VersionId: VersionId}][] | [?Key]}' > /tmp/slax-versions.json
-aws s3api delete-objects --bucket "$B" --delete file:///tmp/slax-versions.json   # repeat while objects remain (1000 per call)
+while :; do
+  aws s3api list-object-versions --bucket "$B" --max-items 1000 --output json \
+    --query '{Objects: [Versions[].{Key: Key, VersionId: VersionId}, DeleteMarkers[].{Key: Key, VersionId: VersionId}][] | [?Key]}' > /tmp/slax-versions.json
+  grep -q '"Key"' /tmp/slax-versions.json || break
+  aws s3api delete-objects --bucket "$B" --delete file:///tmp/slax-versions.json >/dev/null
+done
+rm -f /tmp/slax-versions.json
 aws s3api delete-bucket --bucket "$B"
+echo "Torn down."
+TEARDOWN
 ```
 
 Then: remove the `slax-prod` machine in the Tailscale admin console, the A record, the
@@ -597,7 +646,18 @@ no AWS access). Tick each item.
    followed by an audited action from that client never records 6.6.6.6.
 6. [ ] From outside the tailnet: `nc -vz -w 5 <Elastic IP> 22` and `… 6443` time out; on the
    tailnet `kubectl get nodes` works through the MagicDNS name.
-7. [ ] No static AWS key anywhere: `kubectl -n slax get deploy,cronjob -o yaml | grep -c AWS_ACCESS_KEY_ID` → 0;
+7. [ ] **Before tagging v0.1.0** (moto and MinIO enforce no IAM, so nothing local proves the
+   role's policy): once the cluster is up, write and read an object on the real bucket with
+   the instance role, from the queue pod:
+   `kubectl -n slax exec deploy/slax-queue -- php artisan tinker --execute 'var_dump(Storage::disk("s3")->put("checks/acl-probe.txt", "ok"), Storage::disk("s3")->get("checks/acl-probe.txt"), Storage::disk("s3")->delete("checks/acl-probe.txt"));'`
+   → `bool(true) string(2) "ok" bool(true)`. An `AccessDenied` on the put means the role lacks
+   `s3:PutObjectAcl` (Flysystem sends `x-amz-acl: private`): re-run provision.sh. Then an
+   actual upload in the app (item 4). Also `kubectl -n slax exec deploy/slax-scheduler -- php artisan backups:check-freshness`
+   after the first backup → "The newest backup is N hours old".
+7a. [ ] All four packages are public: logged out (`DOCKER_CONFIG=$(mktemp -d)`),
+   `docker buildx imagetools inspect ghcr.io/yechpa/slax-backup:<sha>` works (§3.9).
+7b. [ ] On the node: `sudo slax-edge-guard status` → `ens5 guarded`; `systemctl is-active slax-edge-guard k3s caddy`.
+7c. [ ] No static AWS key anywhere: `kubectl -n slax get deploy,cronjob -o yaml | grep -c AWS_ACCESS_KEY_ID` → 0;
    an upload works (instance role).
 8. [ ] Release `v0.1.0` (3.11): `check` green, approval requested, `deploy` green, Telegram
    `[Prod] Release v0.1.0 … is live`.
