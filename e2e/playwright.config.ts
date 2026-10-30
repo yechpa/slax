@@ -7,6 +7,13 @@ import { defineConfig, devices } from '@playwright/test'
  */
 const ci = Boolean(process.env.CI)
 
+/**
+ * The phones run their own spec only (mobile.spec.ts: the layout checks, then the core journey of
+ * login, post, thread reply, reaction and conversation, by touch), not the whole desktop suite:
+ * the same flows again in two more browsers would double `make e2e` for little news.
+ */
+const PHONE_SPECS = /mobile\.spec\.ts$/
+
 export default defineConfig({
   testDir: './tests',
   outputDir: './test-results',
@@ -27,5 +34,13 @@ export default defineConfig({
     actionTimeout: 10_000,
     navigationTimeout: 20_000,
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } }],
+  projects: [
+    { name: 'chromium', testIgnore: PHONE_SPECS, use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
+    // Emulation, not devices: WebKit with an iPhone's size, touch and user agent; Chromium as a Pixel.
+    // No service worker in WebKit here: once one controls the page, Playwright's WebKit no longer
+    // routes the page's requests, so the suite would stop being hermetic (the real Turnstile script
+    // would load). The worker itself is covered by pwa.spec.ts in Chromium.
+    { name: 'iphone', testMatch: PHONE_SPECS, use: { ...devices['iPhone 14'], serviceWorkers: 'block' } },
+    { name: 'pixel', testMatch: PHONE_SPECS, use: { ...devices['Pixel 7'] } },
+  ],
 })
