@@ -10,7 +10,9 @@
 # The runner joins the tailnet with an ephemeral node tagged tag:ci (Tailscale OAuth client),
 # which the tailnet policy lets reach slax-dev on 6443 (Kubernetes API) and 443 only, and
 # deploys with a kubeconfig limited to the slax namespace (deploy/dev/deployer-rbac.yaml).
-# Whatever happens, the result goes to the administrators' Telegram chat.
+# Whatever happens, the result goes to the administrators' Telegram chat; when Images did not
+# succeed for a push to main, the `skipped` job says that nothing was deployed. A Telegram
+# failure only warns: it never turns a deployment red.
 #
 # Secrets (repository or `dev` environment; deploy/dev/BOOTSTRAP.md): TS_OAUTH_CLIENT_ID,
 # TS_OAUTH_SECRET, DEV_KUBECONFIG (base64), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
@@ -101,6 +103,8 @@ jobs:
       # the environment, and handed to curl in a config read from stdin.
       - name: Telegram deploy alert
         if: always()
+        # A Telegram problem never turns a good deployment red (the step only warns).
+        continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -120,10 +124,54 @@ jobs:
           else
             text="[Dev] Deploy FAILED (${OUTCOME}): ${short}. Helm rolled back if it got that far."
           fi
-          printf '%s\n' \
+          if printf '%s\n' \
             "url = \"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage\"" \
             "data-urlencode = \"chat_id=${TELEGRAM_CHAT_ID}\"" |
-            curl --silent --show-error --fail --max-time 15 --output /dev/null --config - \
+            curl --silent --fail --max-time 15 --output /dev/null --config - \
               --data-urlencode "text=${text}"$'\n'"${RUN_URL}" \
-              --data-urlencode "disable_web_page_preview=true"
-          echo "Deploy alert sent (${OUTCOME})."
+              --data-urlencode "disable_web_page_preview=true"; then
+            echo "Deploy alert sent (${OUTCOME})."
+          else
+            echo "::warning::The Telegram deploy alert could not be sent (curl exit $?)."
+            exit 1
+          fi
+
+  # Images did not succeed for a push to main: nothing was deployed. Say so.
+  skipped:
+    if: >-
+      github.event.workflow_run.conclusion != 'success'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: dev
+    steps:
+      - name: Telegram alert (deploy skipped)
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          IMAGES_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set +x -eu
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram is not configured: no alert."
+            exit 0
+          fi
+          echo "::add-mask::$TELEGRAM_BOT_TOKEN"
+          echo "::add-mask::$TELEGRAM_CHAT_ID"
+          text="[Dev] Deploy skipped: Images ${CONCLUSION} for ${SHA:0:7}."
+          if printf '%s\n' \
+            "url = \"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage\"" \
+            "data-urlencode = \"chat_id=${TELEGRAM_CHAT_ID}\"" |
+            curl --silent --fail --max-time 15 --output /dev/null --config - \
+              --data-urlencode "text=${text}"$'\n'"${IMAGES_URL}" \
+              --data-urlencode "disable_web_page_preview=true"; then
+            echo "Alert sent."
+          else
+            echo "::warning::The Telegram alert could not be sent (curl exit $?)."
+            exit 1
+          fi
