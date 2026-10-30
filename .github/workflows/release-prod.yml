@@ -1,10 +1,12 @@
 # Release to production (k3s on the AWS node, slax.yechpa.com) when a version tag v* is
 # pushed. docs/runbook.md, "Deploy a release".
 #
-#   check   (no secrets) the tag is vX.Y.Z on a commit of main, and the images
-#           ghcr.io/yechpa/slax-{app,web,scanner,backup}:<sha> exist (main's Images run built
-#           and scanned them; the tag run of Images only adds the vX.Y.Z alias). Anything
-#           else fails here, before anyone is asked to approve.
+#   check   (no secrets) the tag is vX.Y.Z on a commit of main, CI (lint, test, e2e, chart,
+#           secrets) succeeded on that commit, and the images
+#           ghcr.io/yechpa/slax-{app,web,scanner,backup}:<sha> can be pulled ANONYMOUSLY, as
+#           the cluster pulls them (main's Images run built and scanned them; the tag run of
+#           Images only adds the vX.Y.Z alias; a new GHCR package is private until made
+#           public). Anything else fails here, before anyone is asked to approve.
 #   deploy  environment `production`: waits for a required reviewer's approval, joins the
 #           tailnet as an ephemeral tag:ci node, then `helm upgrade --install --atomic` with
 #           the immutable <sha> images (a failing upgrade rolls itself back). Then it checks
@@ -45,7 +47,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      packages: read
+      checks: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,23 +68,42 @@ jobs:
           fi
           echo "$GITHUB_REF_NAME = $GITHUB_SHA, on main."
 
-      - name: The images of that commit exist
+      - name: CI succeeded on that commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100")"
+          failed=0
+          for job in lint test e2e chart secrets; do
+            # The latest run of each job (a re-run supersedes an earlier one).
+            conclusion="$(jq -r --arg job "$job" '[.check_runs[] | select(.name == $job)] | sort_by(.id) | last | .conclusion // "missing"' <<< "$runs")"
+            if [ "$conclusion" = success ]; then
+              echo "ok:   CI $job"
+            else
+              echo "::error::CI job '$job' on $GITHUB_SHA: $conclusion (not finished, failed, or never ran). Wait for CI on main, then re-run this workflow."
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      # Anonymously, with an empty Docker configuration: the cluster pulls without credentials,
+      # so a package that is still private (a new one is, until made public) fails here.
+      - name: The images of that commit can be pulled anonymously
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$RUNNER_TEMP/anonymous-docker"
+          mkdir -p "$DOCKER_CONFIG"
           missing=0
           for image in app web scanner backup; do
             ref="$IMAGE_PREFIX-$image:$GITHUB_SHA"
             if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
               echo "found $ref"
             else
-              echo "::error::$ref does not exist: the Images run of this commit on main has not finished or failed. Wait for it (or fix it), then re-run this workflow."
+              echo "::error::$ref cannot be pulled anonymously: the Images run of this commit on main has not finished or failed, or the package slax-$image is still private (docs/runbook.md §3.9). Fix that, then re-run this workflow."
               missing=1
             fi
           done
-          docker logout ghcr.io >/dev/null
           exit "$missing"
 
   deploy:
@@ -146,7 +167,18 @@ jobs:
         id: before
         run: |
           set -euo pipefail
-          revision="$(helm status slax --namespace slax --output json 2>/dev/null | jq -r '.version // empty' || true)"
+          # Only "release: not found" means a first install; any other error (tailnet, RBAC,
+          # API) stops here, so the rollback below can never be silently disabled.
+          if status="$(helm status slax --namespace slax --output json 2> "$RUNNER_TEMP/helm-status.err")"; then
+            revision="$(jq -r '.version' <<< "$status")"
+            [[ "$revision" =~ ^[0-9]+$ ]] || { echo "::error::unexpected helm status output"; exit 1; }
+          elif grep -q 'release: not found' "$RUNNER_TEMP/helm-status.err"; then
+            revision=""
+          else
+            cat "$RUNNER_TEMP/helm-status.err" >&2
+            echo "::error::helm status failed: cannot tell the current revision, so nothing is deployed."
+            exit 1
+          fi
           echo "revision=${revision}" >> "$GITHUB_OUTPUT"
           echo "Deployed revision before this release: ${revision:-none (first install)}"
 
