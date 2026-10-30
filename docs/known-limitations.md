@@ -79,6 +79,15 @@ receives the channel's events until it disconnects.
 - **Locks are not pushed.** A lock (or unlock) reaches members at their next channel-list refresh (a minute at
   most) or when they open the channel; until then their composer still shows, and a post is refused with
   `channel_locked`, explained in words.
+- **The demo reset is off by default.** `slax:demo-reset` deletes visitors' accounts and content, so it runs (on
+  schedule or by hand) only where `SLAX_DEMO_RESET_ENABLED=true`: the public showcase only, set in its Helm values
+  (Tasks 12/13). Elsewhere the command refuses unless `--force`; `make up` still seeds the demo content.
+- **Banned demo accounts are kept** by the reset (their content goes): deleting one would let the person sign up
+  again with the same Google account.
+- **Alert grouping without Redis** is per host (file cache) and capped at 5 alerts a minute: during a Redis outage,
+  some distinct alerts are dropped (they stay in the local log).
+- **Audit retention.** Entries are kept 180 days (`SLAX_AUDIT_RETENTION_DAYS`), then pruned daily; refused sends
+  are recorded once per sender and channel per 10 minutes.
 - **The nightly demo reset is not pushed either.** Clients open at 03:00 keep showing the deleted messages until
   they reload or reopen the channel.
 - **Conversations with a visitor are demo content.** The reset deletes every conversation that includes a demo
