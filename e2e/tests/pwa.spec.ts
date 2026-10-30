@@ -5,8 +5,8 @@
  * Storage; and none of it trips the production Content-Security-Policy.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { closeAll, newContext, send, signIn, ui, uniq, type Person } from '../support/app.ts'
-import { t } from '../support/i18n.ts'
+import { api, closeAll, newContext, send, signIn, signInThroughGoogle, ui, uniq, type Person } from '../support/app.ts'
+import { t, type Locale } from '../support/i18n.ts'
 
 /** The policy slax-web sends (docker/web/entrypoint.sh) for http://localhost with the e2e services. */
 const PRODUCTION_CSP = [
@@ -146,17 +146,14 @@ test('a new version is announced, and taken on request (reload)', async ({ brows
   let person: Person | undefined
   try {
     person = await signIn(browser, `Update ${uniq('u')}`)
-    const { page, context } = person
+    const { page } = person
     await controlled(page)
     const banner = page.getByRole('status').filter({ hasText: t('en', 'pwa.update.ready') })
     await expect(banner).toHaveCount(0)
     const [before] = await page.evaluate(() => caches.keys())
 
     // A deploy: the server now sends another sw.js (docker/nginx/e2e.conf). The page finds it at its next check.
-    await context.addCookies([{ name: 'slax_e2e_sw_build', value: 'next', url: 'http://localhost' }])
-    await page.evaluate(async () => (await navigator.serviceWorker.ready).update())
-
-    await expect(banner).toBeVisible()
+    await deployNewVersion(person)
     // Nothing switched behind the page's back: the old worker and its cache still serve it.
     expect(await page.evaluate(async () => ((await navigator.serviceWorker.ready).waiting ? 'waiting' : 'none'))).toBe('waiting')
     expect(await page.evaluate(() => caches.keys())).toContain(before)
@@ -173,6 +170,69 @@ test('a new version is announced, and taken on request (reload)', async ({ brows
     await closeAll(person)
   }
 })
+
+/** Shows the update banner: a simulated deploy (docker/nginx/e2e.conf), then the page's next check. */
+async function deployNewVersion(person: Person) {
+  await person.context.addCookies([{ name: 'slax_e2e_sw_build', value: 'next', url: 'http://localhost' }])
+  await person.page.evaluate(async () => (await navigator.serviceWorker.ready).update())
+  const banner = person.page.getByRole('status').filter({ hasText: t(person.locale, 'pwa.update.ready') })
+  await expect(banner).toBeVisible()
+  return banner
+}
+
+/** The element is what a tap at its centre reaches (nothing drawn over it). */
+const reachable = (locator: import('@playwright/test').Locator) =>
+  locator.evaluate((element) => {
+    const box = element.getBoundingClientRect()
+    const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+    return top !== null && (top === element || element.contains(top))
+  })
+
+const LAYOUTS = [
+  { name: 'desktop 1280x800', viewport: { width: 1280, height: 800 } },
+  { name: 'phone 375x667', viewport: { width: 375, height: 667 } },
+]
+
+for (const locale of ['en', 'he'] satisfies Locale[]) {
+  for (const { name, viewport } of LAYOUTS) {
+    test(`the update banner never covers the composer or its Send button (${name}, ${locale})`, async ({ browser }) => {
+      let person: Person | undefined
+      try {
+        // Signed in at this size (signIn() expects the sidebar, which a phone keeps in a drawer).
+        const context = await newContext(browser, { locale, viewport })
+        const page = await context.newPage()
+        const email = `${uniq('banner')}@example.test`
+        const fullName = `Banner ${uniq('b')}`
+        await signInThroughGoogle(page, { email, name: fullName, locale })
+        await expect(page.locator('.shell__main .message-list')).toBeVisible()
+        const { id } = await api(page).get<{ id: number }>('/me')
+        person = { context, page, id, name: fullName, email, locale, theme: 'console' }
+        await controlled(page)
+        const banner = await deployNewVersion(person)
+        await expect(banner).toBeInViewport({ ratio: 1 })
+
+        const view = ui(person)
+        const sendButton = page.locator('.shell__footer').getByRole('button', { name: t(locale, 'action.send') })
+        await expect(sendButton).toBeInViewport({ ratio: 1 })
+        await expect(view.composer).toBeInViewport({ ratio: 1 })
+        expect(await reachable(sendButton)).toBe(true)
+        expect(await reachable(view.composer)).toBe(true)
+        // The header's own controls (the channel drawer's toggle on a phone) stay reachable too.
+        const navToggle = page.locator('.channel-header__nav')
+        if (await navToggle.isVisible()) expect(await reachable(navToggle)).toBe(true)
+
+        // And sending works with the banner up: typed, sent with the button.
+        const text = `with the banner up ${uniq('m')}`
+        await view.composer.fill(text)
+        await sendButton.click()
+        await expect(view.sent(text)).toHaveCount(1)
+        await expect(banner).toBeVisible()
+      } finally {
+        await closeAll(person)
+      }
+    })
+  }
+}
 
 test('sign-out leaves no private data in Cache Storage, and the shell still works offline', async ({ browser }) => {
   let person: Person | undefined

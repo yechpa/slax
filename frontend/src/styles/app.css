@@ -882,16 +882,33 @@
     font-weight: var(--weight-strong);
   }
 
-  /* A new version is ready (pwa/UpdateBanner.tsx): at the foot of the screen, above everything. */
-  .update-banner-region {
-    position: fixed;
-    inset-block-end: var(--space-4);
-    inset-inline: 0;
-    z-index: 110;
+  /*
+   * A new version is ready (pwa/UpdateBanner.tsx): a band above the screen, in the page's flow,
+   * never drawn over it. While it shows, the screen takes the height that remains, so nothing
+   * (the composer and its Send above all, the header's controls) is ever under it.
+   */
+  .update-banner-region:has(> .update-banner) {
     display: flex;
     justify-content: center;
-    padding-inline: var(--space-4);
-    pointer-events: none;
+    padding: var(--space-2) var(--space-4);
+    background: var(--color-surface);
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  #app:has(> .update-banner-region > .update-banner) {
+    display: flex;
+    flex-direction: column;
+    block-size: 100dvh;
+  }
+
+  #app:has(> .update-banner-region > .update-banner) > :is(.shell--app, .splash, .signin) {
+    flex: 1 1 auto;
+    block-size: auto;
+    min-block-size: 0;
+  }
+
+  #app:has(> .update-banner-region > .update-banner) > :is(.splash, .signin) {
+    overflow: auto;
   }
 
   .update-banner {
@@ -903,10 +920,8 @@
     background: var(--color-raised);
     border: var(--border-width) solid var(--color-accent);
     border-radius: var(--radius-1);
-    box-shadow: 0 0.25rem 0 0 var(--color-shadow);
     color: var(--color-text);
     font-size: var(--text-sm);
-    pointer-events: auto;
   }
 
   .update-banner__tag {

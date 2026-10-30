@@ -6,7 +6,9 @@ import { applyUpdate, updateReady } from './register.ts'
 /**
  * "A new version is ready": shown on every screen (signed in or not) once a new service
  * worker waits, until the person reloads. Not dismissible: an old app against a newer API
- * must not go unnoticed. The live region is always there, so the message is announced.
+ * must not go unnoticed. It is a band above the screen, which shrinks to make room (app.css):
+ * it never covers the composer, its Send or the header. The live region is always there, so
+ * the message is announced.
  */
 export function UpdateBanner() {
   useLocale()
