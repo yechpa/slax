@@ -376,8 +376,10 @@ test('the download redirects to a 60 second presigned URL with the disposition a
 
     $location = $response->headers->get('Location');
     $query = presignedQuery($location);
+    // The expiry is set from the app's clock and the SDK subtracts its own `time()`: 59 when a
+    // second ticks over in between.
     expect($location)->toStartWith("http://files.test/slax-files/{$file->storage_key}?")
-        ->and($query['X-Amz-Expires'])->toBe('60')
+        ->and($query['X-Amz-Expires'])->toBeIn(['59', '60'])
         ->and($query['X-Amz-Signature'])->toMatch('/^[0-9a-f]{64}$/')
         ->and($query['response-content-type'])->toBe($mime)
         ->and($query['response-content-disposition'])->toBe($disposition);
