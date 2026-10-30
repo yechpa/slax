@@ -1,0 +1,177 @@
+# Slax Helm chart: defaults. Safe and environment-neutral; values-dev.yaml and
+# values-prod.yaml complete them:
+#   helm upgrade --install slax deploy/helm/slax -n slax \
+#     -f deploy/helm/slax/values-dev.yaml --set image.tag=<git commit SHA>
+#
+# No secret ever goes in these files. Every secret value lives in one Secret created by
+# hand in the namespace (secretName below; keys listed in deploy/dev/BOOTSTRAP.md and
+# deploy/dev/secrets.example.sh). The chart only refers to it by name.
+
+image:
+  registry: ghcr.io
+  owner: yechpa
+  # The three images (slax-app, slax-web, slax-scanner) share one tag: the Git commit SHA
+  # they were built from (.github/workflows/images.yml). Required, given with --set.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# The GHCR images are public: no pull secret needed.
+imagePullSecrets: []
+
+# Public host name. The app is served at https://<publicHost> (TLS on the ingress, or in
+# front of it). Required.
+publicHost: ""
+
+# Every Telegram alert starts with "[<envLabel>]" (SLAX_ENV_LABEL): Dev or Prod.
+envLabel: ""
+
+# The hand-made Secret holding every secret value (never created by this chart).
+secretName: slax-secrets
+
+config:
+  logLevel: info
+  # Days the audit log keeps its entries (audit:prune).
+  auditRetentionDays: 180
+  # Proxies whose X-Forwarded-For header nginx believes, so rate limits, Turnstile and the
+  # audit log see the visitor's address, not the proxy's. Default: k3s's pod network
+  # (10.42.0.0/16), where the ingress controller (Traefik) runs. The production front proxy
+  # (Task 13) may need its own address here.
+  trustedProxies:
+    - 10.42.0.0/16
+  # Strict-Transport-Security from nginx, in seconds. 0: none from here; the TLS terminator
+  # in front sets it (Caddy in production, Task 13). Set it only if nothing in front does.
+  hstsMaxAge: 0
+  # More non-secret environment variables for the Laravel processes (never APP_ENV,
+  # APP_DEBUG or a secret key: the chart refuses them).
+  extraEnv: {}
+
+demo:
+  # Run DemoSeeder (fictional people and messages, idempotent) after the migrations.
+  seed: false
+  # SLAX_DEMO_RESET_ENABLED: the nightly reset that deletes visitors' accounts and content.
+  # Only on the public showcase.
+  resetEnabled: false
+
+s3:
+  region: us-east-1
+  bucket: slax-files
+  # S3 API the app talks to. Empty: AWS for the region. Ignored with minio.enabled (the
+  # in-cluster MinIO is used).
+  endpoint: ""
+  # Endpoint written into presigned download URLs (what browsers reach). Empty: the same
+  # as the API's; https://<minio.ingress.host> with MinIO.
+  publicEndpoint: ""
+  usePathStyle: false
+  # Origin file previews are loaded from (Content-Security-Policy img-src). Empty: the
+  # origin of publicEndpoint.
+  filesOrigin: ""
+
+# The web pod: nginx (slax-web) and PHP-FPM (slax-app) side by side. One pod so FastCGI
+# stays on the pod's loopback (never on the network) and the SPA and the API it talks to
+# always ship together.
+app:
+  replicas: 1
+  php:
+    resources:
+      requests: { cpu: 50m, memory: 160Mi }
+      limits: { cpu: "1", memory: 768Mi }
+  web:
+    resources:
+      requests: { cpu: 10m, memory: 24Mi }
+      limits: { cpu: 500m, memory: 128Mi }
+
+# Laravel Reverb (WebSocket). One replica: without Reverb's Redis scaling, a second one
+# would not see the first one's connections.
+reverb:
+  # Public identifier of the Reverb app (the key and secret are in the Secret).
+  appId: slax
+  resources:
+    requests: { cpu: 20m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# One queue worker: broadcasts and channel revocations keep their order.
+queue:
+  resources:
+    requests: { cpu: 20m, memory: 112Mi }
+    limits: { cpu: 500m, memory: 384Mi }
+
+# One scheduler (schedule:work): never two at once (Recreate).
+scheduler:
+  resources:
+    requests: { cpu: 10m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# Upload validation (services/scanner). Reachable only from the app and queue pods.
+scanner:
+  resources:
+    requests: { cpu: 20m, memory: 80Mi }
+    limits: { cpu: 500m, memory: 320Mi }
+
+postgres:
+  image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+  database: slax
+  username: slax
+  maxConnections: 50
+  sharedBuffers: 128MB
+  storage:
+    size: 5Gi
+    storageClassName: local-path
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+redis:
+  image: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+  # Sessions, cache and queue. noeviction: a full Redis refuses writes instead of dropping
+  # queued jobs.
+  maxmemory: 128mb
+  storage:
+    size: 1Gi
+    storageClassName: local-path
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 500m, memory: 192Mi }
+
+# S3-compatible storage inside the cluster: development only. Production uses real S3
+# (values-prod.yaml keeps this off).
+minio:
+  enabled: false
+  image: cgr.dev/chainguard/minio:latest@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82
+  clientImage: cgr.dev/chainguard/minio-client:latest@sha256:5b759d9e248ad9f1ab8455f8168b86a47acb1e08207d38603b504bdc5a555d7a
+  storage:
+    size: 10Gi
+    storageClassName: local-path
+  resources:
+    requests: { cpu: 20m, memory: 160Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  # Browsers download files (presigned URLs) from this host, on a name of its own: never
+  # the app's origin.
+  ingress:
+    host: ""
+    tlsSecretName: slax-files-tls
+
+ingress:
+  enabled: true
+  className: traefik
+  tls:
+    enabled: true
+    # cert-manager ClusterIssuer (ACME DNS-01), created by hand: deploy/dev/BOOTSTRAP.md.
+    clusterIssuer: ""
+    secretName: slax-tls
+  annotations: {}
+
+networkPolicy:
+  enabled: true
+  # Where the ingress controller runs (k3s: Traefik in kube-system).
+  ingressController:
+    namespace: kube-system
+    podLabels:
+      app.kubernetes.io/name: traefik
+
+migrations:
+  # The migration Job (post-install, pre-upgrade hook) must finish within this.
+  activeDeadlineSeconds: 600
+  backoffLimit: 2
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }

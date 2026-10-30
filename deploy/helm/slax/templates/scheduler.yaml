@@ -1,0 +1,33 @@
+{{- $component := "scheduler" -}}
+# The scheduler (demo reset, audit pruning, ...). Exactly one: replicas 1 and Recreate, so a
+# deployment never runs two side by side (onOneServer tasks hold a Redis lock as well).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" $component) }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+        {{- include "slax.backendLabel" . | nindent 8 }}
+      annotations:
+        {{- include "slax.configChecksum" . | nindent 8 }}
+    spec:
+      {{- include "slax.podCommon" . | nindent 6 }}
+      securityContext:
+        {{- include "slax.podSecurityContext" 10001 | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        {{- include "slax.phpContainer" (dict "ctx" . "name" "scheduler" "resources" .Values.scheduler.resources "args" (list "php" "artisan" "schedule:work" "--no-interaction")) | nindent 8 }}
+      volumes:
+        {{- include "slax.phpVolumes" . | nindent 8 }}

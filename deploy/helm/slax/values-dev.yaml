@@ -1,0 +1,28 @@
+# Development cluster: k3s on slax-dev (amd64, i7-6500U / 16 GB), reachable on the tailnet
+# only (deploy/dev/BOOTSTRAP.md). Deployed by .github/workflows/deploy-dev.yml on every push
+# to main:
+#   helm upgrade --install slax deploy/helm/slax -n slax \
+#     -f deploy/helm/slax/values-dev.yaml --set image.tag=<sha>
+#
+# Same production images and code paths as prod (APP_ENV=production, APP_DEBUG=false), with
+# MinIO instead of S3 and no nightly demo reset.
+
+publicHost: dev.slax.yechpa.com
+envLabel: Dev
+
+demo:
+  # The demo content makes dev look like the showcase.
+  seed: true
+  # Dev is not the public showcase: visitors' accounts are never reset here.
+  resetEnabled: false
+
+# In-cluster MinIO; browsers fetch files from its own host, also on the tailnet.
+minio:
+  enabled: true
+  ingress:
+    host: files.dev.slax.yechpa.com
+
+ingress:
+  tls:
+    # The ClusterIssuer created by hand (deploy/dev/cluster-issuer.example.yaml).
+    clusterIssuer: letsencrypt-dns

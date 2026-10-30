@@ -1,0 +1,81 @@
+# The namespace Slax runs in, and the identity GitHub Actions deploys with
+# (.github/workflows/deploy-dev.yml). Applied once, by hand, with the cluster admin's
+# kubeconfig (deploy/dev/BOOTSTRAP.md):
+#   sudo k3s kubectl apply -f deploy/dev/deployer-rbac.yaml
+#
+# The deployer is limited to this namespace and to the kinds the chart manages: it cannot
+# touch the cluster, other namespaces, nodes or RBAC. It can read and write Secrets in the
+# namespace because Helm stores its release history there (and anything that can create a
+# Deployment here could mount them anyway).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: slax
+  labels:
+    # Every Slax pod meets the "restricted" Pod Security Standard; enforce it.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: slax-deployer
+  namespace: slax
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: slax-deployer
+  namespace: slax
+rules:
+  # What the chart creates, updates and deletes (and Helm's release records, in Secrets).
+  - apiGroups: [""]
+    resources: [configmaps, secrets, services, serviceaccounts]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [traefik.io]
+    resources: [middlewares]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Read-only: what `helm upgrade --wait` watches, and what a failed deployment is debugged with.
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, persistentvolumeclaims]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [replicasets, controllerrevisions]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: slax-deployer
+  namespace: slax
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: slax-deployer
+subjects:
+  - kind: ServiceAccount
+    name: slax-deployer
+    namespace: slax
+---
+# A long-lived token for the deployer (stored only in the GitHub secret DEV_KUBECONFIG).
+# Rotate it by deleting this Secret and applying the file again (BOOTSTRAP.md).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: slax-deployer-token
+  namespace: slax
+  annotations:
+    kubernetes.io/service-account.name: slax-deployer
+type: kubernetes.io/service-account-token

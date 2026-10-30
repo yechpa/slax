@@ -1,0 +1,63 @@
+{{- $component := "reverb" -}}
+{{- $name := include "slax.name" (dict "ctx" . "component" $component) -}}
+# Laravel Reverb. Browsers reach its WebSocket through nginx (/app/); the Laravel processes
+# call its HTTP API (/apps/) on this Service. Nothing else may connect (network policy).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  # One instance: connections live in its memory (no Redis scaling).
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+        {{- include "slax.backendLabel" . | nindent 8 }}
+      annotations:
+        {{- include "slax.configChecksum" . | nindent 8 }}
+    spec:
+      {{- include "slax.podCommon" . | nindent 6 }}
+      securityContext:
+        {{- include "slax.podSecurityContext" 10001 | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        {{- include "slax.phpContainer" (dict "ctx" . "name" "reverb" "resources" .Values.reverb.resources "args" (list "php" "artisan" "reverb:start" "--host=0.0.0.0" "--port=8080" "--no-interaction")) | nindent 8 }}
+          ports:
+            - name: ws
+              containerPort: 8080
+          readinessProbe:
+            tcpSocket:
+              port: ws
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: ws
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        {{- include "slax.phpVolumes" . | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: ws
+      port: 8080
+      targetPort: ws

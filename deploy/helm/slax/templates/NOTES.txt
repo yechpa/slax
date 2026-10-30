@@ -1,0 +1,9 @@
+Slax {{ .Values.image.tag }} [{{ .Values.envLabel }}] is deployed in namespace {{ .Release.Namespace }}.
+
+  URL:        {{ include "slax.publicUrl" . }}
+  Health:     {{ include "slax.publicUrl" . }}/api/v1/health
+  Migrations: kubectl -n {{ .Release.Namespace }} logs job/{{ include "slax.name" (dict "ctx" . "component" "migrate") }}
+  Pods:       kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  Roll back:  helm -n {{ .Release.Namespace }} rollback {{ .Release.Name }}
+
+Secrets come from the Secret "{{ .Values.secretName }}" (created by hand; see deploy/dev/BOOTSTRAP.md).

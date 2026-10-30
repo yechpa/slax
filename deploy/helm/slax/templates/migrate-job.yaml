@@ -1,0 +1,79 @@
+{{- $component := "migrate" -}}
+# Database migrations, then the default workspace (DefaultWorkspaceSeeder: without it every
+# channel route answers 404) and, when demo.seed, the demo content. Every step is idempotent.
+#
+# A Helm hook:
+#  - pre-upgrade: before the new pods start, so they find the schema they expect (migrations
+#    follow expand-then-contract, so the old pods keep working meanwhile and a rollback
+#    needs no down-migration);
+#  - post-install (not pre-install): on the first install PostgreSQL is part of this same
+#    release and does not exist before it.
+# Its configuration is inline (the same values as the ConfigMap): a pre-upgrade hook runs
+# before the ConfigMap is updated. The last run stays for `kubectl logs job/<release>-migrate`
+# until the next deployment replaces it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" $component) }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+        {{- include "slax.backendLabel" . | nindent 8 }}
+    spec:
+      {{- include "slax.podCommon" . | nindent 6 }}
+      restartPolicy: Never
+      securityContext:
+        {{- include "slax.podSecurityContext" 10001 | nindent 8 }}
+      initContainers:
+        # PostgreSQL may still be starting (first install, node reboot).
+        - name: wait-for-postgres
+          image: {{ .Values.postgres.image }}
+          command:
+            - sh
+            - -c
+            - until pg_isready -h {{ include "slax.name" (dict "ctx" . "component" "postgres") }} -p 5432 -t 3; do sleep 2; done
+          securityContext:
+            {{- include "slax.containerSecurityContext" 70 | nindent 12 }}
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+      containers:
+        - name: migrate
+          image: {{ include "slax.image" (dict "ctx" . "name" "app") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - sh
+            - -c
+            - >-
+              php artisan migrate --force --no-interaction
+              && php artisan db:seed --class=DefaultWorkspaceSeeder --force --no-interaction
+              {{- if .Values.demo.seed }}
+              && php artisan db:seed --class=DemoSeeder --force --no-interaction
+              {{- end }}
+          env:
+            {{- range $key, $value := include "slax.config" . | fromYaml }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- include "slax.backendSecretEnv" . | trim | nindent 12 }}
+          securityContext:
+            {{- include "slax.containerSecurityContext" 10001 | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          volumeMounts:
+            - name: storage
+              mountPath: /var/www/html/storage
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- include "slax.phpVolumes" . | nindent 8 }}

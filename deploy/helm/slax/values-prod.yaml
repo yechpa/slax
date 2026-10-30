@@ -1,0 +1,43 @@
+# Production: k3s on one small AWS ARM64 instance (~2 vCPU / 4 GB, Task 13), slax.yechpa.com,
+# the public showcase. Deployed on a version tag after manual approval (Task 13).
+#
+# Real S3 (no MinIO), the nightly demo reset on. Requests are kept small for the budget
+# (15-20 $/month); Task 14's load test may adjust them.
+
+publicHost: slax.yechpa.com
+envLabel: Prod
+
+demo:
+  seed: true
+  # The production instance IS the public showcase: visitors' accounts and content are
+  # reset nightly (SLAX_DEMO_RESET_ENABLED, docs/known-limitations.md).
+  resetEnabled: true
+
+# Real S3. Task 13 provisions the bucket and settles how browsers reach it
+# (files.slax.yechpa.com): it must set s3.region, and s3.publicEndpoint / s3.filesOrigin so
+# presigned URLs and the CSP's img-src name the same host.
+minio:
+  enabled: false
+s3:
+  region: us-east-1
+  bucket: slax-files
+  filesOrigin: https://files.slax.yechpa.com
+
+ingress:
+  tls:
+    # Task 13 decides the TLS terminator (Caddy per Ruling E, or cert-manager here). HSTS
+    # comes from whichever terminates TLS: set config.hstsMaxAge only if nothing in front does.
+    clusterIssuer: letsencrypt-dns
+
+app:
+  php:
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: "1", memory: 512Mi }
+
+postgres:
+  storage:
+    size: 10Gi
+  resources:
+    requests: { cpu: 50m, memory: 160Mi }
+    limits: { cpu: "1", memory: 640Mi }

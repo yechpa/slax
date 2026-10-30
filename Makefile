@@ -12,10 +12,10 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e chart-lint images
 
 help: ## Show this help
-	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-8s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
 
 env: ## Create .env from .env.example (with a generated APP_KEY) if missing
 	@test -f .env || { \
@@ -108,3 +108,40 @@ e2e: env deps ## Run the Playwright end-to-end suite on a fresh, separate stack 
 	echo '==> Playwright'; \
 	mkdir -p docs/design/e2e; \
 	$(DCE) run --rm -T playwright
+
+# Helm chart checks (deploy/helm/slax), all in pinned containers: helm lint, the dev and prod
+# renders validated against the Kubernetes 1.36 schemas (kubeconform; cert-manager and Traefik
+# resources against the CRDs catalog), then the chart's own rules (deploy/helm/check-chart.sh).
+HELM_IMAGE := alpine/helm:3.22.1@sha256:8191701ad1f82ee3695c87211fcbfe6d7b1bb7df92ac1c8de9ccdb0995a6a2c1
+KUBECONFORM_IMAGE := ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
+YQ_IMAGE := mikefarah/yq:4.54.1@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
+CHART := deploy/helm/slax
+CHART_OUT := build/chart
+CHART_RUN = docker run --rm -u $(DOCKER_UID):$(DOCKER_GID) -e HOME=/tmp -v $(CURDIR):/repo -w /repo
+HELM = $(CHART_RUN) $(HELM_IMAGE)
+KUBECONFORM = $(CHART_RUN) $(KUBECONFORM_IMAGE) -strict -summary -kubernetes-version 1.36.0 \
+	-schema-location default \
+	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+
+chart-lint: ## Lint, render and validate the Helm chart (dev and prod values)
+	set -e; mkdir -p $(CHART_OUT); \
+	for env in dev prod; do \
+		echo "==> helm lint ($$env)"; \
+		$(HELM) lint --strict --quiet $(CHART) -f $(CHART)/values-$$env.yaml --set image.tag=0123abc; \
+		$(HELM) template slax $(CHART) -n slax -f $(CHART)/values-$$env.yaml --set image.tag=0123abc > $(CHART_OUT)/$$env.yaml; \
+	done; \
+	echo '==> helm template refuses unsafe values'; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml > /dev/null 2>&1 || { echo 'rendered without image.tag'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.APP_ENV=local > /dev/null 2>&1 || { echo 'rendered APP_ENV=local'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.APP_KEY=x > /dev/null 2>&1 || { echo 'rendered a secret in the ConfigMap'; exit 1; }; \
+	echo '==> kubeconform'; \
+	$(KUBECONFORM) $(CHART_OUT)/dev.yaml $(CHART_OUT)/prod.yaml deploy/dev/deployer-rbac.yaml deploy/dev/cluster-issuer.example.yaml; \
+	echo '==> chart rules'; \
+	$(CHART_RUN) --entrypoint sh $(YQ_IMAGE) deploy/helm/check-chart.sh $(CHART_OUT)/dev.yaml $(CHART_OUT)/prod.yaml
+
+# The three production images, as CI builds them (native architecture only here).
+images: ## Build the production images slax-app, slax-web and slax-scanner (tag :local)
+	docker build -q -f docker/app/Dockerfile -t slax-app:local .
+	docker build -q -f docker/web/Dockerfile -t slax-web:local .
+	docker build -q --target runtime -t slax-scanner:local services/scanner
+	docker image ls --format '{{.Repository}}:{{.Tag}}  {{.Size}}' | grep -E '^slax-(app|web|scanner):local '

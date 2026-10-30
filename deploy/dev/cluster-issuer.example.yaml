@@ -1,0 +1,51 @@
+# cert-manager ClusterIssuers for Let's Encrypt with the ACME DNS-01 challenge: the
+# certificate is proven by a TXT record in yechpa.com's DNS, so no inbound port has to be
+# open (dev is reachable on the tailnet only). Copy, fill the placeholders, apply by hand:
+#   cp deploy/dev/cluster-issuer.example.yaml /tmp/cluster-issuer.yaml && $EDITOR /tmp/cluster-issuer.yaml
+#   sudo k3s kubectl apply -f /tmp/cluster-issuer.yaml
+#
+# The DNS provider and its API credentials are yours to choose and create (deploy/dev/BOOTSTRAP.md,
+# step 6). This example uses Cloudflare (an API token limited to Zone:DNS:Edit on yechpa.com);
+# for Route 53 or another provider, replace the `solvers` block following
+# https://cert-manager.io/docs/configuration/acme/dns01/ . The credentials Secret lives in the
+# cert-manager namespace, never in this repository.
+#
+# Try the staging issuer first (untrusted certificates, generous rate limits), then switch
+# ingress.tls.clusterIssuer in values-dev.yaml to letsencrypt-dns.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-dns-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: "<ACME_ACCOUNT_EMAIL>"
+    privateKeySecretRef:
+      name: letsencrypt-dns-staging-account
+    solvers:
+      - selector:
+          dnsZones: ["slax.yechpa.com"]
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: dns-provider-credentials
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-dns
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: "<ACME_ACCOUNT_EMAIL>"
+    privateKeySecretRef:
+      name: letsencrypt-dns-account
+    solvers:
+      - selector:
+          dnsZones: ["slax.yechpa.com"]
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: dns-provider-credentials
+              key: api-token
