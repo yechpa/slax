@@ -308,3 +308,120 @@ test('an expired account whose channel must wait for the next run waits with it'
         ->and(File::find($file->id))->toBeNull()
         ->and(User::find($expired->id))->toBeNull();
 });
+
+/**
+ * Family accounts. A relative signs up as a demo account like any visitor; an administrator
+ * then makes them a member (POST /admin/users/{id}/account-type). From then on the nightly
+ * reset keeps what they write, except where Ruling P puts it: anything in a conversation with
+ * a demo account, in a channel a demo account created, or in a thread a demo account started
+ * goes with that conversation, channel or thread.
+ */
+test('a relative made a member keeps messages, conversations, reactions and channels through the reset; a demo account does not', function () {
+    fakeTerminations();
+    $admin = User::factory()->admin()->create();
+    $relative = User::factory()->demo(daysAgo: 30)->create(['name' => 'Relative']);
+    $cousin = User::factory()->create(['name' => 'Cousin', 'last_seen_at' => now()->subYear()]);
+    $visitor = User::factory()->demo(daysAgo: 30)->create(['name' => 'Visitor']);
+
+    asUser($admin)->postJson("/api/v1/admin/users/{$relative->id}/account-type", ['account_type' => 'member'])->assertOk();
+
+    // Everything the relative can leave behind (the same as a visitor's activity), and a member-only conversation.
+    $kept = visitorActivity($relative, $cousin);
+    $familyRoom = $kept['own'];
+    $familyRoomFile = $kept['ownFile'];
+    $toCousin = Message::factory()->create(['channel_id' => $kept['dm']->id, 'user_id' => $relative->id, 'body' => 'shalom cousin']);
+    $onSeed = Reaction::where('user_id', $relative->id)->sole();
+    $reaction = Reaction::create(['message_id' => $kept['post']->id, 'user_id' => $cousin->id, 'emoji' => '❤️']);
+    $ownReaction = Reaction::create(['message_id' => $toCousin->id, 'user_id' => $relative->id, 'emoji' => '👍']);
+
+    // The same for a visitor nobody promoted.
+    $gone = visitorActivity($visitor, User::factory()->demo()->create());
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    // The member: account, posts, reply, reaction, file, own channel and conversation with another member, all kept.
+    expect(User::find($relative->id))->not->toBeNull()
+        ->and(User::find($relative->id)->account_type)->toBe(User::ACCOUNT_MEMBER)
+        ->and(Message::find($kept['post']->id))->not->toBeNull()
+        ->and(Message::find($kept['reply']->id))->not->toBeNull()
+        ->and(Reaction::where('message_id', $reaction->message_id)->where('user_id', $cousin->id)->exists())->toBeTrue()
+        ->and(Reaction::where('message_id', $ownReaction->message_id)->where('user_id', $relative->id)->exists())->toBeTrue()
+        // The demo's sample messages get exactly their sample reactions back every night, anyone's others go.
+        ->and(Reaction::where('message_id', $onSeed->message_id)->where('user_id', $relative->id)->exists())->toBeFalse()
+        ->and(File::find($kept['file']->id))->not->toBeNull()
+        ->and(Channel::find($familyRoom->id))->not->toBeNull()
+        ->and(File::find($familyRoomFile->id))->not->toBeNull()
+        ->and(Channel::find($kept['dm']->id))->not->toBeNull()
+        ->and(Message::where('channel_id', $kept['dm']->id)->count())->toBe(2);
+    Storage::disk('s3')->assertExists($kept['file']->storage_key);
+    Storage::disk('s3')->assertExists($familyRoomFile->storage_key);
+
+    // The visitor: everything gone, account included (30 days without activity).
+    expect(User::find($visitor->id))->toBeNull()
+        ->and(Message::find($gone['post']->id))->toBeNull()
+        ->and(Message::find($gone['reply']->id))->toBeNull()
+        ->and(Channel::find($gone['own']->id))->toBeNull()
+        ->and(Channel::find($gone['dm']->id))->toBeNull()
+        ->and(Reaction::where('user_id', $visitor->id)->exists())->toBeFalse();
+});
+
+test('Ruling P: a conversation between a member and a demo account is deleted whole every night, the member\'s messages included', function () {
+    fakeTerminations();
+    $member = User::factory()->create(['name' => 'Member']);
+    $visitor = User::factory()->demo()->create(['name' => 'Visitor']);
+    $other = User::factory()->create(['name' => 'Other member']);
+
+    $mixed = Channel::factory()->dm()->create();
+    $mixed->members()->attach([$member->id, $visitor->id]);
+    $fromMember = Message::factory()->create(['channel_id' => $mixed->id, 'user_id' => $member->id]);
+    Message::factory()->create(['channel_id' => $mixed->id, 'user_id' => $visitor->id]);
+
+    // A group conversation with one demo account in it goes the same way.
+    $group = Channel::factory()->dm(Channel::KIND_GROUP_DM)->create();
+    $group->members()->attach([$member->id, $other->id, $visitor->id]);
+    $inGroup = Message::factory()->create(['channel_id' => $group->id, 'user_id' => $other->id]);
+
+    // A member's message in a channel a demo account created, and a member's reply in a demo account's thread, go too.
+    $visitorRoom = publicChannel($visitor, 'visitor-room');
+    $visitorRoom->forceFill(['created_by' => $visitor->id])->save();
+    $inVisitorRoom = Message::factory()->create(['channel_id' => $visitorRoom->id, 'user_id' => $member->id]);
+    $visitorPost = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $visitor->id]);
+    $memberReply = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $member->id, 'parent_id' => $visitorPost->id]);
+
+    // Between two members: kept.
+    $family = Channel::factory()->dm()->create();
+    $family->members()->attach([$member->id, $other->id]);
+    $familyMessage = Message::factory()->create(['channel_id' => $family->id, 'user_id' => $member->id]);
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    expect(Channel::find($mixed->id))->toBeNull()
+        ->and(Message::find($fromMember->id))->toBeNull()
+        ->and(Channel::find($group->id))->toBeNull()
+        ->and(Message::find($inGroup->id))->toBeNull()
+        ->and(Channel::find($visitorRoom->id))->toBeNull()
+        ->and(Message::find($inVisitorRoom->id))->toBeNull()
+        ->and(Message::find($memberReply->id))->toBeNull()
+        ->and(Channel::find($family->id))->not->toBeNull()
+        ->and(Message::find($familyMessage->id))->not->toBeNull()
+        // The accounts themselves stay (the visitor was active today).
+        ->and(User::find($member->id))->not->toBeNull()
+        ->and(User::find($visitor->id))->not->toBeNull();
+});
+
+test('made a demo account again, a former member\'s content goes at the next reset', function () {
+    fakeTerminations();
+    $admin = User::factory()->admin()->create();
+    $former = User::factory()->create(['last_seen_at' => now()]);
+    $post = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $former->id]);
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+    expect(Message::find($post->id))->not->toBeNull();
+
+    asUser($admin)->postJson("/api/v1/admin/users/{$former->id}/account-type", ['account_type' => 'demo'])->assertOk();
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    expect(Message::find($post->id))->toBeNull()
+        // Seen today: the account itself waits for 7 days without activity.
+        ->and(User::find($former->id))->not->toBeNull();
+});
