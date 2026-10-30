@@ -26,6 +26,12 @@ class ChannelFactory extends Factory
         ];
     }
 
+    /** A conversation: anonymous, with a unique member-set key (members are attached by the test). */
+    public function dm(string $kind = Channel::KIND_DM): static
+    {
+        return $this->state(fn () => ['kind' => $kind, 'name' => null, 'dm_key' => 'dm:'.fake()->unique()->numerify('########')]);
+    }
+
     public function private(): static
     {
         return $this->state(['kind' => Channel::KIND_PRIVATE]);

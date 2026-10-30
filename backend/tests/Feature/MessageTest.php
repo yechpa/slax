@@ -482,7 +482,7 @@ test('message routes are closed to non-members of a private channel (404)', func
     expect(Message::count())->toBe(1)->and($message->reactions()->count())->toBe(0);
 
     // The same holds for a DM between two other people.
-    $dm = Channel::factory()->create(['kind' => Channel::KIND_DM, 'name' => null]);
+    $dm = Channel::factory()->dm()->create();
     $dm->members()->attach($owner->id);
     $as()->getJson("/api/v1/channels/{$dm->id}/messages")->assertNotFound();
     sendMessage($outsider, $dm)->assertNotFound();
@@ -507,7 +507,7 @@ test('a public channel can be read but not written by non-members (403)', functi
 test('members of a DM can talk', function () {
     $a = User::factory()->create();
     $b = User::factory()->create();
-    $dm = Channel::factory()->create(['kind' => Channel::KIND_DM, 'name' => null]);
+    $dm = Channel::factory()->dm()->create();
     $dm->members()->attach([$a->id, $b->id]);
 
     sendMessage($a, $dm, ['body' => 'psst'])->assertCreated();

@@ -117,7 +117,7 @@ test('channel_name_unique_per_workspace', function () {
 
     // Another workspace may reuse the name; DMs have no name and are exempt.
     Channel::factory()->create(['workspace_id' => $other->id, 'name' => 'general']);
-    Channel::factory()->count(2)->create(['workspace_id' => $workspace->id, 'kind' => 'dm', 'name' => null]);
+    Channel::factory()->dm()->count(2)->create(['workspace_id' => $workspace->id]);
     expect(Channel::where('kind', 'dm')->count())->toBe(2);
 
     // The API reports it as a validation error.

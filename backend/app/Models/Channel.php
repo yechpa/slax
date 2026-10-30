@@ -24,7 +24,7 @@ class Channel extends Model
 
     public const ROLE_OWNER = 'owner';
 
-    protected $fillable = ['workspace_id', 'kind', 'name', 'topic', 'created_by'];
+    protected $fillable = ['workspace_id', 'kind', 'name', 'topic', 'dm_key', 'created_by'];
 
     /** @return BelongsTo<Workspace, $this> */
     public function workspace(): BelongsTo
@@ -49,6 +49,12 @@ class Channel extends Model
     public function isRoom(): bool
     {
         return in_array($this->kind, [self::KIND_PUBLIC, self::KIND_PRIVATE], true);
+    }
+
+    /** One-to-one and group conversations: anonymous, membership fixed at creation. */
+    public function isDirect(): bool
+    {
+        return in_array($this->kind, [self::KIND_DM, self::KIND_GROUP_DM], true);
     }
 
     public function roleOf(User $user): ?string
