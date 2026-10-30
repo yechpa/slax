@@ -5,9 +5,14 @@ use App\Models\File;
 use App\Models\User;
 use App\Services\FakeScannerClient;
 use App\Services\ScannerClient;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -71,6 +76,45 @@ function authorizeChannelName(User $user, string $channelName, string $socketId 
 function authorizeChannel(User $user, int $channelId, string $socketId = '1234.5678'): TestResponse
 {
     return authorizeChannelName($user, "private-channel.{$channelId}", $socketId);
+}
+
+const REVERB_SECRET = 'test-secret';
+
+/**
+ * Broadcasts through the Reverb driver, whose HTTP API calls hit a Guzzle mock.
+ * Returns the history of the requests the app sent to Reverb.
+ */
+function fakeReverb(Response ...$responses): ArrayObject
+{
+    $history = new ArrayObject;
+    $stack = HandlerStack::create(new MockHandler($responses ?: array_fill(0, 5, new Response(200, [], '{}'))));
+    $stack->push(Middleware::history($history));
+
+    config([
+        'broadcasting.connections.reverb' => [
+            'driver' => 'reverb',
+            'key' => 'test-key',
+            'secret' => REVERB_SECRET,
+            'app_id' => 'test-app',
+            'options' => ['host' => 'reverb.test', 'port' => 8080, 'scheme' => 'http', 'useTLS' => false],
+            'client_options' => ['handler' => $stack],
+        ],
+    ]);
+    useReverbDriver();
+
+    return $history;
+}
+
+/** Fakes Reverb's HTTP API for the termination calls (made with the Http client). */
+function fakeTerminations(mixed $response = null): void
+{
+    Http::fake(['reverb.test:8080/apps/*' => $response ?? Http::response('{}')]);
+}
+
+/** @return list<string> paths of the termination calls the app made */
+function terminationPaths(): array
+{
+    return Http::recorded()->map(fn ($pair) => $pair[0]->toPsrRequest()->getUri()->getPath())->values()->all();
 }
 
 /*

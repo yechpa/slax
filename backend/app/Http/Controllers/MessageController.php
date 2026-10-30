@@ -10,6 +10,7 @@ use App\Models\Channel;
 use App\Models\File;
 use App\Models\Message;
 use App\Models\User;
+use App\Services\AuditLogger;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -49,10 +50,14 @@ class MessageController extends Controller
         return $page->setData(['parent' => (new MessageResource($message->refreshForDisplay()))->resolve($request)] + $page->getData(true));
     }
 
-    public function store(Request $request, Channel $channel): JsonResponse
+    public function store(Request $request, Channel $channel, AuditLogger $audit): JsonResponse
     {
         Gate::authorize('view', $channel);
-        Gate::authorize('post', $channel);
+        $decision = Gate::inspect('post', $channel);
+        if ($decision->denied()) {
+            $audit->record(AuditLogger::SEND_REFUSED, $channel);
+            $decision->authorize();
+        }
 
         $this->trimBody($request);
         $data = $request->validate([

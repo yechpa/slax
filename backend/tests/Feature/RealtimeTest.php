@@ -9,9 +9,6 @@ use App\Models\Message;
 use App\Models\User;
 use App\Services\FileNames;
 use Database\Seeders\DefaultWorkspaceSeeder;
-use GuzzleHttp\Handler\MockHandler;
-use GuzzleHttp\HandlerStack;
-use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Message as GuzzleMessage;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Http\Client\ConnectionException;
@@ -28,33 +25,6 @@ use Tests\Support\WebSocketClient;
 beforeEach(function () {
     $this->seed(DefaultWorkspaceSeeder::class);
 });
-
-const REVERB_SECRET = 'test-secret';
-
-/**
- * Broadcasts through the Reverb driver, whose HTTP API calls hit a Guzzle mock.
- * Returns the history of the requests the app sent to Reverb.
- */
-function fakeReverb(Response ...$responses): ArrayObject
-{
-    $history = new ArrayObject;
-    $stack = HandlerStack::create(new MockHandler($responses ?: array_fill(0, 5, new Response(200, [], '{}'))));
-    $stack->push(Middleware::history($history));
-
-    config([
-        'broadcasting.connections.reverb' => [
-            'driver' => 'reverb',
-            'key' => 'test-key',
-            'secret' => REVERB_SECRET,
-            'app_id' => 'test-app',
-            'options' => ['host' => 'reverb.test', 'port' => 8080, 'scheme' => 'http', 'useTLS' => false],
-            'client_options' => ['handler' => $stack],
-        ],
-    ]);
-    useReverbDriver();
-
-    return $history;
-}
 
 /** Checks a Pusher HTTP API signature the way Reverb does. */
 function assertSignedForReverb(RequestInterface $request): void
@@ -122,18 +92,6 @@ test('removed_member_loses_channel_authorization', function () {
     authorizeChannel($leaver, $channel->id)->assertForbidden();
     authorizeChannel($owner, $channel->id)->assertOk();
 });
-
-/** Fakes Reverb's HTTP API for the termination calls (made with the Http client). */
-function fakeTerminations(mixed $response = null): void
-{
-    Http::fake(['reverb.test:8080/apps/*' => $response ?? Http::response('{}')]);
-}
-
-/** @return list<string> paths of the termination calls the app made */
-function terminationPaths(): array
-{
-    return Http::recorded()->map(fn ($pair) => $pair[0]->toPsrRequest()->getUri()->getPath())->values()->all();
-}
 
 test('removing a member terminates their live Reverb connections', function () {
     fakeReverb();

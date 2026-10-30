@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AdminController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\DirectChannelController;
 use App\Http\Controllers\FileController;
@@ -48,5 +49,20 @@ Route::prefix('v1')->group(function () {
 
         Route::post('/files', [FileController::class, 'store'])->middleware('throttle:uploads');
         Route::get('/files/{file}/download', [FileController::class, 'download']);
+
+        // Administrators only: the `admin` gate runs before anything is looked up
+        // (AdminTest checks every route registered here). Writes are rate limited.
+        Route::prefix('admin')->middleware('can:admin')->group(function () {
+            Route::get('/status', [AdminController::class, 'status']);
+            Route::get('/audit', [AdminController::class, 'audit']);
+            Route::get('/users/banned', [AdminController::class, 'bannedUsers']);
+
+            Route::middleware('throttle:admin-writes')->group(function () {
+                Route::post('/users/{id}/ban', [AdminController::class, 'ban'])->whereNumber('id');
+                Route::delete('/messages/{id}', [AdminController::class, 'destroyMessage'])->whereNumber('id');
+                Route::delete('/files/{id}', [AdminController::class, 'destroyFile'])->whereNumber('id');
+                Route::post('/channels/{id}/lock', [AdminController::class, 'lock'])->whereNumber('id');
+            });
+        });
     });
 });

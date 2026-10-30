@@ -4,14 +4,15 @@ namespace App\Listeners;
 
 use App\Broadcasting\ReverbBroadcaster;
 use App\Events\MemberRemoved;
+use App\Events\UserBanned;
 use App\Jobs\TerminateUserConnections;
 use Illuminate\Contracts\Events\ShouldHandleEventsAfterCommit;
 use Illuminate\Support\Facades\Broadcast;
 use Throwable;
 
 /**
- * A user who leaves or is removed from a channel must stop receiving its events,
- * even on a socket that is already subscribed. The Pusher protocol cannot drop a
+ * A user who leaves or is removed from a channel, or is banned, must stop receiving its
+ * events, even on a socket that is already subscribed. The Pusher protocol cannot drop a
  * single subscription from the server side, so the user's sockets are closed:
  * clients reconnect and re-authorize every channel, and `channel.{id}` now refuses.
  *
@@ -20,7 +21,7 @@ use Throwable;
  */
 class TerminateRevokedConnections implements ShouldHandleEventsAfterCommit
 {
-    public function handle(MemberRemoved $event): void
+    public function handle(MemberRemoved|UserBanned $event): void
     {
         $broadcaster = Broadcast::connection();
 
@@ -32,7 +33,7 @@ class TerminateRevokedConnections implements ShouldHandleEventsAfterCommit
             // Short timeout: this runs inside the leave/remove request.
             $broadcaster->terminateUserConnections($event->user->id, timeoutSeconds: 2);
         } catch (Throwable $e) {
-            // The membership change stands either way; keep trying in the background.
+            // The membership change (or the ban) stands either way; keep trying in the background.
             report($e);
             TerminateUserConnections::dispatch($event->user->id);
         }

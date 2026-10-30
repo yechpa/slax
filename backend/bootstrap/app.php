@@ -1,10 +1,13 @@
 <?php
 
 use App\Http\Middleware\EnsureNotBanned;
+use App\Policies\ChannelPolicy;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -28,4 +31,13 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         // The API answers JSON even to plain navigations (file downloads are opened as links).
         $exceptions->shouldRenderJsonWhen(fn (Request $request) => $request->is('api/*') || $request->expectsJson());
+        // Refusals the SPA explains with a stable code rather than a generic "forbidden".
+        $exceptions->render(function (AccessDeniedHttpException $e) {
+            $refusal = $e->getPrevious();
+            if ($refusal instanceof AuthorizationException && $refusal->getCode() === ChannelPolicy::LOCKED) {
+                return response()->json(['error' => ChannelPolicy::LOCKED], 403);
+            }
+
+            return null;
+        });
     })->create();

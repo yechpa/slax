@@ -6,6 +6,7 @@ use App\Broadcasting\ReverbBroadcaster;
 use App\Contracts\AdminNotifier;
 use App\Contracts\IdentityProvider;
 use App\Http\Controllers\GoogleAuthController;
+use App\Models\User;
 use App\Services\Alerts\NotifierFactory;
 use App\Services\FakeScannerClient;
 use App\Services\FakeTurnstile;
@@ -18,6 +19,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Broadcast;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -59,6 +61,10 @@ class AppServiceProvider extends ServiceProvider
         // Clients debounce typing (250 ms) and abort stale searches: about four a second at most.
         RateLimiter::for('user-search', fn (Request $request) => Limit::perMinute(60)->by('user:'.$request->user()->id));
         RateLimiter::for('uploads', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
+        RateLimiter::for('admin-writes', fn (Request $request) => Limit::perMinute(30)->by('user:'.$request->user()->id));
+
+        // Administrators are the ADMIN_EMAILS accounts (set at each sign-in); a banned one is not.
+        Gate::define('admin', fn (User $user) => $user->is_admin && ! $user->isBanned());
 
         // Ids are bigints: anything else is a 404, not a database error.
         Route::pattern('channel', '[0-9]+');

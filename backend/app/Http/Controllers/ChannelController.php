@@ -33,6 +33,10 @@ class ChannelController extends Controller
                 ->orWhere(fn ($query) => $query
                     ->whereIn('kind', [Channel::KIND_PRIVATE, Channel::KIND_DM, Channel::KIND_GROUP_DM])
                     ->whereHas('members', fn ($members) => $members->whereKey($user->id))))
+            // A one-to-one conversation with a banned person is not listed any more.
+            ->where(fn ($query) => $query
+                ->where('kind', '!=', Channel::KIND_DM)
+                ->orWhereDoesntHave('members', fn ($members) => $members->whereNotNull('users.banned_at')))
             ->withExists(['members' => fn ($members) => $members->whereKey($user->id)])
             ->withCount('members')
             ->orderBy('name')
@@ -111,13 +115,14 @@ class ChannelController extends Controller
     /**
      * GET /channels/{id}/members: who is in a channel the caller may see (any public channel,
      * or one they belong to; 404 otherwise). Owners first, then by name; at most 200.
-     * Only the public profile, never an e-mail address.
+     * Only the public profile, never an e-mail address; banned accounts are left out.
      */
     public function members(Channel $channel): JsonResponse
     {
         Gate::authorize('view', $channel);
 
         $members = $channel->members()
+            ->whereNull('users.banned_at')
             ->orderByRaw("CASE WHEN channel_members.role = 'owner' THEN 0 ELSE 1 END")
             ->orderByRaw('lower(users.name)')
             ->orderBy('users.name')
@@ -156,7 +161,8 @@ class ChannelController extends Controller
         Gate::authorize('view', $channel);
         Gate::authorize('manage', $channel);
 
-        $data = $request->validate(['user_id' => ['required', 'integer', 'exists:users,id']]);
+        // Banned accounts cannot be added (same answer as an unknown id).
+        $data = $request->validate(['user_id' => ['required', 'integer', Rule::exists('users', 'id')->whereNull('banned_at')]]);
 
         $user = User::findOrFail($data['user_id']);
         $created = $channel->addMember($user);

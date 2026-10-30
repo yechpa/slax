@@ -12,6 +12,9 @@ use Illuminate\Auth\Access\Response;
  */
 class ChannelPolicy
 {
+    /** Error code of a refusal because the channel is locked. */
+    public const LOCKED = 'channel_locked';
+
     public function view(User $user, Channel $channel): Response
     {
         if ($channel->isPublic() || $channel->hasMember($user)) {
@@ -32,9 +35,20 @@ class ChannelPolicy
         return $channel->isRoom();
     }
 
-    public function post(User $user, Channel $channel): bool
+    /**
+     * Members post, react and edit; in a locked channel only administrators do
+     * (403 `channel_locked`, see bootstrap/app.php).
+     */
+    public function post(User $user, Channel $channel): Response
     {
-        return $channel->hasMember($user);
+        if (! $channel->hasMember($user)) {
+            return Response::deny();
+        }
+        if ($channel->isLocked() && ! $user->is_admin) {
+            return Response::deny('This channel is locked.', self::LOCKED);
+        }
+
+        return Response::allow();
     }
 
     /** Membership management: owners of public and private channels. */

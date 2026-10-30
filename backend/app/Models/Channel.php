@@ -25,7 +25,22 @@ class Channel extends Model
 
     public const ROLE_OWNER = 'owner';
 
+    /** locked_at is set by administrators only (AdminController), never mass assigned. */
     protected $fillable = ['workspace_id', 'kind', 'name', 'topic', 'dm_key', 'created_by'];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return ['locked_at' => 'datetime'];
+    }
+
+    /** Members still read a locked channel; only administrators post, react or edit there. */
+    public function isLocked(): bool
+    {
+        return $this->locked_at !== null;
+    }
 
     /** @return BelongsTo<Workspace, $this> */
     public function workspace(): BelongsTo

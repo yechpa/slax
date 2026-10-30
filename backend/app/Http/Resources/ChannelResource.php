@@ -52,6 +52,8 @@ class ChannelResource extends JsonResource
             'kind' => $this->kind,
             'name' => $this->name,
             'topic' => $this->topic,
+            // Locked by an administrator: members read, only administrators post.
+            'locked' => $this->isLocked(),
             'is_member' => $this->isMember ?? (bool) $this->members_exists,
             'member_count' => (int) ($this->members_count ?? $this->members()->count()),
             'last_read_message_id' => $readState['last_read_message_id'],

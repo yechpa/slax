@@ -50,6 +50,12 @@ class PresenceService
         });
     }
 
+    /** The user shows offline at once (a ban; the sockets are closed separately). */
+    public function forget(int $userId): void
+    {
+        $this->redis()->del(self::connectionKey($userId), self::activeKey($userId));
+    }
+
     /** One of PresenceState's values. */
     public function stateOf(int $userId): string
     {
