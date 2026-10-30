@@ -71,10 +71,12 @@ receives the channel's events until it disconnects.
 `backend/app/Services/Alerts/TelegramNotifier.php`, `backend/app/Console/Commands/DemoReset.php`,
 `backend/app/Services/AuditLogger.php`.
 
-- **Audit IP behind a proxy.** `audit_logs.ip` is the request IP as Laravel resolves it. In the clusters, nginx
-  (slax-web) takes the client address from `X-Forwarded-For` sent by the trusted proxies of `config.trustedProxies`
-  (the k3s pod network, where Traefik runs), so Laravel sees the visitor. With k3s's ServiceLB in front of Traefik,
-  the address Traefik itself sees may already be rewritten; production's front proxy is settled in Task 13.
+- **Audit IP behind a proxy.** `audit_logs.ip` is the request IP as Laravel resolves it (Laravel trusts no proxy:
+  it reads REMOTE_ADDR). In the clusters, nginx (slax-web) takes the client address from `X-Forwarded-For` sent by
+  the trusted proxies of `config.trustedProxies` (the k3s pod network). Production: Caddy on the host replaces any
+  client `X-Forwarded-For` with the TCP peer and only the node reaches the web pod, so the address is the visitor's
+  (`make proxy-test`). Dev: with k3s's ServiceLB in front of Traefik, the address Traefik sees may already be
+  rewritten to a node address (dev is tailnet-only, so this only lumps the developers together).
 - **Sessions from before the session index.** A ban destroys the sessions indexed per user at sign-in. A session
   opened before that index existed is not destroyed, but it is useless: `EnsureNotBanned` refuses every request of a
   banned user and logs that session out on its next request.
@@ -127,8 +129,10 @@ receives the channel's events until it disconnects.
 - **Turnstile is allowed by the CSP on every page.** The SPA is one document, so `challenges.cloudflare.com` is in
   `script-src` and `frame-src` everywhere, not only on the sign-in screen.
 - **Dev file downloads** come from MinIO on `files.dev.slax.yechpa.com`, with `nosniff` and a sandboxing CSP added
-  by a Traefik middleware. Production's file host (S3 directly or behind a CDN) and the matching `s3.publicEndpoint`
-  / `s3.filesOrigin` are Task 13's.
+  by a Traefik middleware. **Production's** come from presigned URLs on the bucket's own S3 host
+  (`https://slax-files-<suffix>.s3.eu-central-1.amazonaws.com`, a cross-site origin): S3 cannot add `nosniff` or a
+  sandboxing CSP, so the protection is the forced `response-content-type` (the scanner's allowlist) and
+  `attachment` for everything but images and PDFs. PDFs open inline on that isolated origin.
 - **MinIO images are Chainguard's `latest`, pinned by digest** (upstream MinIO images are gone): the digest may be
   garbage-collected one day; dev only.
 - **The first start of a pod can fail once** to reach Redis or PostgreSQL: k3s applies a network policy to a new pod
@@ -136,3 +140,28 @@ receives the channel's events until it disconnects.
 - **The images take Alpine's security updates at build time** (`apk upgrade` in slax-app), so two builds of the
   same commit can differ in OS packages. The Trivy gate fails on fixable critical vulnerabilities only.
 
+## Production (AWS)
+
+**Where:** `deploy/aws/`, `deploy/backup/`, `.github/workflows/release-prod.yml`, `docs/runbook.md`.
+
+- **One small node.** t4g.small (2 GiB) holds k3s and every pod with a few hundred MiB to spare and a 2 GiB swap
+  file; Task 14's load test decides whether t4g.medium is needed (runbook §2). A reboot (security updates at
+  02:00 UTC when needed) or a resize is a minute or two of downtime.
+- **Every pod can use the instance role** (IMDSv2 with hop limit 2, so containers reach the metadata service),
+  except Reverb (an egress policy denies 169.254.169.254) and the scanner (no egress at all). The role reaches only
+  the two Slax buckets and cannot delete backups; a compromised app pod could still read or delete uploaded files.
+- **The web pod admits only its node**, relying on k3s's network policy engine (kube-router) always admitting
+  node-local traffic (the same rule that lets kubelet probes in). Proven for probes in the dev k3s test; the Caddy
+  path through the fixed ClusterIP is to be confirmed on the real node (runbook §7).
+- **The node's Tailscale auth key stays in the instance's user data** (readable with `ec2:DescribeInstanceAttribute`).
+  It is single use and short-lived, so it is worthless once the node has joined.
+- **Caddy and k3s are pinned** (the `.deb` and the install script are checked against checksums at first boot) and
+  are not updated by unattended-upgrades: updating them is a manual step. Tailscale updates itself.
+- **No HTTP/3**: the security group opens TCP 80/443 only, so Caddy serves HTTP/1.1 and HTTP/2.
+- **Backups are logical dumps, daily**: up to a day of data can be lost; there is no point-in-time recovery. The
+  restore check restores only the newest dump. Backup alerts reach Telegram only while the cluster runs: a dead
+  node sends nothing (the missing Sunday "restore check OK" message is the signal).
+- **A release's checks run before approval only for the tag and the images**; Telegram is told about failed
+  deployments, not about a tag refused by the `check` job (visible in GitHub Actions).
+- **The release's post-deploy checks look at the public site**: an outage of Caddy or DNS during a release also
+  triggers a rollback of a good release (harmless: re-run it).

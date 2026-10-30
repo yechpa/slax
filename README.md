@@ -63,7 +63,8 @@ suite relies on is pinned in `backend/phpunit.xml` (`force="true"`, in both `<en
 ## Deployment
 
 Development and production run the same production images
-(`ghcr.io/yechpa/slax-{app,web,scanner}`, built for amd64 and arm64 by
+(`ghcr.io/yechpa/slax-{app,web,scanner}`, plus `slax-backup` for production's database
+backups, built for amd64 and arm64 by
 `.github/workflows/images.yml`) on single-node k3s, through one Helm chart with a values
 file per environment:
 
@@ -74,7 +75,12 @@ file per environment:
 - Development (`dev.slax.yechpa.com`, tailnet only) deploys itself on every push to `main`
   (`.github/workflows/deploy-dev.yml`). Setting the server up, the secrets and the checklist:
   [deploy/dev/BOOTSTRAP.md](deploy/dev/BOOTSTRAP.md).
-- Production (`slax.yechpa.com`, AWS ARM64): Task 13.
+- Production (`slax.yechpa.com`, one AWS Graviton instance behind Caddy) is released from a
+  `vX.Y.Z` tag on `main` after manual approval (`.github/workflows/release-prod.yml`).
+  Provisioning (`deploy/aws/provision.sh`), first-time setup, operations, backups and
+  restores, incidents, costs and teardown: [docs/runbook.md](docs/runbook.md). Local checks:
+  `make aws-test` (provisioning against an AWS emulator), `make proxy-test` (Caddy in front of
+  nginx), `make backup-test` (backup and restore check).
 
 ## Secrets
 

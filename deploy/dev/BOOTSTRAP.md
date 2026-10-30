@@ -406,8 +406,8 @@ refers to it by name; nothing secret is ever in the repository.
 
 - **Google sign-in**: in Google Cloud Console, an OAuth client of type *Web application*
   (consent screen in production, scopes `openid email profile`). Authorized redirect URI:
-  `https://dev.slax.yechpa.com/auth/google/callback` (add the production one,
-  `https://slax.yechpa.com/auth/google/callback`, when Task 13 gets there).
+  `https://dev.slax.yechpa.com/auth/google/callback` and the production one,
+  `https://slax.yechpa.com/auth/google/callback` (docs/runbook.md §3.7).
 - **Cloudflare Turnstile**: a widget (mode *Managed*) whose hostnames include
   `dev.slax.yechpa.com` (and later `slax.yechpa.com`). Cloudflare's always-pass test keys
   also work on dev if you prefer (sign-in then never challenges anyone).
@@ -481,9 +481,10 @@ web UI).
    `main` and tags). Require the `build …` checks (and CI's `lint`, `test`, `e2e`,
    `chart`, `secrets`) by these exact names; older names will never report.
 
-3. After the first `Images` run on `main`, make the three packages public (the cluster pulls
+3. After the first `Images` run on `main`, make the packages public (the cluster pulls
    them without credentials): github.com/yechpa?tab=packages → `slax-app` → Package
-   settings → Change visibility → Public. Same for `slax-web` and `slax-scanner`. Check:
+   settings → Change visibility → Public. Same for `slax-web`, `slax-scanner` and
+   `slax-backup` (production's backups). Check:
    `docker pull ghcr.io/yechpa/slax-app:<sha>` works while logged out.
 
 ## 10. First deployment
@@ -566,7 +567,7 @@ A failed `helm upgrade --atomic` (by hand or in CI) already rolls itself back.
 ## 13. Backups (dev)
 
 None are scheduled: dev data is disposable (the demo content is re-seeded on every deploy).
-Production backups are Task 13. A manual dump when you want one:
+Production's are in docs/runbook.md §4.3. A manual dump when you want one:
 
 ```sh
 kubectl -n slax exec slax-postgres-0 -- sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \

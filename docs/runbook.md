@@ -1,0 +1,634 @@
+# Slax production runbook
+
+How production (`https://slax.yechpa.com`, the public showcase) is built, set up, operated,
+repaired and torn down. Development has its own guide: [deploy/dev/BOOTSTRAP.md](../deploy/dev/BOOTSTRAP.md).
+
+Steps marked **YOU DO THIS** need a human with the owner's accounts (AWS, DNS, Tailscale,
+Google, GitHub). Nothing in this repository holds a secret, an account id or an address.
+
+Contents: [1. Architecture](#1-architecture) · [2. Sizing and cost](#2-sizing-and-cost) ·
+[3. First-time production setup](#3-first-time-production-setup) ·
+[4. Routine operations](#4-routine-operations) · [5. Incident playbook](#5-incident-playbook) ·
+[6. Teardown](#6-teardown) · [7. Verification checklist](#7-verification-checklist)
+
+## 1. Architecture
+
+```
+                 Internet (TCP 80/443 only: security group slax-prod)
+                                   │
+            Elastic IP ── A slax.yechpa.com
+                                   │
+ ┌──────────────────────── EC2 t4g.small "slax-prod" (Ubuntu 24.04 arm64, eu-central-1) ─┐
+ │                                 ▼                                                       │
+ │  Caddy (systemd)  TLS (Let's Encrypt HTTP-01/TLS-ALPN), HSTS, X-Forwarded-For := peer, │
+ │                   /apps → 404, HTTP/1.1 + HTTP/2                                        │
+ │                                 │ http://10.43.10.80:80 (Service slax-app, fixed IP)   │
+ │  k3s v1.36 (no Traefik, no ServiceLB)                namespace slax, PSS restricted    │
+ │   ┌─ pod slax-app ───────────────────┐   ┌ slax-reverb (WebSocket /app) ┐              │
+ │   │ nginx (slax-web): SPA, CSP,      │──▶│ Pusher protocol, Redis        │              │
+ │   │  realip from 10.42.0.0/16        │   └───────────────────────────────┘              │
+ │   │ PHP-FPM (slax-app) on 127.0.0.1  │──▶ slax-scanner (no egress)                      │
+ │   └──────────────────────────────────┘                                                  │
+ │   slax-queue, slax-scheduler ── slax-postgres (PVC, local-path) ── slax-redis (PVC)     │
+ │   CronJobs: slax-backup 02:30 daily, slax-restore-check Sun 03:30 (Asia/Jerusalem)      │
+ │  Tailscale (tag:slax-prod): Tailscale SSH for you, :6443 for CI (tag:ci). No sshd.      │
+ └───────────────┬─────────────────────────────────────────────────────────────────────────┘
+                 │ instance role slax-prod-instance (IMDSv2, hop limit 2), no static keys
+                 ▼
+   S3 slax-files-<suffix>   (uploads; browsers download from presigned URLs on
+                             https://slax-files-<suffix>.s3.eu-central-1.amazonaws.com)
+   S3 slax-backups-<suffix> (pg/YYYY/MM/DD/slax-<UTC>.dump, versioned, 35 days)
+```
+
+What runs where, and why:
+
+| Concern | Decision |
+|---|---|
+| Region | **eu-central-1 (Frankfurt)**: the owner's other EC2 instance is already there, t4g and every service used are available, it is not an opt-in region, and prices are among Europe's lowest. il-central-1 (Tel Aviv) would cut latency from Israel (≈50 ms → ≈5 ms) but is an opt-in region, generally pricier, and latency does not matter for a chat demo. |
+| Front door | **Caddy on the host.** It terminates TLS (automatic Let's Encrypt), sets HSTS (`max-age=31536000; includeSubDomains`, no `preload`), replaces any client `X-Forwarded-For`/`X-Real-IP` with the real peer address, and proxies to the web pod's Service on a fixed ClusterIP. k3s runs without Traefik and ServiceLB: nothing in the cluster listens on a public port, and ServiceLB's source-address rewriting does not exist. nginx in the web pod believes `X-Forwarded-For` only from the pod network, and the web pod's network policy admits no pod (only its node). Laravel trusts no proxy itself. Proven by `make proxy-test`. |
+| Files | **Presigned S3 URLs, straight from the bucket** (`https://<bucket>.s3.eu-central-1.amazonaws.com`): a cross-site origin of the bucket's own, so an uploaded file can never run with the app's cookies or origin. The presigned request forces the stored type (`response-content-type`, from the scanner's allowlist: PNG/JPEG/GIF/WebP/PDF/text/zip) and the disposition (`attachment` for everything but images and PDFs). `nosniff` cannot be added to S3 responses; forcing the type covers it (browsers never sniff an `image/*` into HTML). No `files.slax.yechpa.com` record, no CloudFront, no CORS (uploads go through the app; `<img>` needs no CORS). The CSP's `img-src` names exactly that host. |
+| AWS credentials | **The EC2 instance role**, through IMDSv2 with hop limit 2 so pods can reach it. The chart references no AWS key at all in production (`s3.useInstanceRole`). Reverb is denied the metadata service; the scanner has no egress. The role can touch only the two buckets, and cannot delete backups. |
+| TLS for the cluster API | k3s's own certificate, `tls-san` = the Tailscale address and names. Port 6443 is closed to the Internet; CI and you reach it over the tailnet. |
+| Backups | `pg_dump -Fc` daily to S3 (SSE-S3), weekly full restore into a throwaway PostgreSQL inside the check's pod (never the production server). Telegram: failures, and the weekly "restore check OK". |
+| Releases | A `vX.Y.Z` tag on a commit of `main` → check → approval in GitHub → `helm upgrade --atomic` with the `<sha>` images already tested on dev → public checks → explicit `helm rollback` if they fail. |
+
+## 2. Sizing and cost
+
+### Memory on t4g.small (2 vCPU, 2 GiB)
+
+| Consumer | Typical use | Kubernetes request (values-prod.yaml) |
+|---|---|---|
+| Ubuntu (systemd, journald, snapd/SSM agent), Tailscale, Caddy | ≈ 250-300 MiB | – |
+| k3s server (API, scheduler, kubelet, containerd, kube-router, CoreDNS, local-path, metrics-server) | ≈ 500-650 MiB | – |
+| PHP-FPM (up to 6 workers) + nginx | ≈ 150-300 MiB | 128 + 16 MiB |
+| Reverb, queue, scheduler | ≈ 60-80 MiB each | 80 + 96 + 80 MiB |
+| scanner | ≈ 60-80 MiB | 64 MiB |
+| PostgreSQL (shared_buffers 96 MB) | ≈ 100-200 MiB | 160 MiB |
+| Redis (maxmemory 96 MB) | ≈ 10-30 MiB | 24 MiB |
+| **Total** | **≈ 1.3-1.8 GiB of 1.9 GiB usable** | **648 MiB** (+64-128 MiB while a CronJob runs) |
+
+The requests fit easily (the scheduler sees ≈ 1.8 GiB allocatable), but real use leaves only a
+few hundred MiB of page cache; the 2 GiB swap file absorbs spikes (pods themselves do not
+swap). **It should run, tightly.** Starting at t4g.small as the brief says is reasonable for a
+low-traffic showcase; move to **t4g.medium (4 GiB, +$14/month)** if Task 14's load test or
+production shows any of: `free -m` available below 200 MiB for long, swap in steady use
+(`vmstat 5` si/so non-zero), OOM kills (`journalctl -k | grep -i oom`), pods evicted. How: §4.9.
+
+### Monthly cost (eu-central-1, on-demand list prices, October 2026, before tax)
+
+| Item | t4g.small | t4g.medium |
+|---|---|---|
+| EC2 instance (730 h) | $14.02 | $28.03 |
+| EBS gp3 30 GB (encrypted) | $2.86 | $2.86 |
+| Public IPv4 (Elastic IP, associated) | $3.65 | $3.65 |
+| S3 (≈ 5 GB of files and backups + requests) | ≈ $0.40 | ≈ $0.40 |
+| Data transfer out (first 100 GB/month free) | $0 | $0 |
+| **Total** | **≈ $20.9** | **≈ $34.9** |
+
+Against the 15-20 $/month target: t4g.small lands just above it. Levers: `SLAX_ROOT_GB=20`
+(−$0.95; 20 GB is enough for the OS, images, a 10 GiB database volume and swap); a 1-year
+Savings Plan or reserved instance (≈ −35 % on the instance). **With or without the Elastic
+IP:** since February 2024 AWS bills every public IPv4 address, so an instance's automatic
+public address costs the same $3.65 as an associated Elastic IP; the EIP adds nothing to the
+bill and keeps the address (and the DNS record) stable across stop/start. Only an
+IPv6-only site would save it, and too many visitors still lack IPv6. An Elastic IP that is
+*not* associated also costs $3.65: release it if the instance goes away (§6). The ≈ $100 of
+AWS credits cover about 5 months at t4g.small. `provision.sh` prints the same estimate
+before asking for confirmation.
+
+## 3. First-time production setup
+
+Do the steps in this order. Each one says what proves it worked.
+
+### 3.1 Prerequisites
+
+**YOU DO THIS**
+
+- An AWS account with the AWS CLI **v2** logged in (`aws sso login` with IAM Identity Center,
+  or an IAM user with MFA) with enough rights to create EC2, IAM and S3 resources. Check:
+  `aws sts get-caller-identity` and `aws --version` (`aws-cli/2.…`).
+- The region: `export AWS_REGION=eu-central-1`.
+- The account has its default VPC in that region (`aws ec2 describe-vpcs --filters Name=is-default,Values=true`).
+  The script never creates networks.
+- `tailscale` on your machine, logged in to your tailnet; `kubectl`, `helm` 3.22.1, `gh`.
+
+### 3.2 Tailscale: tag, policy, auth key
+
+**YOU DO THIS**
+
+1. Tailnet policy (admin console → Access controls), merged with your rules and the dev ones
+   (deploy/dev/BOOTSTRAP.md §3):
+
+   ```jsonc
+   {
+     "tagOwners": {
+       "tag:slax-prod": ["autogroup:admin"],
+       "tag:ci":        ["autogroup:admin"],
+     },
+     "acls": [
+       // You: everything on the production node.
+       {"action": "accept", "src": ["autogroup:admin"], "dst": ["tag:slax-prod:*"]},
+       // GitHub Actions: the Kubernetes API only (the public site is checked over the Internet).
+       {"action": "accept", "src": ["tag:ci"], "dst": ["tag:slax-prod:6443"]},
+     ],
+     "ssh": [
+       // Tailscale SSH: you, as the node's "ubuntu" user (passwordless sudo), re-authenticated every 12 h.
+       {"action": "check", "src": ["autogroup:admin"], "dst": ["tag:slax-prod"], "users": ["ubuntu"], "checkPeriod": "12h"},
+     ],
+     "tests": [
+       {"src": "tag:ci", "accept": ["tag:slax-prod:6443"], "deny": ["tag:slax-prod:22", "tag:slax-prod:443", "tag:slax-prod:80"]},
+     ],
+   }
+   ```
+
+   (`grants` syntax for the CI rule: `{"src": ["tag:ci"], "dst": ["tag:slax-prod"], "ip": ["tcp:6443"]}`.)
+
+2. The node's auth key. It ends up in the instance's user data, which anyone allowed
+   `ec2:DescribeInstanceAttribute` can read for the instance's whole life, so it must be
+   worthless once used: **single use** (not reusable), **pre-approved**, **tagged
+   `tag:slax-prod`**, **not ephemeral** (an ephemeral node is removed from the tailnet after
+   going offline; a server must survive reboots), and as short-lived as possible. The admin
+   console's shortest expiry is one day; single use already makes it dead after the node
+   joins. For a one-hour key use the API (an API access token from Settings → Keys, typed
+   at a hidden prompt):
+
+   ```sh
+   read -r -s -p 'Tailscale API token: ' TS_API_TOKEN; echo
+   # The token reaches curl in a config on stdin, never on its command line.
+   TS_AUTHKEY="$(printf 'user = "%s:"\n' "$TS_API_TOKEN" | curl -fsS --config - \
+     -H 'Content-Type: application/json' https://api.tailscale.com/api/v2/tailnet/-/keys \
+     -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":["tag:slax-prod"]}}},"expirySeconds":3600,"description":"slax-prod bootstrap"}' \
+     | sed -n 's/.*"key":"\([^"]*\)".*/\1/p')"
+   unset TS_API_TOKEN; export TS_AUTHKEY
+   ```
+
+   Use it within the hour (3.3). Tagged nodes have key expiry disabled by default.
+
+### 3.3 Provision AWS
+
+**YOU DO THIS**, from a clone of the repository:
+
+```sh
+deploy/aws/provision.sh --dry-run        # read-only: the plan and "This will cost about $X/month"
+deploy/aws/provision.sh                  # same plan, then type: create slax-prod
+```
+
+It creates only resources tagged `Project=slax` and named `slax-*`, re-applies their settings
+when run again, and stops if a `slax-*` name is held by something without that tag (see the
+script's header). It never touches the `wa-bot` instance or anything else. Bucket names
+get a suffix derived from the account id (stable; or set `SLAX_BUCKET_SUFFIX`).
+
+It ends with what to do next: the DNS record, the redirect URIs, the two GitHub variables
+(`SLAX_FILES_BUCKET`, `SLAX_BACKUPS_BUCKET`). Keep that output. Running it again prints the
+same (creating nothing). Then: `unset TS_AUTHKEY`.
+
+### 3.4 DNS
+
+**YOU DO THIS** at your DNS provider:
+
+| Type | Name | Value | TTL |
+|---|---|---|---|
+| A | `slax.yechpa.com` | the Elastic IP printed by provision.sh | 300 |
+
+No `files.slax.yechpa.com` record: browsers fetch files from the bucket's own S3 host. No
+AAAA record (the instance has no IPv6). If the zone has a CAA record, it must allow
+`letsencrypt.org`. Check: `dig +short slax.yechpa.com` → the Elastic IP.
+
+### 3.5 The node boots
+
+Cloud-init installs everything in 5-10 minutes. **YOU DO THIS**:
+
+```sh
+tailscale ssh ubuntu@slax-prod -- cloud-init status --wait          # status: done
+tailscale ssh ubuntu@slax-prod -- sudo tail -n 30 /var/log/slax-bootstrap.log
+tailscale ssh ubuntu@slax-prod -- sudo k3s kubectl get nodes        # slax-prod Ready
+tailscale ssh ubuntu@slax-prod -- systemctl is-active caddy k3s     # active active
+```
+
+In the Tailscale admin console the machine `slax-prod` shows tag `tag:slax-prod`, and the
+auth key shows as used. Caddy gets its certificate as soon as DNS points at the node (until
+then it retries; `journalctl -u caddy`).
+
+### 3.6 Namespace, deployer, kubeconfig for CI
+
+**YOU DO THIS** (from your machine; the files go through Tailscale SSH's stdin):
+
+```sh
+tailscale ssh ubuntu@slax-prod -- sudo k3s kubectl apply -f - < deploy/dev/deployer-rbac.yaml
+```
+
+Same file as dev: namespace `slax` (Pod Security *restricted* enforced) and the
+namespace-scoped `slax-deployer` (Deployments, StatefulSets, Jobs, CronJobs, Services,
+ConfigMaps, Secrets, NetworkPolicies in `slax` only). Then build its kubeconfig on the node
+exactly as deploy/dev/BOOTSTRAP.md §7, with two changes: `NODE` is the node's MagicDNS name
+(`tailscale status | grep slax-prod`, e.g. `slax-prod.<tailnet>.ts.net`, listed in `tls-san`)
+and the cluster/context names are `slax-prod`. Keep `/tmp/slax-deployer.kubeconfig.b64`
+for 3.10, then shred it.
+
+For your own `kubectl` from your machine: copy `/etc/rancher/k3s/k3s.yaml` from the node
+(root only), replace `127.0.0.1` by the MagicDNS name, keep it `chmod 600`. Or simply run
+`sudo k3s kubectl` on the node through Tailscale SSH.
+
+### 3.7 Google sign-in
+
+**YOU DO THIS** in Google Cloud Console (APIs & Services):
+
+- OAuth consent screen: user type *External*, app name *Slax*, your support e-mail,
+  authorized domain `yechpa.com`, scopes `openid`, `email`, `profile` only (no verification
+  needed for these), publishing status *In production* (in *Testing* only listed test users
+  can sign in).
+- Credentials → the OAuth client of type *Web application* (dev's, or a new one for prod).
+  **Authorized redirect URIs** (exactly; the route is `GET /auth/google/callback`):
+  - `https://dev.slax.yechpa.com/auth/google/callback`
+  - `https://slax.yechpa.com/auth/google/callback`
+
+  No JavaScript origin is needed (the exchange happens on the server).
+- Cloudflare Turnstile: add `slax.yechpa.com` to the widget's hostnames.
+
+### 3.8 Application secrets
+
+**YOU DO THIS**. The same script as dev, run on the node, with **no S3 keys** (the instance
+role replaces them):
+
+```sh
+tailscale ssh ubuntu@slax-prod -- 'cat > /tmp/create-secrets.sh' < deploy/dev/create-secrets.sh
+tailscale ssh -t ubuntu@slax-prod -- sudo S3_KEYS=none bash /tmp/create-secrets.sh
+tailscale ssh ubuntu@slax-prod -- rm /tmp/create-secrets.sh
+```
+
+Hidden prompts: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TURNSTILE_SITE_KEY`,
+`TURNSTILE_SECRET`, then optional `ADMIN_EMAILS` (administrators: personal data, so here and
+never in values), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (the same bot and chat as dev:
+production messages start with `[Prod]`). Generated: `APP_KEY`, `DB_PASSWORD`,
+`REDIS_PASSWORD`, `REVERB_APP_KEY`, `REVERB_APP_SECRET`. Check:
+`sudo k3s kubectl -n slax get secret slax-secrets -o jsonpath='{.data}' | tr ',' '\n' | cut -d'"' -f2`
+lists the key names (no `AWS_*`).
+
+### 3.9 Images public
+
+After the first `Images` run on `main` that includes `slax-backup`, make that package public
+like the other three (deploy/dev/BOOTSTRAP.md §9.3): k3s pulls without credentials.
+
+### 3.10 GitHub: environment `production`
+
+**YOU DO THIS** (Settings → Environments → New environment `production`):
+
+1. **Required reviewers**: yourself (and anyone else allowed to release). Leave "Prevent
+   self-review" off if you are the only maintainer, or no one can approve.
+2. **Deployment branches and tags**: *Selected* → add the tag pattern `v*`.
+3. Secrets (`gh` prompts without echo):
+
+   ```sh
+   gh secret set TS_OAUTH_CLIENT_ID --env production --repo yechpa/slax   # the tag:ci OAuth client (dev's works)
+   gh secret set TS_OAUTH_SECRET    --env production --repo yechpa/slax
+   gh secret set TELEGRAM_BOT_TOKEN --env production --repo yechpa/slax
+   gh secret set TELEGRAM_CHAT_ID   --env production --repo yechpa/slax
+   gh secret set PROD_KUBECONFIG    --env production --repo yechpa/slax < /tmp/slax-deployer.kubeconfig.b64
+   shred -u /tmp/slax-deployer.kubeconfig /tmp/slax-deployer.kubeconfig.b64   # wherever they are
+   ```
+
+4. Variables (not secret; from provision.sh's output):
+
+   ```sh
+   gh variable set SLAX_FILES_BUCKET   --env production --repo yechpa/slax --body slax-files-<suffix>
+   gh variable set SLAX_BACKUPS_BUCKET --env production --repo yechpa/slax --body slax-backups-<suffix>
+   ```
+
+5. Protect the release tags: Settings → Rules → Rulesets → New *tag* ruleset, target
+   `v*`, restrict creations, updates and deletions to administrators (bypass list: you).
+   The workflow refuses a tag that is not on `main` anyway.
+
+### 3.11 First release: v0.1.0
+
+1. Pick a commit of `main` whose `Images` run is green (all four `build`/`push`/`manifest`
+   jobs) and that dev runs well.
+2. Tag and push it:
+
+   ```sh
+   git fetch origin && git tag -a v0.1.0 -m "Slax 0.1.0" origin/main && git push origin v0.1.0
+   ```
+
+3. Actions → *Release prod*: `check` passes (tag on main, images exist), then `deploy`
+   waits: **Review deployments → Approve**.
+4. The first install creates the release; the migration Job runs after it and seeds the demo
+   content. Watch: `sudo k3s kubectl -n slax get pods -w` on the node.
+5. Telegram: `[Prod] Release v0.1.0 (…) is live on slax.yechpa.com.` Then run the
+   verification checklist (§7).
+
+## 4. Routine operations
+
+Commands below run on the node (`tailscale ssh ubuntu@slax-prod`), as `sudo k3s kubectl …`,
+abbreviated `kubectl`; `helm` likewise with `KUBECONFIG=/etc/rancher/k3s/k3s.yaml`, or from
+your machine with your kubeconfig over the tailnet.
+
+### 4.1 Deploy a release
+
+Merge to `main`, let dev deploy and look right, then tag `vX.Y.Z` on that commit and push
+the tag (3.11). Approve in Actions. Production always runs the immutable `<sha>` images that
+dev ran; `vX.Y.Z` is only an alias. A by-hand deploy (same as CI):
+
+```sh
+helm upgrade --install slax deploy/helm/slax --namespace slax \
+  -f deploy/helm/slax/values-prod.yaml --set image.tag=<full sha> \
+  --set s3.bucket=slax-files-<suffix> --set backup.bucket=slax-backups-<suffix> \
+  --atomic --wait --timeout 15m
+```
+
+### 4.2 Roll back
+
+```sh
+helm -n slax history slax                     # REVISION, app version (the sha), status
+helm -n slax rollback slax <REVISION> --wait --timeout 10m
+```
+
+`helm rollback slax` with no revision goes to the previous one. A failed `--atomic` upgrade
+has already rolled itself back; the release workflow rolls back by itself when the public
+checks fail after a successful upgrade. Migrations are not undone (expand then contract:
+older code runs on the newer schema).
+
+### 4.3 Backups
+
+- Where: `s3://slax-backups-<suffix>/pg/YYYY/MM/DD/slax-<UTC>.dump`, daily at 02:30
+  Asia/Jerusalem, kept 35 days (+7 days as a non-current version). Telegram says nothing on a
+  successful backup; it says `[Prod] Backup FAILED at step "…"` on a failure, and every Sunday
+  `[Prod] Weekly restore check OK: …` (or `FAILED`). **No Sunday message = investigate.**
+- Run one now: `kubectl -n slax create job --from=cronjob/slax-backup slax-backup-manual-$(date +%s)`;
+  a restore check now: `kubectl -n slax create job --from=cronjob/slax-restore-check slax-restore-check-manual-$(date +%s)`;
+  logs: `kubectl -n slax logs -l app.kubernetes.io/component=backup --tail=50` (or `restore-check`).
+- List them (your AWS CLI): `aws s3 ls s3://slax-backups-<suffix>/pg/ --recursive | tail`.
+- The instance role cannot delete backups; only the lifecycle rule (and you) can.
+
+### 4.4 Restore the production database from a backup
+
+Data written since that backup is lost: say so on the site first if anyone uses it.
+
+1. Make sure the dump restores: run a restore check now (4.3) on the chosen dump (it takes the
+   newest; for an older one, restore it on your machine into a scratch PostgreSQL 16 first).
+2. Stop everything that writes:
+
+   ```sh
+   kubectl -n slax scale deployment slax-app slax-queue slax-scheduler slax-reverb --replicas=0
+   kubectl -n slax patch cronjob slax-backup -p '{"spec":{"suspend":true}}'
+   ```
+
+3. Restore with a one-off pod of the backup image (it may reach PostgreSQL: it carries the
+   backup's label). `KEY` is the dump's key, `TAG` the deployed sha (`helm -n slax history slax`):
+
+   ```sh
+   KEY=pg/2026/10/30/slax-20261030T003000Z.dump TAG=<sha> BUCKET=slax-backups-<suffix>
+   cat <<EOF | kubectl -n slax apply -f -
+   apiVersion: batch/v1
+   kind: Job
+   metadata: {name: slax-restore-manual}
+   spec:
+     backoffLimit: 0
+     template:
+       metadata:
+         labels: {app.kubernetes.io/name: slax, app.kubernetes.io/instance: slax, app.kubernetes.io/component: backup}
+       spec:
+         restartPolicy: Never
+         automountServiceAccountToken: false
+         securityContext: {runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, seccompProfile: {type: RuntimeDefault}}
+         containers:
+           - name: restore
+             image: ghcr.io/yechpa/slax-backup:${TAG}
+             command: [bash, -c, 'set -euo pipefail; aws s3 cp --only-show-errors "s3://\$BUCKET/\$KEY" /tmp/r.dump; pg_restore --list /tmp/r.dump >/dev/null; pg_restore --clean --if-exists --no-owner --no-acl --exit-on-error --single-transaction -d slax /tmp/r.dump; echo restored']
+             env:
+               - {name: BUCKET, value: "${BUCKET}"}
+               - {name: KEY, value: "${KEY}"}
+               - {name: AWS_REGION, value: eu-central-1}
+               - {name: HOME, value: /tmp}
+               - {name: PGHOST, value: slax-postgres}
+               - {name: PGUSER, value: slax}
+               - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: slax-secrets, key: DB_PASSWORD}}}
+             securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+             resources: {requests: {memory: 64Mi}, limits: {memory: 256Mi}}
+             volumeMounts: [{name: tmp, mountPath: /tmp}]
+         volumes: [{name: tmp, emptyDir: {sizeLimit: 2Gi}}]
+   EOF
+   kubectl -n slax wait --for=condition=complete job/slax-restore-manual --timeout=15m
+   kubectl -n slax logs job/slax-restore-manual          # ... restored
+   kubectl -n slax delete job slax-restore-manual
+   ```
+
+4. Start again: `kubectl -n slax scale deployment slax-app slax-queue slax-scheduler slax-reverb --replicas=1`,
+   `kubectl -n slax patch cronjob slax-backup -p '{"spec":{"suspend":false}}'`, then the
+   checklist items 2-4 of §7.
+
+### 4.5 Rotate secrets
+
+- One application key: `sudo bash /tmp/create-secrets.sh set KEY` (copy the script over as in
+  3.8), then `kubectl -n slax rollout restart deployment`. Not `DB_PASSWORD`/`REDIS_PASSWORD`
+  this way (the servers keep their initial password: `ALTER ROLE` first). Rotating `APP_KEY`
+  signs everyone out.
+- Google client secret: add a new secret in Google Cloud, `set GOOGLE_CLIENT_SECRET`, restart,
+  then delete the old one in Google Cloud.
+- The CI deployer token: `kubectl -n slax delete secret slax-deployer-token`, re-apply
+  `deployer-rbac.yaml` (3.6), rebuild the kubeconfig, `gh secret set PROD_KUBECONFIG …`.
+- Tailscale OAuth client (CI): generate a new one, update `TS_OAUTH_*` in both environments,
+  revoke the old one. The node's own key never expires (tagged node).
+- Telegram bot token: BotFather `/revoke`, then `set TELEGRAM_BOT_TOKEN` (prod and dev) and
+  the GitHub secrets of both environments.
+- AWS: there is no static key to rotate; the instance role's credentials rotate by themselves.
+
+### 4.6 Ban, unban, moderate
+
+In the app, as an administrator (`ADMIN_EMAILS`): Administration → a person → Ban; the
+"Banned" list lifts a ban. Every action lands in the audit log (Administration → Audit), with
+the visitor's real address. An administrator listed in `ADMIN_EMAILS` cannot be banned.
+
+### 4.7 Demo reset
+
+Every night at 03:00 Asia/Jerusalem the scheduler resets the demo (`SLAX_DEMO_RESET_ENABLED=true`
+in production only): visitors' accounts and content go, the seed comes back; banned accounts
+are kept. By hand: `kubectl -n slax exec deploy/slax-scheduler -- php artisan slax:demo-reset`.
+
+### 4.8 Logs and state
+
+| What | Command |
+|---|---|
+| Pods | `kubectl -n slax get pods -o wide`; `kubectl -n slax top pods` |
+| App, API errors | `kubectl -n slax logs deploy/slax-app -c php --tail=100`; nginx: `-c web` |
+| Queue, scheduler, Reverb | `kubectl -n slax logs deploy/slax-queue` (likewise `slax-scheduler`, `slax-reverb`) |
+| Migrations of the last deploy | `kubectl -n slax logs job/slax-migrate` |
+| Backups | `kubectl -n slax get cronjobs,jobs`; logs as in 4.3 |
+| Caddy (TLS, proxy errors) | `journalctl -u caddy --since -1h` (no access log by design) |
+| k3s, the node | `journalctl -u k3s --since -1h`; `free -m`; `df -h /`; `vmstat 5` |
+| First boot | `/var/log/slax-bootstrap.log`, `cloud-init status --long` |
+
+### 4.9 Scale
+
+- **Bigger instance** (t4g.small → t4g.medium), ≈ 2 minutes of downtime, the Elastic IP and the
+  disk stay:
+
+  ```sh
+  ID=$(aws ec2 describe-instances --filters Name=tag:Project,Values=slax Name=tag:Name,Values=slax-prod \
+       --query 'Reservations[].Instances[].InstanceId' --output text); echo "$ID"   # exactly one id
+  aws ec2 stop-instances --instance-ids "$ID" && aws ec2 wait instance-stopped --instance-ids "$ID"
+  aws ec2 modify-instance-attribute --instance-id "$ID" --instance-type '{"Value":"t4g.medium"}'
+  aws ec2 start-instances --instance-ids "$ID"
+  ```
+
+  Then `SLAX_INSTANCE_TYPE=t4g.medium` for later provision.sh runs, and raise
+  `values-prod.yaml` limits if useful.
+- **Bigger disk**: `aws ec2 modify-volume --volume-id <the slax-prod-root volume> --size 40`,
+  then on the node `sudo growpart /dev/nvme0n1 1 && sudo resize2fs /dev/nvme0n1p1`.
+- More replicas are not useful on one node (Reverb, queue and scheduler must stay single).
+
+## 5. Incident playbook
+
+### Site down (`curl -I https://slax.yechpa.com` fails or 5xx)
+
+1. From your machine: DNS (`dig +short slax.yechpa.com` = the Elastic IP)? The instance
+   running (`aws ec2 describe-instance-status --instance-ids <id>`)?
+2. On the node: `systemctl is-active caddy k3s`; `journalctl -u caddy -n 50`.
+   502 from Caddy = the cluster side: `kubectl -n slax get pods`; `kubectl -n slax get svc slax-app`
+   (ClusterIP must be 10.43.10.80); describe the failing pod.
+3. A bad release: roll back (4.2). Memory: `free -m`, `journalctl -k | grep -i oom` → §4.9.
+4. Node unreachable on the tailnet too: AWS console → the instance → *Reboot*. Still nothing:
+   *Get system log* / *Get instance screenshot*. Break-glass shell without opening a port:
+   attach the managed policy `AmazonSSMManagedInstanceCore` to the role `slax-prod-instance`
+   (`aws iam attach-role-policy --role-name slax-prod-instance --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore`),
+   wait a few minutes, `aws ssm start-session --target <id>` (the SSM agent ships with
+   Ubuntu's AMI), then **detach it again** (`aws iam detach-role-policy …`): every pod could
+   use it while attached.
+
+### Database full
+
+`kubectl -n slax exec slax-postgres-0 -- df -h /var/lib/postgresql/data` and `df -h /` on the
+node (the local-path volume lives on the root disk; the 10Gi claim is not a hard limit).
+Usual causes: the audit log (retention `SLAX_AUDIT_RETENTION_DAYS`), orphan files' rows, WAL
+after a crash. Free space on the node first (`sudo k3s crictl rmi --prune`,
+`journalctl --vacuum-size=100M`), then grow the disk (4.9). PostgreSQL refuses writes when the
+disk is full; it recovers by itself once there is room.
+
+### Telegram storm
+
+Alerts are grouped and rate-limited by the app (docs/known-limitations.md). If the chat floods
+anyway: find the source (`[Prod]` messages name the error), fix or roll back. To silence
+production meanwhile: `sudo bash /tmp/create-secrets.sh set TELEGRAM_CHAT_ID` with an invalid
+value (or remove the key: `kubectl -n slax patch secret slax-secrets --type json -p '[{"op":"remove","path":"/data/TELEGRAM_CHAT_ID"}]'`),
+`kubectl -n slax rollout restart deployment`; restore it afterwards.
+
+### S3 errors (uploads or downloads fail, backups fail at "upload")
+
+1. The role reaches the pods: `kubectl -n slax exec deploy/slax-queue -- php artisan tinker --execute 'echo json_encode(Storage::disk("s3")->files("", false));'`.
+   `Credentials ... not found` / timeouts to 169.254.169.254: the instance metadata options
+   (`aws ec2 describe-instances … MetadataOptions`: HttpTokens required, hop limit **2**;
+   provision.sh re-applies them) or the instance profile is missing.
+2. `AccessDenied`: the role policy (`aws iam get-role-policy --role-name slax-prod-instance --policy-name slax-prod-s3`)
+   names other buckets than the deployed `s3.bucket` / `backup.bucket`. Re-run provision.sh.
+3. Downloads blocked in the browser: the CSP `img-src` must be the bucket's host
+   (`curl -sI https://slax.yechpa.com | grep -i content-security-policy`).
+
+### Certificate expiry / TLS errors
+
+Caddy renews 30 days before expiry. It needs port 80 or 443 reachable from the Internet and
+DNS pointing at the Elastic IP. `journalctl -u caddy | grep -iE 'obtain|renew|error'`. Check
+the certificate: `echo | openssl s_client -connect slax.yechpa.com:443 -servername slax.yechpa.com 2>/dev/null | openssl x509 -noout -dates`.
+Let's Encrypt rate limits (5 failed validations per hour) mean: fix DNS/firewall first, then
+`systemctl reload caddy`.
+
+### Backup or restore check failed
+
+The alert names the step. `pg_dump`: is PostgreSQL up, is `DB_PASSWORD` right? `upload`:
+see S3 errors. `backup age` in the restore check: the daily backup stopped (CronJob suspended?
+`kubectl -n slax get cronjob slax-backup`). `pg_restore`/`users > 0`: the dump is bad: run a
+backup by hand now (4.3), keep older dumps (they expire after 35 days), investigate.
+
+## 6. Teardown
+
+Only for retiring production. Every command targets ids found by the tag `Project=slax`
+**and** a `slax-*` name; print them and read them before going on. Nothing here may touch
+the `wa-bot` instance or anything without that tag.
+
+**YOU DO THIS**:
+
+```sh
+export AWS_REGION=eu-central-1
+SUFFIX=<the bucket suffix>
+ID=$(aws ec2 describe-instances --filters Name=tag:Project,Values=slax Name=tag:Name,Values=slax-prod \
+     Name=instance-state-name,Values=pending,running,stopping,stopped --query 'Reservations[].Instances[].InstanceId' --output text)
+ALLOC=$(aws ec2 describe-addresses --filters Name=tag:Project,Values=slax Name=tag:Name,Values=slax-prod --query 'Addresses[].AllocationId' --output text)
+SG=$(aws ec2 describe-security-groups --filters Name=tag:Project,Values=slax Name=group-name,Values=slax-prod --query 'SecurityGroups[].GroupId' --output text)
+echo "instance=$ID eip=$ALLOC sg=$SG"      # one id each, nothing else; stop here if not
+
+# 0. Keep a last backup somewhere else if the data matters (aws s3 cp of the newest dump).
+# 1. The instance (and its root volume, DeleteOnTermination).
+aws ec2 modify-instance-attribute --instance-id "$ID" --no-disable-api-termination
+aws ec2 terminate-instances --instance-ids "$ID" && aws ec2 wait instance-terminated --instance-ids "$ID"
+# 2. The Elastic IP (billed while it exists), then the security group.
+aws ec2 release-address --allocation-id "$ALLOC"
+aws ec2 delete-security-group --group-id "$SG"
+# 3. IAM.
+aws iam remove-role-from-instance-profile --instance-profile-name slax-prod-instance --role-name slax-prod-instance
+aws iam delete-instance-profile --instance-profile-name slax-prod-instance
+aws iam delete-role-policy --role-name slax-prod-instance --policy-name slax-prod-s3
+aws iam delete-role --role-name slax-prod-instance
+# 4. Buckets: files (not versioned), then backups (versioned: every version and delete marker).
+aws s3 rm "s3://slax-files-$SUFFIX" --recursive && aws s3api delete-bucket --bucket "slax-files-$SUFFIX"
+B="slax-backups-$SUFFIX"
+aws s3api list-object-versions --bucket "$B" --output json \
+  --query '{Objects: [Versions[].{Key: Key, VersionId: VersionId}, DeleteMarkers[].{Key: Key, VersionId: VersionId}][] | [?Key]}' > /tmp/slax-versions.json
+aws s3api delete-objects --bucket "$B" --delete file:///tmp/slax-versions.json   # repeat while objects remain (1000 per call)
+aws s3api delete-bucket --bucket "$B"
+```
+
+Then: remove the `slax-prod` machine in the Tailscale admin console, the A record, the
+GitHub environment `production`, and the production redirect URI in Google Cloud.
+
+## 7. Verification checklist
+
+Brief step 4, to run once production exists (none of it could be run when this was written:
+no AWS access). Tick each item.
+
+1. [ ] `deploy/aws/provision.sh --dry-run` on the provisioned account lists 7 resources as
+   `exists`, and a second real run creates nothing.
+2. [ ] `curl -sI https://slax.yechpa.com` → `HTTP/2 200` with `content-security-policy:`
+   (`default-src 'self'`, `img-src` naming `slax-files-<suffix>.s3.eu-central-1.amazonaws.com`),
+   `strict-transport-security: max-age=31536000; includeSubDomains`, `x-content-type-options: nosniff`.
+   `curl -sI http://slax.yechpa.com` → 308 to https. `curl -s -o /dev/null -w '%{http_code}' https://slax.yechpa.com/apps/x` → 404.
+3. [ ] `curl -s https://slax.yechpa.com/api/v1/health` → `{"status":"ok"}`.
+4. [ ] Sign in with Google in a browser; post a message; a second browser sees it live
+   (WebSocket through Caddy); upload an image: its preview loads from the bucket's S3 host
+   (DevTools → Network), a `.txt` downloads as an attachment; the console shows no CSP error.
+5. [ ] Client address: as an administrator, Administration → Audit shows your own public IP
+   for your actions (not 10.42.x.x, not the Elastic IP). `curl -H 'X-Forwarded-For: 6.6.6.6' https://slax.yechpa.com/api/v1/health`
+   followed by an audited action from that client never records 6.6.6.6.
+6. [ ] From outside the tailnet: `nc -vz -w 5 <Elastic IP> 22` and `… 6443` time out; on the
+   tailnet `kubectl get nodes` works through the MagicDNS name.
+7. [ ] No static AWS key anywhere: `kubectl -n slax get deploy,cronjob -o yaml | grep -c AWS_ACCESS_KEY_ID` → 0;
+   an upload works (instance role).
+8. [ ] Release `v0.1.0` (3.11): `check` green, approval requested, `deploy` green, Telegram
+   `[Prod] Release v0.1.0 … is live`.
+9. [ ] Deliberately failing deploy, Helm's own rollback: by hand, the current sha with a web
+   container that cannot start (8 MiB of memory), while a loop watches the site:
+
+   ```sh
+   while sleep 1; do curl -s -o /dev/null -w '%{http_code}\n' https://slax.yechpa.com/api/v1/health; done   # another terminal
+   helm upgrade slax deploy/helm/slax -n slax -f deploy/helm/slax/values-prod.yaml --set image.tag=<deployed sha> \
+     --set s3.bucket=slax-files-<suffix> --set backup.bucket=slax-backups-<suffix> \
+     --set app.web.resources.limits.memory=8Mi --atomic --wait --timeout 4m
+   ```
+
+   The upgrade fails, `helm -n slax history slax` shows the failed revision and a newer
+   `Rollback to N`, and the loop never stops printing 200 (`maxUnavailable: 0`).
+10. [ ] Deliberately failing release, the workflow's explicit rollback: on the node, comment
+    out the `Strict-Transport-Security` line in `/etc/caddy/Caddyfile`,
+    `sudo systemctl reload caddy`; in Actions, *Re-run all jobs* of the last *Release prod*
+    run and approve. Helm succeeds, the post-deploy check fails on HSTS, the workflow runs
+    `helm rollback slax <previous revision>`, and Telegram says
+    `FAILED its post-deploy checks: ROLLED BACK to revision N`. Restore the line, reload
+    Caddy, re-run once more: `is live`.
+11. [ ] Backups: `kubectl -n slax create job --from=cronjob/slax-backup slax-backup-manual-1`
+    completes; the dump appears under `s3://slax-backups-<suffix>/pg/<today>/`; then
+    `kubectl -n slax create job --from=cronjob/slax-restore-check slax-restore-check-manual-1`
+    completes and Telegram says `[Prod] Weekly restore check OK: … N users, M migrations`.
+12. [ ] The following Sunday, the scheduled restore check reports by itself.
+13. [ ] Caddy certificate: `openssl s_client` (§5) shows a Let's Encrypt certificate valid
+    for about 90 days; `systemctl list-timers` shows `k3s-image-prune.timer` and
+    `apt-daily-upgrade.timer`.
+14. [ ] Memory after a day: `free -m` available > 200 MiB, `vmstat` si/so ≈ 0; otherwise plan
+    t4g.medium (§2, §4.9).
+15. [ ] `aws ec2 describe-instances --instance-ids <wa-bot id>` is exactly as before (state,
+    security groups, tags): provisioning never touched it.
