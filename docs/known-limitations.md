@@ -44,9 +44,9 @@ receives the channel's events until it disconnects.
 - An alternative with the same shape is end-to-end encrypted channels (`private-encrypted-`) with a per-epoch
   shared secret.
 
-## Realtime: Reverb's rate limit and connection cap
+## Realtime: Reverb's rate limit, and no connection cap
 
-**Where:** `backend/config/reverb.php`, chart values `reverb.rateLimit` and `reverb.maxConnections`.
+**Where:** `backend/config/reverb.php`, chart values `reverb.rateLimit`.
 
 - **Per socket, every frame counts.** Reverb's limiter (enabled everywhere by default) counts each frame a socket
   sends, subscriptions and pings included, not only typing whispers: at most 300 per 60 s. Beyond, each frame is
@@ -55,15 +55,26 @@ receives the channel's events until it disconnects.
   sixth of it (reverb-e2e test). A user in more than about 250 channels would see some subscriptions refused at
   each reconnection (no events for those channels until the next one): far beyond the demo's scale. *Intended
   fix if needed:* a whisper-only limit (Reverb has none; a custom `ClientEvent` handler would be needed).
-- **What the limit does not stop.** A modified client gets 300 whispers relayed per minute and per socket, and may
-  open several sockets: the relay is bounded (at most 300 x sockets per minute, sockets capped below), not
-  zero. Refused frames still cost Reverb a small error reply each.
+- **What the limit does not stop.** The limit is per socket: a modified client gets 300 whispers relayed per
+  minute on each socket it opens, so the relay is bounded per socket, not overall. Refused frames still cost
+  Reverb a small error reply each.
+- **Anyone can hold sockets.** Opening a socket needs no session (the Origin header is the browser's word, and a
+  script sets its own), and subscribing it to a public channel name (any name without the `private-` or
+  `presence-` prefix, such as `x`) needs no authorization: nothing in Slax broadcasts there, but the socket is
+  held. Nothing limits how many: there is no per-IP limit at Caddy or nginx, and deliberately no Reverb
+  connection cap (`max_connections`), because a cap is a lockout: one script filling it would get every new or
+  reconnecting user refused with error 4004, which pusher-js never retries. The only bound is the Reverb pod's
+  memory limit (256 MiB in dev, 192 MiB in prod): beyond it the pod is restarted, every client reconnects.
+  *Next hardening step (not done):* a per-IP connection limit at nginx (`limit_conn` on `/app/`) or Caddy, or a
+  custom Reverb channel manager refusing public channel names; not done because it cannot be tested here against
+  the real Caddy -> nginx path (client addresses through the proxies).
 - **The limiter's memory.** Reverb keeps each socket's counter in an in-process array cache that is not pruned
   when the socket closes: a few hundred bytes per socket ever opened since Reverb started. Negligible at the
   demo's scale; a Reverb restart (each deploy) clears it.
-- **At the connection cap (500 sockets, all users together)** a new socket is refused (pusher error 4004),
-  existing ones are unaffected. pusher-js does not retry after 4004: that tab shows the "Connection lost" banner
-  and works without live updates (the channel list is still polled) until it is reloaded once sockets are free.
+- **A refused connection is not retried.** When Reverb refuses a connection with a 4xxx error (over quota,
+  application disabled, ...), pusher-js gives up: the tab shows the "Connection lost. Reconnecting…" banner, but
+  does not reconnect until the page is reloaded (the channel list is still polled). No such refusal is
+  configured in Slax today.
 
 ## Chat client: what is polled rather than pushed
 
