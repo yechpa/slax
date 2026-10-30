@@ -236,6 +236,20 @@ describe('realtime events', () => {
     await chat.refreshChannels()
     expect([...realtime.subscriptions.keys()]).toEqual(['private-channel.8'])
   })
+
+  it('drops a refused subscription, retries it once if still a member, then leaves it', async () => {
+    const server = fakeFetch({ 'GET /api/v1/channels': () => ({ body: [channel(CHANNEL)] }) })
+    vi.stubGlobal('fetch', server.fetch)
+    const chat = createChat({ api, realtime })
+    await chat.start()
+    realtime.subscriptions.get('private-channel.7')!.onError!(403)
+    await flush()
+    expect(realtime.subscriptions.has('private-channel.7')).toBe(true)
+    realtime.subscriptions.get('private-channel.7')!.onError!(403)
+    await flush()
+    expect(realtime.subscriptions.has('private-channel.7')).toBe(false)
+    expect(server.calls.filter((c) => c.path === '/api/v1/channels')).toHaveLength(3)
+  })
 })
 
 describe('reading', () => {

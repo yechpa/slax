@@ -21,8 +21,6 @@ type Props = {
   /** A link was followed (closes the drawer on small screens). */
   onNavigate?: () => void
   navRef?: Ref<HTMLElement>
-  /** Off-screen drawer state on small screens (for assistive technology). */
-  hidden?: boolean
 }
 
 export const SIDEBAR_ID = 'app-sidebar'

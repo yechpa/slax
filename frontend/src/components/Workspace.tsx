@@ -48,6 +48,7 @@ export function Workspace({ connect, chat: given }: Props) {
     let cancelled = false
     let realtime: Realtime | null = null
     let stopWatching: (() => void) | null = null
+    let unavailable: ReturnType<typeof setTimeout> | undefined
     chat.start().catch(() => !cancelled && setLoadFailed(true))
     connect().then(
       (connected) => {
@@ -58,11 +59,12 @@ export function Workspace({ connect, chat: given }: Props) {
       },
       () => {
         // No realtime at all (blocked WebSocket): the banner says so after the grace period.
-        if (!cancelled) setTimeout(() => (realtimeDown.value = true), FIRST_CONNECT_GRACE_MS)
+        if (!cancelled) unavailable = setTimeout(() => (realtimeDown.value = true), FIRST_CONNECT_GRACE_MS)
       },
     )
     return () => {
       cancelled = true
+      clearTimeout(unavailable)
       stopWatching?.()
       chat.stop()
       realtime?.disconnect()

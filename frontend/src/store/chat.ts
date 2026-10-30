@@ -53,6 +53,8 @@ export type Chat = ReturnType<typeof createChat>
 export function createChat({ api, realtime: initialRealtime, uuid = () => crypto.randomUUID(), now = () => new Date() }: ChatDeps) {
   let realtime = initialRealtime
   const subscriptions = new Map<number, () => void>()
+  /** Refused subscriptions per channel since the last reconnection (retried once, then left alone). */
+  const refusals = new Map<number, number>()
   const loads = new Map<number, AbortController>()
   const readTimers = new Map<number, ReturnType<typeof setTimeout>>()
   /** Message ids already counted as unread, so a repeated event never counts twice. */
@@ -78,12 +80,16 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
       }
     }
     for (const id of wanted) {
-      if (subscriptions.has(id)) continue
+      if (subscriptions.has(id) || (refusals.get(id) ?? 0) >= 2) continue
       const handlers = Object.fromEntries(MESSAGE_EVENTS.map((event) => [event, (payload: unknown) => onMessageEvent(id, event, payload)]))
       subscriptions.set(
         id,
         realtime.subscribe(`private-channel.${id}`, handlers, () => {
-          // Refused (no longer a member, channel gone): the list tells what remains.
+          // Refused: no longer a member, channel gone, or a passing failure. Drop it; the
+          // refreshed list tells whether to subscribe again (once).
+          subscriptions.get(id)?.()
+          subscriptions.delete(id)
+          refusals.set(id, (refusals.get(id) ?? 0) + 1)
           void refreshChannels().catch(() => undefined)
         }),
       )
@@ -282,6 +288,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
 
   /** After the socket came back: see the module comment. */
   async function reconnect(): Promise<void> {
+    refusals.clear()
     for (const key of timelineKeys()) {
       if (key !== (current === null ? '' : channelKey(current))) updateTimeline(key, (t) => (t.status === 'idle' ? t : { ...t, stale: true }))
     }
@@ -342,6 +349,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     stopReconnect = null
     for (const unsubscribe of subscriptions.values()) unsubscribe()
     subscriptions.clear()
+    refusals.clear()
     for (const controller of loads.values()) controller.abort()
     loads.clear()
     for (const timer of readTimers.values()) clearTimeout(timer)
