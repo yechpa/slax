@@ -16,10 +16,17 @@ class DirectChannelController extends Controller
 
     /**
      * Opens the conversation between the caller and `user_ids`: the existing channel
-     * for that exact set of people (200), or a new dm / group_dm (201).
+     * for that exact set of people (200), or a new dm / group_dm (201). At most
+     * MAX_PARTICIPANTS people, the caller included, and as many entries in `user_ids`.
      */
     public function store(Request $request): JsonResponse
     {
+        // More entries than people allowed (duplicates or not): refused before anything else.
+        $given = $request->input('user_ids');
+        if (is_array($given) && count($given) > self::MAX_PARTICIPANTS) {
+            return response()->json(['error' => 'invalid_participant_count'], 422);
+        }
+
         $data = $request->validate([
             'user_ids' => ['present', 'array'],
             'user_ids.*' => ['required', 'integer', 'min:1'],

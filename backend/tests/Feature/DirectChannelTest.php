@@ -62,6 +62,29 @@ test('group_dm_over_8_rejected', function () {
         ->and(Channel::whereIn('kind', [Channel::KIND_DM, Channel::KIND_GROUP_DM])->count())->toBe(1);
 });
 
+test('user_ids holds 8 entries at most, duplicates included, before anything is looked up', function () {
+    $caller = User::factory()->create();
+    $bob = User::factory()->create();
+
+    // Nine times the same person would make a set of two: still refused, as too many.
+    openDm($caller, array_fill(0, 9, $bob->id))->assertStatus(422)->assertExactJson(['error' => 'invalid_participant_count']);
+    DB::enableQueryLog();
+    openDm($caller, range(1, 5000))->assertStatus(422)->assertExactJson(['error' => 'invalid_participant_count']);
+    expect(collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql) => str_contains($sql, '"users"'))->count())->toBeLessThanOrEqual(1);
+    // Eight entries (the caller among them) are fine.
+    openDm($caller, [...array_fill(0, 7, $bob->id), $caller->id])->assertCreated();
+});
+
+test('a conversation of 8 people with the longest ids has room for its key', function () {
+    $ids = collect(range(1, 8))->map(fn (int $i) => 9_100_000_000_000_000_000 + $i);
+    $users = $ids->map(fn (int $id) => User::factory()->create(['id' => $id]));
+
+    openDm($users[0], $ids->slice(1)->values()->all())->assertCreated()->assertJson(['kind' => 'group_dm']);
+    expect(Channel::where('kind', Channel::KIND_GROUP_DM)->sole()->dm_key)->toBe('dm:'.$ids->implode(','));
+    // The same set again: the existing one.
+    openDm($users[3], $ids->reverse()->values()->all())->assertOk();
+});
+
 test('cannot_dm_banned_user', function () {
     $caller = User::factory()->create();
     $friend = User::factory()->create();
