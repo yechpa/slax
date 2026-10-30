@@ -83,6 +83,7 @@
 
   "app.loading": "Loading…",
   "app.unreachable": "Slax can't be reached right now. Check your connection, then try again.",
+  "app.offline": "You're offline. Slax will open as soon as the network is back.",
   "auth.title": "Sign in",
   "auth.google": "Continue with Google",
   "auth.pending": "Connecting to Google…",

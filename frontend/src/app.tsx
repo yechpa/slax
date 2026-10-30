@@ -44,6 +44,15 @@ function Screen({ connect = defaultConnect, turnstile }: Props) {
   const current = session.value
 
   useEffect(() => {
+    // Offline at start-up (the shell came from the service worker): try again once the network is back.
+    const onOnline = () => {
+      if (session.peek().status === 'unreachable') void boot()
+    }
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
+  }, [])
+
+  useEffect(() => {
     // In-app links (sidebar) navigate without reloading the page.
     // Its own listener (not the shared function): no other instance's cleanup can remove it.
     const onClick = (event: MouseEvent) => interceptLinks(event)
@@ -64,7 +73,7 @@ function Screen({ connect = defaultConnect, turnstile }: Props) {
         <div class="splash">
           <Brand />
           <p class="splash__text" role="alert">
-            {t('app.unreachable')}
+            {globalThis.navigator?.onLine === false ? t('app.offline') : t('app.unreachable')}
           </p>
           <Button variant="secondary" onClick={() => void boot()}>
             {t('action.retry')}

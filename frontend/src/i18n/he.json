@@ -83,6 +83,7 @@
 
   "app.loading": "בטעינה…",
   "app.unreachable": "אין כרגע גישה ל־Slax. כדאי לבדוק את החיבור ולנסות שוב.",
+  "app.offline": "אין חיבור לרשת. Slax ייפתח ברגע שהרשת תחזור.",
   "auth.title": "התחברות",
   "auth.google": "המשך עם Google",
   "auth.pending": "מתחברים ל־Google…",

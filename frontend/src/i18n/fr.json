@@ -83,6 +83,7 @@
 
   "app.loading": "Chargement…",
   "app.unreachable": "Slax est injoignable pour le moment. Vérifiez votre connexion, puis réessayez.",
+  "app.offline": "Vous êtes hors ligne. Slax s'ouvrira dès que le réseau sera revenu.",
   "auth.title": "Connexion",
   "auth.google": "Continuer avec Google",
   "auth.pending": "Connexion à Google…",
