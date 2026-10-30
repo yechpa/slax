@@ -55,8 +55,8 @@ flowchart LR
 
 | Component | What it does | Image |
 |---|---|---|
-| SPA | Preact + TypeScript, plain modern CSS (logical properties, `@layer`, container queries), two themes, three languages | built into `slax-web` |
-| nginx | Serves the SPA, sets the CSP and the other headers, routes `/api`, `/auth`, `/sanctum`, `/broadcasting` to PHP-FPM on the pod's loopback and `/app` to Reverb; `/apps` (Reverb's HTTP API) is never public | `ghcr.io/yechpa/slax-web` |
+| SPA | Preact + TypeScript, plain modern CSS (logical properties, `@layer`, container queries), two themes, three languages; installable (manifest, a service worker that serves the public shell only) | built into `slax-web` |
+| nginx | Serves the SPA, sets the CSP and the other headers, routes `/api`, `/auth`, `/sanctum`, `/broadcasting` to PHP-FPM on the pod's loopback (never stored by the browser: `no-store`) and `/app` to Reverb; `/apps` (Reverb's HTTP API) is never public; `/sw.js` always revalidated | `ghcr.io/yechpa/slax-web` |
 | Laravel API | Accounts, channels, messages, threads, reactions, files, presence, moderation, audit log, channel authorization | `ghcr.io/yechpa/slax-app` |
 | Reverb | Laravel's WebSocket server (Pusher protocol); presence channel for the workspace, private channel per conversation | `slax-app` |
 | Queue worker | Broadcasts (after the transaction commits), channel revocations, one worker so their order holds | `slax-app` |
@@ -218,6 +218,7 @@ redeploy of the previous image without undoing the schema.
 | Account takeover, bots | Google only (no password to steal or reset), `state` and `nonce`, verified e-mail only, Turnstile before the flow, rate limits on sign-in | A Google account is as strong as its owner keeps it |
 | Reading what one should not | Every channel, message, file and subscription checked on the server (membership, live at subscription); private channels; files by channel membership | A removed member's own client may keep a socket briefly (known limitations) |
 | Abuse of the public demo | Rate limits (messages 30/min, uploads 20/min, DMs, searches), quotas, administrators can ban, delete, lock; the nightly reset; banned accounts kept so they cannot sign up again | – |
+| A shared device after sign-out, or an old app after a deploy | The service worker caches the public shell only, never the API, sign-in or another origin; a session's end empties Cache Storage; API responses are `no-store`; a new version waits and is announced on every screen until the person reloads, and navigations are network first, so a reload always gets the newest page | Offline, only the shell opens; an unsent draft is lost by the update's reload |
 | Admin actions without trace | Audit log of sensitive actions with the visitor's real IP (Caddy replaces any client `X-Forwarded-For`; nginx believes the pod network only), kept 180 days | – |
 | A compromised pod | Pod Security *restricted* (non-root, read-only root, no capability, seccomp), default-deny network policies (the scanner reaches nothing; PostgreSQL and Redis admit named pods only), no Kubernetes API token in any pod, the instance metadata service denied to pods without AWS needs | App, queue and scheduler can use the instance role (the two buckets only; it cannot delete backups) |
 | Infrastructure exposure | Only TCP 80/443 public (security group and a host firewall); SSH and the Kubernetes API over Tailscale only; dev not reachable outside the tailnet; no SSH daemon in prod | – |
@@ -265,6 +266,13 @@ Short records: the choice, why, and what it costs.
 12. **Single-node k3s on t4g.small.** Kubernetes as the brief asked, at the smallest cost:
     the load test and an idle k3s measurement put the instance at about 63 % of its memory
     at the target load ([runbook.md §2](runbook.md#2-sizing-and-cost)).
+13. **A hand-written service worker, no PWA framework.** About 130 lines in
+    `frontend/src/pwa/` (the routing decision a pure, unit-tested function) and a small Vite
+    step (`frontend/plugins/service-worker.ts`) that bakes the precache list and a content
+    hash into `/sw.js`. It does one thing,
+    the offline shell, and states plainly what it never touches; Workbox or vite-plugin-pwa
+    would add a dependency on the newest Vite/rolldown for features Slax does not use.
+    Cost: no runtime caching or background sync to switch on later without writing it.
 
 ## 7. Cost
 

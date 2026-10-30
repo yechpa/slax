@@ -30,6 +30,9 @@ address is the target, not a promise.
   properties and per-message bidi isolation.
 - Sign-in with Google only (no password anywhere), behind Cloudflare Turnstile.
 - Administration: service status, audit log, ban, delete, lock; alerts to a Telegram bot.
+- Installable as an app (PWA) on Android, iPhone and desktop: Install from the account menu
+  (or the Add to Home Screen steps on iOS), the app shell opens offline, a new version is
+  announced with a Reload button.
 
 ## How it is built
 
@@ -60,6 +63,7 @@ make test    # Pest (backend), Vitest (frontend), pytest (scanner)
 make lint    # Pint, ESLint, Ruff
 make e2e     # Playwright end to end, then a load smoke, on a fresh stack of its own (APP_ENV=e2e)
 make load    # the load test: 50 WebSocket clients, 10 messages/s for 2 minutes
+make icons   # re-render the install icons from frontend/public/favicon.svg (commit the PNGs)
 make help    # all targets
 ```
 
@@ -82,7 +86,8 @@ suite in the official Playwright image, then removes the whole stack. It can run
 `APP_ENV=e2e`; Turnstile uses Cloudflare's always-pass test keys. The HTML report and
 failure traces are left in `e2e/playwright-report/` and `e2e/test-results/`.
 `E2E_SCREENSHOTS=1 make e2e` also rewrites the RTL reference screenshots in
-`docs/design/e2e/`. It ends with a 10-second load smoke (5 WebSocket clients) that fails on
+`docs/design/e2e/`. The e2e build registers the service worker like production
+(`e2e/tests/pwa.spec.ts`). It ends with a 10-second load smoke (5 WebSocket clients) that fails on
 any lost or doubled message; `make load` runs the full load test on a stack of its own and
 writes `docs/load-test-results.md`.
 

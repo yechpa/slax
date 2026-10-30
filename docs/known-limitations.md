@@ -119,6 +119,46 @@ receives the channel's events until it disconnects.
   guessed from the broadcast.
 
 
+## Installable app (PWA)
+
+**Where:** `frontend/src/pwa/` (service worker, registration, update banner, install help),
+`frontend/plugins/service-worker.ts`, `frontend/public/manifest.webmanifest`, `docker/web/slax.conf.template`,
+`e2e/tests/pwa.spec.ts`.
+
+- **Offline is the shell only.** The service worker precaches the page, the bundle, the fonts and the favicon (12
+  files, about 420 KB, under 200 KB over the wire), so Slax opens offline and says "You're offline", then boots by
+  itself when the network is back. Nothing can be read or sent offline: messages, channels and files are never
+  cached (the API, sign-in, broadcasting auth, Reverb and every other origin, presigned S3 URLs included, are not
+  touched by the worker at all). Offline reading would mean caching private data on the device, which this version
+  refuses.
+- **Verified in emulation only.** Playwright runs desktop Chromium: registration, the offline shell (with the worker
+  itself offline), the update banner after a simulated deploy, and sign-out's cleanup, under the production CSP.
+  The iOS Add to Home Screen help and Chromium's Install button are covered by unit tests (user agents and a fake
+  `beforeinstallprompt`), not by a browser: headless Chromium does not offer installation, and the suite runs
+  desktop Chromium only (WebKit and phone emulation come with the mobile pass). **To try on real devices:** install from Chrome on Android (account menu
+  → Install Slax) and from Safari on an iPhone (the three steps), open from the icon, check the status bar colour in
+  both themes, go to airplane mode and reopen (offline notice, then automatic recovery), deploy and check the banner
+  appears when the app comes back to the foreground.
+- **Safe areas come with the mobile pass.** `viewport-fit=cover` is set so the app can use the whole screen, but the
+  safe-area padding (notch, home indicator) is the next task's work; until then, landscape on a notched iPhone can
+  put the edges of the sidebar under the notch.
+- **Where install is offered.** Chromium (Android, Windows, macOS, Linux) shows the Install button once the browser
+  fires `beforeinstallprompt`; iPhone and iPad (Safari and the other iOS browsers) get the steps. Firefox desktop
+  cannot install web apps, and Safari on macOS ("Add to Dock") is not detected: the menu says nothing there.
+- **The update banner cannot be dismissed**, by design: an old app must not run unnoticed against a newer API.
+  Reloading loses an unsent draft (drafts live in memory). Until the person reloads, the old version keeps working
+  (old worker, old cache); any reload, by the banner or by hand, gets the newest page (navigations are network
+  first). The browser checks for a new `sw.js` on navigations; the app also asks when it returns to the foreground
+  and every hour.
+- **Sign-out empties Cache Storage, not every trace.** All of the origin's caches are deleted at any session end
+  (sign-out, expiry, ban), then the public shell is fetched again; API responses carry `Cache-Control: no-store`
+  (nginx), so the HTTP cache keeps none either. Local storage keeps the language and theme chosen on the device (not
+  private), and the browser's own history stays the browser's.
+- **The icons are rendered from `favicon.svg`**, which is still Vite's default lightning logo. Replacing the favicon
+  and running `make icons` regenerates every icon (a test fails while they are out of date).
+- **The manifest is in English** (`lang: en`, name "Slax", the same in every language); the app itself follows the
+  person's language once opened.
+
 ## Administration, alerts and the demo reset
 
 **Where:** `backend/app/Services/Moderation.php`, `backend/app/Services/UserSessions.php`,
