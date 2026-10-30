@@ -85,9 +85,9 @@ for env in dev prod; do
     empty "$env: no ingress routes to Reverb or under /app" \
         "$(yq ea -N 'select(.kind == "Ingress") | .spec.rules[].http.paths[] | select((.backend.service.name | test("reverb")) or (.path | test("^/apps?"))) | .path' "$file")"
 
-    expect "$env: Reverb rate-limits every socket (300 frames/60 s, refused not cut) and caps sockets at 500" \
-        "$(yq ea -N 'select(.kind == "ConfigMap") | .data | [.REVERB_APP_RATE_LIMITING_ENABLED, .REVERB_APP_RATE_LIMIT_MAX_ATTEMPTS, .REVERB_APP_RATE_LIMIT_DECAY_SECONDS, .REVERB_APP_RATE_LIMIT_TERMINATE, .REVERB_APP_MAX_CONNECTIONS] | join(",")' "$file")" \
-        "true,300,60,false,500"
+    expect "$env: Reverb rate-limits every socket (300 frames/60 s, refused not cut), with no socket cap (a lockout vector)" \
+        "$(yq ea -N 'select(.kind == "ConfigMap") | .data | [.REVERB_APP_RATE_LIMITING_ENABLED, .REVERB_APP_RATE_LIMIT_MAX_ATTEMPTS, .REVERB_APP_RATE_LIMIT_DECAY_SECONDS, .REVERB_APP_RATE_LIMIT_TERMINATE, (has("REVERB_APP_MAX_CONNECTIONS") | tostring)] | join(",")' "$file")" \
+        "true,300,60,false,false"
     expect "$env: Reverb gets only its own secrets, Redis's and the alert keys" \
         "$(yq ea -N 'select(.kind == "Deployment" and .metadata.name == "slax-reverb") | [.spec.template.spec.containers[0].env[].valueFrom.secretKeyRef.key] | sort | join(",")' "$file")" \
         "REDIS_PASSWORD,REVERB_APP_KEY,REVERB_APP_SECRET,TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID"

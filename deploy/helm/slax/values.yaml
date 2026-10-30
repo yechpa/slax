@@ -102,9 +102,9 @@ app:
 reverb:
   # Public identifier of the Reverb app (the key and secret are in the Secret).
   appId: slax
-  # Sockets at once, all users together. Beyond, a new socket is refused (pusher error 4004)
-  # and pusher-js does not retry it: the page shows the connection banner until reloaded.
-  maxConnections: 500
+  # No cap on sockets (REVERB_APP_MAX_CONNECTIONS unset), deliberately: anyone may subscribe a
+  # socket to a public channel name without authorization and fill a cap, and pusher-js never
+  # retries a refused socket. The memory limit below is the bound (docs/known-limitations.md).
   # Per socket, every frame counts (subscriptions, pings, typing whispers): at most maxAttempts
   # per decaySeconds; beyond, each frame is refused (pusher error 4301) and dropped, the socket
   # stays (terminateOnLimit false). A reconnection re-subscribing 30 channels and the presence

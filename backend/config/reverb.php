@@ -87,8 +87,10 @@ return [
                 'allowed_origins' => array_values(array_filter(array_map('trim', explode(',', (string) env('REVERB_ALLOWED_ORIGINS', '*'))))),
                 'ping_interval' => env('REVERB_APP_PING_INTERVAL', 60),
                 'activity_timeout' => env('REVERB_APP_ACTIVITY_TIMEOUT', 30),
-                // Sockets at once, all users together (none: no cap). Beyond, a new socket is refused
-                // (pusher error 4004) and pusher-js does not retry it: see docs/known-limitations.md.
+                // No cap by default, deliberately: Reverb counts a socket once it subscribed to any
+                // channel, public names need no authorization, and pusher-js never retries a refused
+                // (4004) socket, so anyone could fill a cap and lock everybody out until reload. The pod's
+                // memory limit is the bound (see docs/known-limitations.md).
                 'max_connections' => env('REVERB_APP_MAX_CONNECTIONS') === null ? null : (int) env('REVERB_APP_MAX_CONNECTIONS'),
                 'max_message_size' => env('REVERB_APP_MAX_MESSAGE_SIZE', 10_000),
                 // Typing "whispers" (client-typing on private channels): only from sockets subscribed

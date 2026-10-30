@@ -148,7 +148,6 @@ REVERB_SERVER_HOST: "0.0.0.0"
 REVERB_SERVER_PORT: "8080"
 REVERB_MAX_REQUEST_SIZE: "131072"
 REVERB_ALLOWED_ORIGINS: {{ $host | quote }}
-REVERB_APP_MAX_CONNECTIONS: {{ required "reverb.maxConnections is required" .Values.reverb.maxConnections | toString | quote }}
 REVERB_APP_RATE_LIMITING_ENABLED: "true"
 REVERB_APP_RATE_LIMIT_MAX_ATTEMPTS: {{ required "reverb.rateLimit.maxAttempts is required" .Values.reverb.rateLimit.maxAttempts | toString | quote }}
 REVERB_APP_RATE_LIMIT_DECAY_SECONDS: {{ required "reverb.rateLimit.decaySeconds is required" .Values.reverb.rateLimit.decaySeconds | toString | quote }}
