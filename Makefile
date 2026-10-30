@@ -8,6 +8,8 @@ DC  := docker compose --progress quiet
 
 .SILENT:
 RUN := $(DC) run --rm -T
+# The scanner's tooling image is rebuilt when its pinned requirements change (cached otherwise).
+PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
 .PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt
@@ -60,7 +62,7 @@ test: env deps ## Run Pest, Vitest and pytest
 	$(DC) exec -T postgres sh -c 'psql -U "$$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '"'"'slax_test'"'"'" | grep -q 1 || createdb -U "$$POSTGRES_USER" slax_test'
 	echo '==> Pest (backend)'; $(RUN) app vendor/bin/pest
 	echo '==> Vitest (frontend)'; $(RUN) --no-deps frontend npm test --silent
-	echo '==> pytest (scanner)'; $(RUN) python-tools pytest -q
+	echo '==> pytest (scanner)'; $(PYRUN) pytest -q
 
 test-reverb: env deps ## Run the end-to-end WebSocket tests against the dev Reverb server
 	$(DC) up -d --wait postgres redis
@@ -71,9 +73,9 @@ test-reverb: env deps ## Run the end-to-end WebSocket tests against the dev Reve
 lint: env deps ## Run Pint, ESLint and Ruff (checks only)
 	echo '==> Pint (backend)'; $(RUN) --no-deps app vendor/bin/pint --test
 	echo '==> ESLint (frontend)'; $(RUN) --no-deps frontend npm run lint --silent
-	echo '==> Ruff (scanner)'; $(RUN) python-tools ruff check . && $(RUN) python-tools ruff format --check .
+	echo '==> Ruff (scanner)'; $(PYRUN) ruff check . && $(PYRUN) ruff format --check .
 
 fmt: env deps ## Fix formatting with Pint and Ruff
 	$(RUN) --no-deps app vendor/bin/pint
-	$(RUN) python-tools ruff check --fix .
-	$(RUN) python-tools ruff format .
+	$(PYRUN) ruff check --fix .
+	$(PYRUN) ruff format .

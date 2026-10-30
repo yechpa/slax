@@ -112,12 +112,28 @@ services:
     depends_on:
       - minio
 
+  # Upload validation (services/scanner), called by the app at http://scanner:8000.
+  # Deliberately no published port: only reachable on the compose network.
+  scanner:
+    build:
+      context: services/scanner
+      target: runtime
+    image: slax-scanner
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
   # Tooling container for services/scanner (pytest, ruff); not started by `up`.
+  # Same image as the scanner plus the test tools (Dockerfile target `dev`).
   python-tools:
     profiles: ["tools"]
     build:
-      context: docker/python
-    image: slax-python-dev
+      context: services/scanner
+      target: dev
+    image: slax-scanner-dev
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     working_dir: /app
     environment:
