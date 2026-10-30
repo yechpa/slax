@@ -410,8 +410,7 @@ test('with Redis unreachable a ban still stands, is audited and closes the socke
     fakeTerminations();
     $admin = admin();
     $target = User::factory()->create();
-    config(['database.redis.default.port' => 1, 'database.redis.default.timeout' => 0.2, 'database.redis.default.read_timeout' => 0.2]);
-    app('redis')->purge();
+    breakRedis();
 
     asUser($admin)->postJson("/api/v1/admin/users/{$target->id}/ban")->assertOk();
 
@@ -423,7 +422,7 @@ test('with Redis unreachable a ban still stands, is audited and closes the socke
 test('with neither Reverb nor the queue reachable a ban still stands and is audited and alerted', function () {
     fakeReverb();
     // Reverb refuses, and the retry job (sync queue in tests) fails too.
-    fakeTerminations(fn () => throw new Illuminate\Http\Client\ConnectionException('down'));
+    fakeTerminations(fn () => throw new ConnectionException('down'));
     $admin = admin();
     $target = User::factory()->create();
 

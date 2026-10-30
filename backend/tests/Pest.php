@@ -13,6 +13,7 @@ use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -103,6 +104,19 @@ function fakeReverb(Response ...$responses): ArrayObject
     useReverbDriver();
 
     return $history;
+}
+
+/**
+ * Redis down from now on: a new Redis manager pointed at a closed port (the manager keeps a
+ * copy of its configuration, so changing the config alone is not enough). Resolve the services
+ * under test after calling this.
+ */
+function breakRedis(): void
+{
+    config(['database.redis.default.port' => 1, 'database.redis.default.timeout' => 0.2, 'database.redis.default.read_timeout' => 0.2]);
+    app()->forgetInstance('redis');
+    app()->forgetInstance('redis.connection');
+    Redis::clearResolvedInstance('redis');
 }
 
 /** Fakes Reverb's HTTP API for the termination calls (made with the Http client). */

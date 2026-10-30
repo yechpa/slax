@@ -2,14 +2,13 @@
 
 use App\Contracts\AdminNotifier;
 use App\Contracts\IdentityProvider;
-use App\Services\Identity\GoogleProfile;
-use Tests\Support\FakeIdentityProvider;
 use App\Models\AuditLog;
 use App\Models\Channel;
 use App\Models\File;
 use App\Models\Message;
 use App\Models\Reaction;
 use App\Models\User;
+use App\Services\Identity\GoogleProfile;
 use App\Services\UserSessions;
 use Database\Seeders\DefaultWorkspaceSeeder;
 use Database\Seeders\DemoSeeder;
@@ -17,6 +16,7 @@ use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Storage;
+use Tests\Support\FakeIdentityProvider;
 use Tests\Support\RecordingNotifier;
 
 beforeEach(function () {

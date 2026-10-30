@@ -6,6 +6,7 @@ use App\Services\Alerts\NullNotifier;
 use App\Services\Alerts\TelegramNotifier;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
@@ -19,6 +20,8 @@ beforeEach(function () {
     // REDIS_DB=15 under phpunit.xml: never the development data.
     expect((int) config('database.redis.default.database'))->toBe(15);
     Redis::connection()->flushdb();
+    Cache::store('file')->flush();
+    TelegramNotifier::resetCircuitBreaker();
     $this->withoutDefer();
 });
 
@@ -96,7 +99,7 @@ test('notifier_dedupes_identical_alerts_for_5_minutes', function () {
     $notifier->notify('warning', 'Scanner unreachable', ['service' => 'scanner']);
 
     // A different alert is not a duplicate.
-    $notifier->notify('warning', 'Scanner unreachable', ['service' => 's3']);
+    $notifier->notify('warning', 'Storage unreachable', ['service' => 's3']);
     $notifier->notify('error', 'Scanner unreachable', ['service' => 'scanner']);
     expect(sentTexts())->toHaveCount(3);
 
@@ -113,18 +116,16 @@ test('notifier_dedupes_identical_alerts_for_5_minutes', function () {
 
 test('notifier_failure_never_throws', function () {
     Log::spy();
-    $notifier = telegram();
 
     Http::fake(['api.telegram.org/*' => fn () => throw new ConnectionException('cURL error 28 for https://api.telegram.org/bot'.FAKE_BOT_TOKEN.'/sendMessage')]);
-    $notifier->notify('critical', 'Database down');
+    telegram()->notify('critical', 'Database down');
 
     Http::fake(['api.telegram.org/*' => Http::response(['ok' => false], 500)]);
-    $notifier->notify('critical', 'Database down again');
+    telegram()->notify('critical', 'Database down again');
 
-    // Redis gone too: the alert is still attempted, and nothing is thrown either.
-    config(['database.redis.default.port' => 1, 'database.redis.default.read_timeout' => 0.2, 'database.redis.default.timeout' => 0.2]);
-    app('redis')->purge();
-    $notifier->notify('critical', 'Everything down');
+    // Redis gone too: the alert is still attempted (grouped without Redis), and nothing is thrown either.
+    breakRedis();
+    telegram()->notify('critical', 'Everything down');
 
     // Logged locally below the level relayed to Telegram, and never with the token (the URL).
     Log::shouldHaveReceived('warning')->atLeast()->times(2)->withArgs(function (string $message, array $context = []) {
@@ -208,4 +209,45 @@ test('reported exceptions reach the notifier through the default stack', functio
 
     expect($notifier->alerts)->toHaveCount(1)
         ->and($notifier->alerts[0]['context']['exception'])->toBe('LogicException');
+});
+
+test('relayed errors are grouped by what failed and where, not by their message', function () {
+    Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
+    app()->instance(AdminNotifier::class, telegram());
+    // Same class, same file and line, different messages (and so different digests).
+    $fail = fn (string $message) => new RuntimeException($message);
+
+    Log::channel('telegram')->error('Insert failed for message 41', ['exception' => $fail('SQLSTATE body one')]);
+    Log::channel('telegram')->error('Insert failed for message 42', ['exception' => $fail('SQLSTATE body two')]);
+    expect(sentTexts())->toHaveCount(1);
+
+    // Another class, or another place, is another alert.
+    Log::channel('telegram')->error('Other', ['exception' => new LogicException('x')]);
+    expect(sentTexts())->toHaveCount(2);
+});
+
+test('with Redis unreachable, duplicates are still grouped and an outage cannot flood the chat', function () {
+    Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
+    breakRedis();
+    $notifier = telegram();
+
+    $notifier->notify('error', 'Redis down', ['service' => 'redis']);
+    $notifier->notify('error', 'Redis down', ['service' => 'redis']);
+    $notifier->notify('error', 'Redis down', ['service' => 'redis']);
+    expect(sentTexts())->toHaveCount(1);
+
+    // Many different alerts during the outage: a few a minute at most.
+    foreach (range(1, 20) as $i) {
+        $notifier->notify('error', "Failure {$i}");
+    }
+    expect(sentTexts())->toHaveCount(TelegramNotifier::FALLBACK_PER_MINUTE);
+
+    // Another process sees the same file-based guard (a fresh notifier, same storage).
+    (new TelegramNotifier(FAKE_BOT_TOKEN, FAKE_CHAT_ID, app('redis')))->notify('error', 'Redis down', ['service' => 'redis']);
+    expect(sentTexts())->toHaveCount(TelegramNotifier::FALLBACK_PER_MINUTE);
+
+    // The next minute lets a few through again.
+    $this->travel(61)->seconds();
+    $notifier->notify('error', 'Failure 21');
+    expect(sentTexts())->toHaveCount(TelegramNotifier::FALLBACK_PER_MINUTE + 1);
 });
