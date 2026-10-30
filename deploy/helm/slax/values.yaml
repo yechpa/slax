@@ -56,6 +56,14 @@ demo:
   # Only on the public showcase.
   resetEnabled: false
 
+session:
+  # SESSION_LIFETIME, in minutes: how long a session lasts without a request. Rolling: every
+  # request starts the count again. 14 days, so a notification tapped after a quiet week opens
+  # the conversation instead of the sign-in screen. Sign-out and a ban end a session at once
+  # whatever this says. Each session (a visitor's without an account too) is kept in Redis
+  # this long: see docs/runbook.md 4.8 for its memory.
+  lifetimeMinutes: 20160
+
 # Web Push (VAPID). The key pair lives in the Secret only (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY:
 # both optional; without them push is off and the app hides its switch). Generate it with
 # deploy/dev/create-secrets.sh (or `php artisan slax:push-keys`); see docs/runbook.md.

@@ -137,6 +137,7 @@ REDIS_HOST: {{ include "slax.name" (dict "ctx" . "component" "redis") | quote }}
 REDIS_PORT: "6379"
 SESSION_DRIVER: redis
 SESSION_SECURE_COOKIE: "true"
+SESSION_LIFETIME: {{ include "slax.sessionLifetime" . | quote }}
 CACHE_STORE: redis
 QUEUE_CONNECTION: redis
 BROADCAST_CONNECTION: reverb
@@ -176,11 +177,27 @@ SLAX_BACKUP_PREFIX: {{ .Values.backup.prefix | quote }}
 {{- if has $key (list "APP_ENV" "APP_DEBUG" "APP_KEY") }}
 {{- fail (printf "config.extraEnv cannot set %s" $key) }}
 {{- end }}
+{{- if eq $key "SESSION_LIFETIME" }}
+{{- fail "config.extraEnv cannot set SESSION_LIFETIME: use session.lifetimeMinutes" }}
+{{- end }}
 {{- if has $key (concat (include "slax.secretKeys" $ | fromYamlArray) (include "slax.optionalSecretKeys" $ | fromYamlArray) (list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SESSION_TOKEN" "TURNSTILE_SITE_KEY")) }}
 {{- fail (printf "config.extraEnv cannot set %s: it is a secret (%s)" $key $.Values.secretName) }}
 {{- end }}
 {{ $key }}: {{ $value | quote }}
 {{- end }}
+{{- end -}}
+
+{{/* SESSION_LIFETIME: session.lifetimeMinutes, a whole number of minutes, at least 1. */}}
+{{- define "slax.sessionLifetime" -}}
+{{- $minutes := required "session.lifetimeMinutes is required (minutes; 20160 = 14 days)" .Values.session.lifetimeMinutes -}}
+{{- $wrong := printf "session.lifetimeMinutes must be a whole number of minutes, at least 1 (got %v)" $minutes -}}
+{{- if not (or (kindIs "float64" $minutes) (kindIs "int64" $minutes) (kindIs "int" $minutes)) -}}
+{{- fail $wrong -}}
+{{- end -}}
+{{- if or (lt (float64 $minutes) 1.0) (ne (float64 $minutes) (float64 (int64 $minutes))) -}}
+{{- fail $wrong -}}
+{{- end -}}
+{{- int64 $minutes -}}
 {{- end -}}
 
 {{/*

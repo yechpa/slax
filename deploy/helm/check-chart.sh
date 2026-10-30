@@ -68,6 +68,17 @@ for env in dev prod; do
         "$(yq ea -N 'select(.kind == "ConfigMap") | .data.VAPID_SUBJECT' "$file")" \
         "$(yq ea -N 'select(.kind == "ConfigMap") | .data.APP_URL' "$file")"
 
+    # Sessions: 14 days, rolling, from session.lifetimeMinutes (a tapped notification must not land on sign-in).
+    expect "$env: sessions last 14 days, rolling (SESSION_LIFETIME=20160 from session.lifetimeMinutes; never expire on close)" \
+        "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SESSION_LIFETIME + "/" + (.data.SESSION_EXPIRE_ON_CLOSE // "unset")' "$file")" \
+        "20160/unset"
+    expect "$env: the app, the queue worker and the scheduler read SESSION_LIFETIME from the ConfigMap" \
+        "$(yq e -N 'select(.kind == "Deployment" and (.metadata.name == "slax-app" or .metadata.name == "slax-queue" or .metadata.name == "slax-scheduler")) | .metadata.name + ":" + ([.spec.template.spec.containers[] | .envFrom[]? | .configMapRef.name // ""] | join(","))' "$file" | sort | tr '\n' ' ')" \
+        "slax-app:slax-config slax-queue:slax-config slax-scheduler:slax-config "
+    expect "$env: the migration job gets the same SESSION_LIFETIME" \
+        "$(yq e -N 'select(.kind == "Job") | .spec.template.spec.containers[].env[]? | select(.name == "SESSION_LIFETIME") | .value' "$file")" \
+        "20160"
+
     # Pod specs of every workload: Deployments, StatefulSets, Jobs and CronJobs.
     empty "$env: every pod runs as non-root with the RuntimeDefault seccomp profile and no API token" \
         "$(yq ea -N "$PODS"' | select(.spec.securityContext.runAsNonRoot != true or .spec.securityContext.seccompProfile.type != "RuntimeDefault" or .spec.automountServiceAccountToken != false) | .name' "$file")"

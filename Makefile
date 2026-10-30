@@ -168,6 +168,9 @@ chart-lint: ## Lint, render and validate the Helm chart (dev and prod values)
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.APP_KEY=x > /dev/null 2>&1 || { echo 'rendered a secret in the ConfigMap'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.VAPID_PRIVATE_KEY=x > /dev/null 2>&1 || { echo 'rendered the VAPID private key in the ConfigMap'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set push.subject=http://slax.example > /dev/null 2>&1 || { echo 'rendered a VAPID subject that is neither mailto: nor https:'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set session.lifetimeMinutes=0 > /dev/null 2>&1 || { echo 'rendered a session lifetime of 0 minutes'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set session.lifetimeMinutes=two-weeks > /dev/null 2>&1 || { echo 'rendered a session lifetime that is not a number'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.SESSION_LIFETIME=5 > /dev/null 2>&1 || { echo 'rendered SESSION_LIFETIME from extraEnv'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.disk.recoverPercent=80 > /dev/null 2>&1 || { echo 'rendered a monitor without disk hysteresis'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.activeDeadlineSeconds=60 > /dev/null 2>&1 || { echo 'rendered monitor runs that can overlap'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.budgetSeconds=45 > /dev/null 2>&1 || { echo 'rendered a monitor budget past its deadline'; exit 1; }; \
