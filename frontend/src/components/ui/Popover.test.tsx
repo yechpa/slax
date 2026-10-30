@@ -73,4 +73,32 @@ describe('Popover', () => {
     list.dispatchEvent(new Event('scroll'))
     expect(onClose).toHaveBeenCalledWith(false)
   })
+
+  it('stays open, re-placed, when only the height of the window changes (Android opening its keyboard)', async () => {
+    const width = innerWidth
+    const height = innerHeight
+    let top = 500
+    const anchor = createRef<HTMLElement>()
+    anchor.current = button(page, () => top)
+    const onClose = vi.fn()
+    render(<Popover anchor={anchor} onClose={onClose}>menu</Popover>, host)
+    await flush()
+    const panel = host.querySelector<HTMLElement>('.popover')!
+    try {
+      // The keyboard opens: the page is resized shorter (interactive-widget=resizes-content), the anchor moves up.
+      ;(window as { innerHeight: number }).innerHeight = height - 300
+      top = 200
+      dispatchEvent(new Event('resize'))
+      expect(onClose).not.toHaveBeenCalled()
+      expect(panel.style.getPropertyValue('--pop-block')).toBe(`${200 + 24 + 4}px`)
+
+      // A rotation (or any change of width): closed, as before.
+      ;(window as { innerWidth: number }).innerWidth = width + 200
+      dispatchEvent(new Event('resize'))
+      expect(onClose).toHaveBeenCalledWith(false)
+    } finally {
+      ;(window as { innerWidth: number }).innerWidth = width
+      ;(window as { innerHeight: number }).innerHeight = height
+    }
+  })
 })

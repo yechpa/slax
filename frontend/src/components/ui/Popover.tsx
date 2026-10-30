@@ -29,7 +29,8 @@ function shownInClippers(el: HTMLElement, box: DOMRect): boolean {
 /**
  * A small panel over everything (a menu, the emoji picker), placed under its anchor and
  * aligned with its inline end, or above it when there is no room below; kept inside the
- * window. It closes on Escape (focus back to the anchor), a click elsewhere, or a resize.
+ * window. It closes on Escape (focus back to the anchor), a click elsewhere, or a change of the
+ * window's width (a change of its height alone, the on-screen keyboard, re-places it).
  * When what is under it scrolls (the reader, or a message list keeping to its newest
  * message as one arrives), it follows its anchor, and closes once the anchor is out of
  * sight (out of the window, or out of a scrolling box around it, such as under the channel
@@ -89,7 +90,13 @@ export function Popover({ anchor, onClose, children, class: extra }: Props) {
     const onScroll = (event: Event) => {
       if (!el?.contains(event.target as Node) && !place.current()) close.current(false)
     }
-    const onResize = () => close.current(false)
+    // A change of width (a rotation, a resized window) closes it. A change of height alone is
+    // Android's keyboard opening or closing (the page is resized for it, see index.html): the
+    // popover follows its anchor instead, and closes only if the anchor went out of sight.
+    const width = innerWidth
+    const onResize = () => {
+      if (innerWidth !== width || !place.current()) close.current(false)
+    }
     el?.addEventListener('keydown', onKey)
     document.addEventListener('pointerdown', onPointer, true)
     document.addEventListener('scroll', onScroll, true)

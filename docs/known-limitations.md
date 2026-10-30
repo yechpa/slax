@@ -208,8 +208,10 @@ receives the channel's events until it disconnects.
 - **The page itself never overscrolls vertically** (`overscroll-behavior-y: none` on the page, `contain` on the
   lists, the sidebar and the dialogs): no pull-to-refresh, so a stuck page is reloaded from the browser's menu
   (Safari's reload button, Chrome's ⟳), or by closing and reopening the installed app.
-- **Popovers ignore the keyboard.** The emoji picker and the message menu are placed in the window, not in what the
-  keyboard leaves; they open from a tap, which normally closes the keyboard first.
+- **Popovers and the keyboard.** The emoji picker and the message menu stay open when only the window's height
+  changes (Chrome on Android resizing the page as its keyboard opens or closes): they follow their anchor, and close
+  on a change of width (rotation) or once the anchor is out of sight (unit-tested). On iOS, where the keyboard does
+  not resize the window, they are placed in the window, not in what the keyboard leaves.
 - **On a real iPhone (Safari, then installed from the Home Screen), please check:**
   1. Tap the message field: the page does not zoom in; the keyboard opens and the field and Send sit right on top
      of it, the channel header still visible; type, tap Send, the keyboard can stay open; close it: the app fills the
@@ -224,8 +226,9 @@ receives the channel's events until it disconnects.
   6. Scroll a long channel to the top and keep pulling: the list stops, the page does not bounce or reload.
   7. Both themes: the status bar and the tapped-message tint look right.
 - **On a real Android phone (Chrome, then installed):** items 1 to 7 as above (on item 1 Chrome shrinks the page with
-  the keyboard; the composer must end right above it), and a long press on a message must open Slax's menu, not
-  Chrome's text selection.
+  the keyboard; the composer must end right above it), a long press on a message must open Slax's menu, not
+  Chrome's text selection, and, with the keyboard up (the message field focused), open a message's menu and the
+  reaction picker: neither may close by itself as the keyboard goes away.
 
 ## Administration, alerts and the demo reset
 
