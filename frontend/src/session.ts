@@ -8,6 +8,7 @@ import { api } from './api/endpoints.ts'
 import type { Me } from './api/types.ts'
 import { isLocale, plural, setLocale, t } from './i18n/index.ts'
 import { readPref } from './lib/prefs.ts'
+import { clearAppCaches } from './pwa/caches.ts'
 import { navigate, route } from './router.ts'
 import { resetChannels } from './store/channels.ts'
 import { resetTimelines } from './store/messages.ts'
@@ -50,7 +51,7 @@ function syncPreferences(me: Me): void {
   if (changes.locale || changes.theme) api.updateMe(changes).catch(() => undefined)
 }
 
-/** Back to the sign-in screen, everything of the previous session forgotten. */
+/** Back to the sign-in screen, everything of the previous session forgotten (Cache Storage too). */
 export function endSession(error: AuthErrorCode | null): void {
   batch(() => {
     resetChannels()
@@ -58,6 +59,7 @@ export function endSession(error: AuthErrorCode | null): void {
     resetUi()
     signedOut(error)
   })
+  void clearAppCaches()
   if (route.peek().name !== 'home') navigate('/', { replace: true })
 }
 
