@@ -44,6 +44,27 @@ receives the channel's events until it disconnects.
 - An alternative with the same shape is end-to-end encrypted channels (`private-encrypted-`) with a per-epoch
   shared secret.
 
+## Realtime: Reverb's rate limit and connection cap
+
+**Where:** `backend/config/reverb.php`, chart values `reverb.rateLimit` and `reverb.maxConnections`.
+
+- **Per socket, every frame counts.** Reverb's limiter (enabled everywhere by default) counts each frame a socket
+  sends, subscriptions and pings included, not only typing whispers: at most 300 per 60 s. Beyond, each frame is
+  answered with pusher error 4301 and dropped; the socket stays open. A reconnection re-subscribing 30 channels
+  and the presence channel, then typing for a minute at the client's pace (one whisper per 3 s), uses about a
+  sixth of it (reverb-e2e test). A user in more than about 250 channels would see some subscriptions refused at
+  each reconnection (no events for those channels until the next one): far beyond the demo's scale. *Intended
+  fix if needed:* a whisper-only limit (Reverb has none; a custom `ClientEvent` handler would be needed).
+- **What the limit does not stop.** A modified client gets 300 whispers relayed per minute and per socket, and may
+  open several sockets: the relay is bounded (at most 300 x sockets per minute, sockets capped below), not
+  zero. Refused frames still cost Reverb a small error reply each.
+- **The limiter's memory.** Reverb keeps each socket's counter in an in-process array cache that is not pruned
+  when the socket closes: a few hundred bytes per socket ever opened since Reverb started. Negligible at the
+  demo's scale; a Reverb restart (each deploy) clears it.
+- **At the connection cap (500 sockets, all users together)** a new socket is refused (pusher error 4004),
+  existing ones are unaffected. pusher-js does not retry after 4004: that tab shows the "Connection lost" banner
+  and works without live updates (the channel list is still polled) until it is reloaded once sockets are free.
+
 ## Chat client: what is polled rather than pushed
 
 **Where:** `frontend/src/components/Workspace.tsx`, `frontend/src/store/threads.ts`, `frontend/src/store/presence.ts`.
