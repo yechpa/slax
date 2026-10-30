@@ -11,8 +11,8 @@
 # which the tailnet policy lets reach slax-dev on 6443 (Kubernetes API) and 443 only, and
 # deploys with a kubeconfig limited to the slax namespace (deploy/dev/deployer-rbac.yaml).
 # Whatever happens, the result goes to the administrators' Telegram chat; when Images did not
-# succeed for a push to main, the `skipped` job says that nothing was deployed. A Telegram
-# failure only warns: it never turns a deployment red.
+# succeed (failed or timed out) for a push to main, the `skipped` job says that nothing was
+# deployed. A Telegram failure only warns: it never turns a deployment red.
 #
 # Secrets (repository or `dev` environment; deploy/dev/BOOTSTRAP.md): TS_OAUTH_CLIENT_ID,
 # TS_OAUTH_SECRET, DEV_KUBECONFIG (base64), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
@@ -136,10 +136,11 @@ jobs:
             exit 1
           fi
 
-  # Images did not succeed for a push to main: nothing was deployed. Say so.
+  # Images failed (or timed out) for a push to main: nothing was deployed. Say so. A
+  # cancelled run (superseded by a newer push) is not worth an alert.
   skipped:
     if: >-
-      github.event.workflow_run.conclusion != 'success'
+      (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out')
       && github.event.workflow_run.event == 'push'
       && github.event.workflow_run.head_branch == 'main'
       && github.event.workflow_run.head_repository.full_name == github.repository

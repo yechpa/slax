@@ -120,7 +120,10 @@ receives the channel's events until it disconnects.
 - **Dev is tailnet-only by a host firewall rule, not by k3s.** k3s's ServiceLB and API server listen on every node
   address; the mandatory LAN guard (`deploy/dev/slax-lan-guard.sh`, BOOTSTRAP.md step 4.1, required by k3s) drops
   80/443/6443 on the interfaces listed in `/etc/default/slax-lan-guard`. A new physical interface (USB adapter,
-  Wi-Fi switched on) is exposed to its LAN until it is added there. Nothing is forwarded from the Internet.
+  Wi-Fi switched on) is exposed to its LAN until it is added there (`systemctl reload slax-lan-guard`). Because
+  k3s requires the guard, stopping or restarting the guard stops k3s. Nothing is forwarded from the Internet.
+- **Image check names changed** (`build app (amd64)`, `push …`, `manifest …`, `tag …`): branch protection's
+  required checks must use the new `build …` names.
 - **Turnstile is allowed by the CSP on every page.** The SPA is one document, so `challenges.cloudflare.com` is in
   `script-src` and `frame-src` everywhere, not only on the sign-in screen.
 - **Dev file downloads** come from MinIO on `files.dev.slax.yechpa.com`, with `nosniff` and a sandboxing CSP added
