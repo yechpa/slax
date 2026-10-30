@@ -1,4 +1,5 @@
-// Captures the design-system kitchen sink in every theme × language for review.
+// Captures the design-system kitchen sink, and the application itself on fixtures
+// (app-preview.html), in every theme × language for review.
 // Runs inside the official Playwright image (see `make screenshots`); Playwright
 // is installed there on the fly and is NOT a dependency of the app.
 import { mkdir, readFile } from 'node:fs/promises'
@@ -31,16 +32,33 @@ const server = createServer(async (req, res) => {
 await new Promise((resolve) => server.listen(PORT, '127.0.0.1', resolve))
 
 const desktop = { width: 1280, height: 900 }
+const appDesktop = { width: 1280, height: 800 }
 const mobile = { width: 390, height: 844 }
+const sink = (theme, lang) => `/design-system.html?theme=${theme}&lang=${lang}`
+const app = (theme, lang, extra = '') => `/app-preview.html?screen=app&theme=${theme}&lang=${lang}${extra}`
+const signIn = (theme, lang, extra = '') => `/app-preview.html?screen=signed-out&theme=${theme}&lang=${lang}${extra}`
+const openDrawer = async (page) => {
+  await page.click('.channel-header__nav')
+  await page.waitForSelector('.shell--nav-open')
+}
 // Every theme × language is loaded and checked at both widths; only some are saved.
 const shots = []
 for (const theme of ['console', 'listing']) {
   for (const lang of ['en', 'he', 'fr']) {
-    shots.push({ files: [`${theme}-${lang}.png`, `full/${theme}-${lang}.png`], theme, lang, viewport: desktop })
+    shots.push({ url: sink(theme, lang), files: [`${theme}-${lang}.png`, `full/${theme}-${lang}.png`], theme, lang, viewport: desktop })
     const saveMobile = theme === 'console' && lang === 'fr'
-    shots.push({ files: saveMobile ? ['mobile-console-fr.png'] : [], theme, lang, viewport: mobile, isMobile: true })
+    shots.push({ url: sink(theme, lang), files: saveMobile ? ['mobile-console-fr.png'] : [], theme, lang, viewport: mobile, isMobile: true })
+    // The application (docs/design/app/).
+    shots.push({ url: signIn(theme, lang), files: [`app/signin-${theme}-${lang}.png`], theme, lang, viewport: appDesktop, ready: '.signin__google' })
+    shots.push({ url: app(theme, lang), files: [`app/shell-${theme}-${lang}.png`], theme, lang, viewport: appDesktop, ready: '.message__body' })
+    const appMobile = (theme === 'console' && lang === 'fr') || (theme === 'listing' && lang === 'he')
+    shots.push({ url: app(theme, lang), files: appMobile ? [`app/mobile-${theme}-${lang}.png`] : [], theme, lang, viewport: mobile, isMobile: true, ready: '.message__body' })
+    shots.push({ url: app(theme, lang), files: appMobile ? [`app/mobile-nav-${theme}-${lang}.png`] : [], theme, lang, viewport: mobile, isMobile: true, ready: '.message__body', before: openDrawer })
+    shots.push({ url: signIn(theme, lang), files: appMobile ? [`app/mobile-signin-${theme}-${lang}.png`] : [], theme, lang, viewport: mobile, isMobile: true, ready: '.signin__google' })
   }
 }
+shots.push({ url: signIn('listing', 'fr', '&auth_error=provider_error'), files: ['app/signin-error-listing-fr.png'], theme: 'listing', lang: 'fr', viewport: appDesktop, ready: '.signin__error' })
+shots.push({ url: app('console', 'en'), files: ['app/shell-menu-console-en.png'], theme: 'console', lang: 'en', viewport: appDesktop, ready: '.message__body', before: (page) => page.click('.user-menu__toggle') })
 
 /** Runs in the page: anything clipped that must not be. */
 function layoutProblems() {
@@ -63,6 +81,7 @@ function layoutProblems() {
 }
 
 await mkdir(join(OUT, 'full'), { recursive: true })
+await mkdir(join(OUT, 'app'), { recursive: true })
 const browser = await chromium.launch()
 const failures = []
 for (const shot of shots) {
@@ -79,13 +98,15 @@ for (const shot of shots) {
   page.on('console', (msg) => msg.type() === 'error' && failures.push(`${shot.theme}/${shot.lang}: ${msg.text()}`))
   page.on('pageerror', (err) => failures.push(`${shot.theme}/${shot.lang}: ${err.message}`))
   page.on('requestfailed', (req) => failures.push(`${shot.theme}/${shot.lang}: request failed ${req.url()}`))
-  await page.goto(`http://127.0.0.1:${PORT}/design-system.html?theme=${shot.theme}&lang=${shot.lang}`)
+  await page.goto(`http://127.0.0.1:${PORT}${shot.url}`)
+  if (shot.ready) await page.waitForSelector(shot.ready)
   await page.evaluate(async () => {
     await Promise.all([document.fonts.load('300 1em "Cascadia Mono"', 'שלום'), document.fonts.load('700 1em "Cascadia Mono"', 'שלום')])
     await document.fonts.ready
   })
   const fonts = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').length)
-  const label = `${shot.theme}/${shot.lang} @${shot.viewport.width}px`
+  if (shot.before) await shot.before(page)
+  const label = `${shot.url.split('?')[0]} ${shot.theme}/${shot.lang} @${shot.viewport.width}px`
   for (const problem of await page.evaluate(layoutProblems)) failures.push(`${label}: ${problem}`)
   for (const file of shot.files) {
     await page.screenshot({ path: join(OUT, file), fullPage: file.startsWith('full/') })

@@ -6,6 +6,7 @@ The look of an old monitor, built with modern CSS. Two themes, three languages (
 - **Review screenshots:** `make screenshots` captures `docs/design/` with headless Chromium in the official Playwright image. Playwright is installed inside that container only, so it is not an app dependency. You get six 1280×900 shots (`{console,listing}-{en,he,fr}.png`), their full-page versions under `docs/design/full/`, and `mobile-console-fr.png` at 390×844.
   - **It checks before it saves.** All 12 combinations (2 themes × 3 languages × 1280/390px) are loaded and checked.
   - **It fails on:** any sideways page scroll, a clipped input or composer placeholder (text measured against the field's content box), console errors, and failed requests.
+  - **The application too:** `app-preview.html` (same build, never in production) runs the real app on fixtures: a stand-in `fetch` and a silent realtime client (`src/design-system/app-fixtures.ts`). Its shots go to `docs/design/app/`: the sign-in screen and the workspace in 2 themes × 3 languages at 1280×800, the account menu, a sign-in error, and 390px phones (conversation, open channel drawer, sign-in) in `console`/French and `listing`/Hebrew. The same checks apply.
 - **Code:** tokens and styles are in `frontend/src/styles/`, reusable components in `frontend/src/components/ui/`, i18n in `frontend/src/i18n/`, and the theme logic in `frontend/src/theme.ts`.
 
 > Status: first version, submitted for yechpa's review before Task 9. The Hebrew strings in particular are a proposal, not final.
@@ -184,8 +185,8 @@ All components are presentational Preact components, one job each, for Task 9 to
 - `Segmented`, `LocaleSwitcher`, `ThemeSwitcher`
 - `PresenceDot`: online is filled, away is half-filled and offline is hollow, so the state never relies on colour alone
 - `Avatar`
-- `NavItem`: current, unread with badge, muted, DM with presence
-- `Message`: avatar, `<bdi>` author, `<time>`, edited marker, `dir="auto"` body, footer, hover/focus toolbar
+- `NavItem`: current, unread with badge (shown up to `99+`, the accessible name keeps the true count), muted (with its own `tag`, e.g. "not joined"), DM with presence, `leading` slot (avatar, padlock)
+- `Message`: avatar, `<bdi>` author, `<time>`, edited marker, `dir="auto"` body, footer, hover/focus toolbar; `compact` for a follow-up by the same author (no avatar or visible header, time in the gutter on hover), `busy` while sending
 - `ReactionChip`: `aria-pressed` when mine
 - `ThreadLink`
 - `Tombstone`
@@ -193,7 +194,7 @@ All components are presentational Preact components, one job each, for Task 9 to
 - `TypingIndicator`: keeps its line, so nothing jumps
 - `FileChip`: ready, scanning, error
 - `Toast`: errors use `role=alert`, others `role=status`
-- `Composer`
+- `Composer`: IME-safe Enter, optional `maxLength` with a counter in the last 200 characters (code points, like the server), `+` only when `onAttach` is given
 - `EmptyState`
 
 Layout classes: `.shell` collapses below 44rem *of its own width* (a container query): the sidebar becomes an overlay opened from the channel header.
