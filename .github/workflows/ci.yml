@@ -45,6 +45,17 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # Helm chart: lint, dev/prod renders against the Kubernetes schemas, the chart's own rules.
+  chart:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: helm lint, kubeconform, chart rules
+        run: make chart-lint
+
   secrets:
     runs-on: ubuntu-latest
     steps:
