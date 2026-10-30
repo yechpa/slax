@@ -59,14 +59,10 @@
 
   "file.remove": "Retirer {name}",
   "file.scanning": "Analyse en cours…",
-  "file.tooLarge": "{name} dépasse la limite de {limit}.",
-  "file.rejected": "{name} a été refusé par l'analyse de sécurité.",
 
   "toast.saved": "Modifications enregistrées.",
   "error.network": "Connexion perdue. Reconnexion en cours…",
-  "error.generic": "Une erreur est survenue. Veuillez réessayer.",
   "error.sendFailed": "Message non envoyé.",
-  "error.forbidden": "Vous n'avez pas accès à ce canal.",
   "error.notFound": "Ce canal n'existe plus.",
 
   "time.today": "aujourd'hui",
@@ -74,7 +70,6 @@
 
   "empty.channel": "Aucun message pour l'instant. Lancez la conversation dans {channel}.",
   "empty.dms": "Aucun message direct pour l'instant.",
-  "empty.search": "Aucun résultat pour {query}.",
 
   "settings.language": "Langue",
   "settings.theme": "Thème",
@@ -157,7 +152,6 @@
   "message.editHint": "Entrée pour enregistrer · Échap pour annuler",
   "message.deleteTitle": "Supprimer ce message ?",
   "message.deleteBody": "Il sera supprimé pour tout le monde. Les réponses de son fil restent. C'est définitif.",
-  "message.deleted.toast": "Message supprimé.",
   "error.editFailed": "Impossible d'enregistrer votre modification. Veuillez réessayer.",
   "error.editEmpty": "Un message modifié doit contenir du texte.",
   "error.editGone": "Ce message n'existe plus.",

@@ -59,14 +59,10 @@
 
   "file.remove": "הסרת {name}",
   "file.scanning": "בסריקה…",
-  "file.tooLarge": "הקובץ {name} חורג מהמגבלה של {limit}.",
-  "file.rejected": "הקובץ {name} נדחה בסריקת האבטחה.",
 
   "toast.saved": "השינויים נשמרו.",
   "error.network": "החיבור נותק. מתחברים מחדש…",
-  "error.generic": "משהו השתבש. כדאי לנסות שוב.",
   "error.sendFailed": "ההודעה לא נשלחה.",
-  "error.forbidden": "אין לך גישה לערוץ הזה.",
   "error.notFound": "הערוץ הזה כבר לא קיים.",
 
   "time.today": "היום",
@@ -74,7 +70,6 @@
 
   "empty.channel": "עדיין אין כאן הודעות. אפשר לפתוח את השיחה ב־{channel}.",
   "empty.dms": "עדיין אין הודעות ישירות.",
-  "empty.search": "לא נמצאו תוצאות עבור {query}.",
 
   "settings.language": "שפה",
   "settings.theme": "ערכת נושא",
@@ -157,7 +152,6 @@
   "message.editHint": "Enter לשמירה · Escape לביטול",
   "message.deleteTitle": "למחוק את ההודעה?",
   "message.deleteBody": "ההודעה תימחק אצל כולם. התשובות בשרשור יישארו. אי אפשר לבטל את הפעולה.",
-  "message.deleted.toast": "ההודעה נמחקה.",
   "error.editFailed": "לא ניתן היה לשמור את העריכה. כדאי לנסות שוב.",
   "error.editEmpty": "כדי לערוך הודעה צריך לכתוב בה טקסט.",
   "error.editGone": "ההודעה הזו כבר לא קיימת.",

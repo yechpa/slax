@@ -155,6 +155,19 @@ describe('dictionaries', () => {
     expect(keys(he)).toEqual(keys(en))
   })
 
+  it('has no key the app never uses (nothing to translate for nothing)', () => {
+    const sources = import.meta.glob(['../**/*.{ts,tsx}', '!../**/*.test.{ts,tsx}', '!../test/**'], {
+      query: '?raw',
+      import: 'default',
+      eager: true,
+    }) as Record<string, string>
+    const code = Object.values(sources).join('\n')
+    // Keys built at run time: `auth.error.${code}` and the like.
+    const prefixes = [...code.matchAll(/`([a-z][\w.]*)\.\$\{/gi)].map((m) => `${m[1]}.`)
+    const unused = Object.keys(en).filter((key) => !code.includes(`'${key}'`) && !code.includes(`"${key}"`) && !prefixes.some((p) => key.startsWith(p)))
+    expect(unused).toEqual([])
+  })
+
   it('plural entries carry the categories each language needs', () => {
     const needs: Record<string, string[]> = { en: ['one', 'other'], fr: ['one', 'other'], he: ['one', 'two', 'other'] }
     for (const [locale, dict] of Object.entries(dicts)) {

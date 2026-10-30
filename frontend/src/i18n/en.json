@@ -59,14 +59,10 @@
 
   "file.remove": "Remove {name}",
   "file.scanning": "Scanning…",
-  "file.tooLarge": "{name} is larger than {limit}.",
-  "file.rejected": "{name} was rejected by the security scan.",
 
   "toast.saved": "Changes saved.",
   "error.network": "Connection lost. Reconnecting…",
-  "error.generic": "Something went wrong. Please try again.",
   "error.sendFailed": "Message not sent.",
-  "error.forbidden": "You don't have access to this channel.",
   "error.notFound": "This channel no longer exists.",
 
   "time.today": "today",
@@ -74,7 +70,6 @@
 
   "empty.channel": "No messages yet. Start the conversation in {channel}.",
   "empty.dms": "No direct messages yet.",
-  "empty.search": "No results for {query}.",
 
   "settings.language": "Language",
   "settings.theme": "Theme",
@@ -157,7 +152,6 @@
   "message.editHint": "Enter to save · Escape to cancel",
   "message.deleteTitle": "Delete this message?",
   "message.deleteBody": "It will be removed for everyone. Replies in its thread stay. This can't be undone.",
-  "message.deleted.toast": "Message deleted.",
   "error.editFailed": "Could not save your edit. Please try again.",
   "error.editEmpty": "A message needs some text to be edited.",
   "error.editGone": "This message no longer exists.",
