@@ -1,9 +1,9 @@
 /**
  * About a channel or conversation: its topic and its members (with their presence),
- * owners first. An owner of a room can add people and remove members; a member can
- * leave a room (the server refuses when they are its only owner, and that is said).
+ * owners first. An owner of a room can add people and remove members (confirmed first); a
+ * member can leave a room (the server refuses when they are its only owner, and that is said).
  */
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { isApiError } from '../api/client.ts'
 import { api } from '../api/endpoints.ts'
 import type { Channel, ChannelMember, UserSummary } from '../api/types.ts'
@@ -36,6 +36,9 @@ export function ChannelDetails({ channel, label, onClose }: Props) {
   const [members, setMembers] = useState<Members>({ status: 'loading' })
   const [busy, setBusy] = useState(false)
   const [leaveError, setLeaveError] = useState<string | null>(null)
+  /** The member whose removal is being confirmed. */
+  const [removing, setRemoving] = useState<ChannelMember | null>(null)
+  const membersList = useRef<HTMLUListElement>(null)
   const room = !isDirect(channel)
   const list = members.status === 'ready' ? members.list : []
   const owner = room && list.some((m) => m.id === meId && m.role === 'owner')
@@ -70,13 +73,19 @@ export function ChannelDetails({ channel, label, onClose }: Props) {
     }
   }
 
+  const cancelRemove = () => {
+    if (!busy) setRemoving(null)
+  }
+
   const remove = async (member: ChannelMember) => {
     setBusy(true)
     try {
       await api.removeMember(channel.id, member.id)
+      setRemoving(null)
       setMembers((current) => (current.status === 'ready' ? { status: 'ready', list: current.list.filter((m) => m.id !== member.id) } : current))
       void chat.refreshChannel(channel.id).catch(() => undefined)
     } catch (error) {
+      setRemoving(null)
       if (!isApiError(error, 'rate_limited')) showToast({ tone: 'error', text: t('details.removeFailed', { name: member.name }), key: 'members' })
     } finally {
       setBusy(false)
@@ -135,15 +144,15 @@ export function ChannelDetails({ channel, label, onClose }: Props) {
           </p>
         )}
         {members.status === 'ready' && (
-          <ul class="details__members">
+          <ul class="details__members" ref={membersList} tabIndex={-1}>
             {list.map((member) => (
-              <li class="details__member" key={member.id}>
+              <li class="details__member" key={member.id} data-member={member.id}>
                 <Avatar name={member.name} hue={userHue(String(member.id))} size="sm" presence={chat.presence.stateOf(member.id)} />
                 <bdi class="details__member-name">{member.name}</bdi>
                 {member.id === meId && <span class="details__tag">{t('details.you')}</span>}
                 {member.role === 'owner' && <span class="details__tag details__tag--owner">{t('details.owner')}</span>}
                 {owner && member.id !== meId && (
-                  <Button variant="quiet" size="sm" class="details__remove" aria-label={t('details.remove', { name: member.name })} onClick={() => void remove(member)} disabled={busy}>
+                  <Button variant="quiet" size="sm" class="details__remove" aria-label={t('details.remove', { name: member.name })} onClick={() => setRemoving(member)} disabled={busy}>
                     {t('action.remove')}
                   </Button>
                 )}
@@ -169,6 +178,28 @@ export function ChannelDetails({ channel, label, onClose }: Props) {
         <p class="field__error" role="alert">
           {leaveError}
         </p>
+      )}
+      {removing && (
+        <Dialog
+          role="alertdialog"
+          title={t('details.removeTitle', { name: removing.name, channel: label })}
+          description={t('details.removeBody')}
+          onClose={cancelRemove}
+          // Back to that member's Remove button; once they are removed (the button is gone), to the list.
+          returnFocus={() =>
+            membersList.current?.querySelector<HTMLElement>(`[data-member="${removing.id}"] .details__remove`) ?? membersList.current
+          }
+          footer={
+            <>
+              <Button variant="secondary" data-autofocus onClick={cancelRemove} disabled={busy}>
+                {t('action.cancel')}
+              </Button>
+              <Button variant="danger" onClick={() => void remove(removing)} disabled={busy}>
+                {t('action.remove')}
+              </Button>
+            </>
+          }
+        />
       )}
     </Dialog>
   )

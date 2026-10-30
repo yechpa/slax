@@ -192,11 +192,26 @@ describe('channels', () => {
     expect(shown()).toEqual(['Alice', 'dana', 'נעם'])
     expect(app.host.querySelector('.channel-header__meta')?.textContent).toContain('3 members')
 
-    // Remove.
-    dialog.querySelector<HTMLButtonElement>(`[aria-label="${'Remove ⁨dana⁩ from the channel'}"]`)!.click()
+    // Remove: confirmed first; Cancel changes nothing and gives the focus back.
+    const removeDana = () => dialog.querySelector<HTMLButtonElement>(`[aria-label="${'Remove ⁨dana⁩ from the channel'}"]`)!
+    const confirm = () => document.querySelector<HTMLDialogElement>('dialog[role="alertdialog"]')
+    removeDana().click()
+    await settle()
+    expect(plain(confirm()?.querySelector('.dialog__title')?.textContent)).toBe('Remove dana from #general?')
+    expect(document.activeElement).toBe(button(confirm()!, 'Cancel'))
+    button(confirm()!, 'Cancel').click()
+    await settle()
+    expect(confirm()).toBeNull()
+    expect(calls).toEqual([`add ${NOAM.id}`])
+    expect(document.activeElement).toBe(removeDana())
+    removeDana().click()
+    await settle()
+    button(confirm()!, 'Remove').click()
     await settle()
     expect(calls).toEqual([`add ${NOAM.id}`, `remove ${DANA.id}`])
+    expect(confirm()).toBeNull()
     expect(shown()).toEqual(['Alice', 'נעם'])
+    expect(dialog.contains(document.activeElement)).toBe(true)
 
     // The only owner cannot leave: said in the dialog, which stays.
     button(dialog, 'Leave channel').click()

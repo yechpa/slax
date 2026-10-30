@@ -234,6 +234,8 @@
   "details.added": "הוספת את {name} ל־{channel}.",
   "details.addFailed": "לא ניתן היה להוסיף את {name}.",
   "details.remove": "הסרת {name} מהערוץ",
+  "details.removeTitle": "להסיר את {name} מ־{channel}?",
+  "details.removeBody": "החברות בערוץ תסתיים. אפשר להוסיף שוב בהמשך.",
   "details.removeFailed": "לא ניתן היה להסיר את {name}.",
   "details.left": "יצאת מ־{channel}.",
   "details.leaveFailed": "לא ניתן היה לצאת מ־{channel}. כדאי לנסות שוב.",

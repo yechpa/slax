@@ -234,6 +234,8 @@
   "details.added": "You added {name} to {channel}.",
   "details.addFailed": "Could not add {name}.",
   "details.remove": "Remove {name} from the channel",
+  "details.removeTitle": "Remove {name} from {channel}?",
+  "details.removeBody": "They will no longer be a member. You can add them again later.",
   "details.removeFailed": "Could not remove {name}.",
   "details.left": "You left {channel}.",
   "details.leaveFailed": "Could not leave {channel}. Please try again.",

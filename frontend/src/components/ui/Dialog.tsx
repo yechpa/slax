@@ -16,6 +16,11 @@ type Props = {
   /** Form submit (Enter in a field): the dialog body is a <form>. */
   onSubmit?: () => void
   class?: string
+  /**
+   * Where the focus goes when it closes, if not back to what had it when it opened (a click
+   * does not focus a button in every browser; that button may also be gone by then).
+   */
+  returnFocus?: () => HTMLElement | null | undefined
 }
 
 /**
@@ -23,12 +28,14 @@ type Props = {
  * sits in the top layer (never clipped), and Escape closes it. Focus goes to the first
  * field (or the dialog), and back to what had it when the dialog closes.
  */
-export function Dialog({ title, description, onClose, children, footer, role = 'dialog', onSubmit, class: extra }: Props) {
+export function Dialog({ title, description, onClose, children, footer, role = 'dialog', onSubmit, class: extra, returnFocus }: Props) {
   const ref = useRef<HTMLDialogElement>(null)
   const titleId = useId()
   const descriptionId = useId()
   const close = useRef(onClose)
   close.current = onClose
+  const focusBack = useRef(returnFocus)
+  focusBack.current = returnFocus
 
   useEffect(() => {
     const dialog = ref.current
@@ -54,7 +61,8 @@ export function Dialog({ title, description, onClose, children, footer, role = '
       dialog.removeEventListener('cancel', onCancel)
       dialog.removeEventListener('keydown', onKey)
       if (dialog.open) dialog.close()
-      if (opener?.isConnected) opener.focus()
+      const target = focusBack.current?.() ?? opener
+      if (target?.isConnected) target.focus()
     }
   }, [])
 
