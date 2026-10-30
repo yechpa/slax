@@ -173,6 +173,11 @@ the audit log shows the ban. Unban (the "Banned" list): B can sign in again. **A
 channel (B's composer is replaced within a minute; a post is refused with an explanation).
 **M**
 7.5 [ ] B cannot open Administration (no menu entry; `/admin` refused). **A+M**
+7.6 [ ] **Family account.** As A, Administration → Accounts: B is listed (most recently seen
+first) as "Demo account". Make member: the confirmation says their messages are kept and no
+longer reset every night; confirm: B shows "Member", a toast says so, Audit shows "Made a
+member", Telegram gets an info alert. A has no button (administrator). "Make demo account"
+asks again and says the content goes at the next reset. **A** (AdminTest, Admin.test) **+M**
 
 ## 8. Demo reset (prod only)
 
@@ -186,6 +191,10 @@ still sign in (active account) and lands in `#general`; Audit shows the reset.
 8.3 [ ] Your administrator's account and content are untouched.
 8.4 [ ] Dev does not reset (`SLAX_DEMO_RESET_ENABLED=false`): content posted there the day
 before is still there.
+8.5 [ ] **Members are kept.** Before 03:00, with B made a member (7.6): B posts in `#general`,
+creates `recette-family`, and writes to A in a conversation; a demo account C writes to B. After
+03:00: B's post, `recette-family` and the A-B conversation are there; the B-C conversation is
+gone, B's messages in it included (Ruling P). **A** (DemoResetTest) **+M**
 
 ## 9. Backups and restore
 
@@ -245,6 +254,44 @@ GitHub; docs/architecture.md's diagrams render on GitHub.
 did not.
 13.3 [ ] docs/known-limitations.md has nothing you now consider a bug in the v1 scope.
 
+## 14. Family test (real phones and computers)
+
+The family uses Slax on their own devices, following [family-guide.md](family-guide.md). Run it
+with two or three relatives, on prod, after part 7.6 made each of them a member. **Only
+emulation was automated**: Playwright drives desktop Chromium, WebKit sized as an iPhone 14
+and Chromium as a Pixel 7 (`make e2e`); no real iPhone, Android phone, on-screen keyboard,
+notch or push service was ever involved (docs/known-limitations.md, "Installable app",
+"Phones", "Push notifications"). Everything below is **M**.
+
+14.1 [ ] **Install, each platform.** iPhone (Safari → Share → Add to Home Screen, then open from
+the icon), Android (Chrome → account menu → Install Slax, or Chrome's menu → Install app), a
+desktop (the install icon in Chrome's or Edge's address bar). Each opens full screen from its
+icon, with the Slax icon; sign in with Google from the installed app works (on iPhone, the
+installed app has its own cookies: one more sign-in there is expected).
+14.2 [ ] **Notifications.** In the installed app, account menu → "Notifications on this device"
+→ Allow → "Send a test": it arrives. Close the app everywhere; someone sends a DM, an @mention
+and a reply in a thread you wrote in: three notifications, each showing who and where, never
+the text; each tap opens that conversation or thread. A desktop tab left open but untouched
+for 5 minutes does not stop the phone's notifications. On an iPhone below iOS 16.4, or in
+Safari outside the installed app, the menu explains instead of offering the switch.
+14.3 [ ] **Hebrew, right to left.** Switch to עברית: the drawer comes from the right, the
+composer's text starts on the right, English words and names inside Hebrew messages read in the
+right order, nothing scrolls sideways on the phone.
+14.4 [ ] **Touch.** A long press on a message opens its menu (Reply, React, Copy text…),
+without selecting text; every button is easy to hit with a finger.
+14.5 [ ] **Keyboard and composer.** Tap the message field: no zoom, the field and Send sit just
+above the keyboard, the header stays visible; send; close the keyboard: no gap at the bottom.
+The same in a thread and in "New channel".
+14.6 [ ] **Sign out, sign in.** On a shared device: account menu → Sign out → the sign-in
+screen; reopen the app from its icon: still signed out; no notification for that person
+arrives any more. Sign in again: the conversations are there. Leave a phone unused for two or
+three days, then tap a notification: it opens the conversation, not the sign-in screen
+(sessions last 14 days, rolling).
+14.7 [ ] **What to report** (the guide asks the same): the device and its system version, the
+browser, installed app or browser tab, what was tapped, what was expected and what happened,
+the time (to find it in the logs), a screenshot if possible. Record each report here with its
+fix or its known-limitations entry.
+
 ## Sign-off
 
 | Part | Dev | Prod |
@@ -262,5 +309,6 @@ did not.
 | 11. Google sign-in | | |
 | 12. Accessibility, performance | | |
 | 13. Documentation | | |
+| 14. Family test | – | |
 
 Then 2.5: tag `v1.0.0`.

@@ -29,7 +29,8 @@ address is the target, not a promise.
 - English, Hebrew and French, chosen per person; right to left done with CSS logical
   properties and per-message bidi isolation.
 - Sign-in with Google only (no password anywhere), behind Cloudflare Turnstile.
-- Administration: service status, audit log, ban, delete, lock; alerts to a Telegram bot.
+- Administration: service status, audit log, ban, delete, lock, making a relative a member
+  (kept by the nightly demo reset); alerts to a Telegram bot.
 - Installable as an app (PWA) on Android, iPhone and desktop: Install from the account menu
   (or the Add to Home Screen steps on iOS), the app shell opens offline, a new version is
   announced with a Reload button.
@@ -50,6 +51,7 @@ approval). Production is designed for one EC2 t4g.small behind Caddy, about $21 
 | [docs/runbook.md](docs/runbook.md) | production: setup, operations, backups, alerts, incidents, sizing, teardown |
 | [deploy/dev/BOOTSTRAP.md](deploy/dev/BOOTSTRAP.md) | setting up the development cluster |
 | [docs/recette.md](docs/recette.md) | the acceptance checklist, automated and manual |
+| [docs/family-guide.md](docs/family-guide.md) | for relatives testing Slax: install it, sign in, notifications, sign out, report a problem (English, Hebrew, French) |
 | [docs/known-limitations.md](docs/known-limitations.md) | what is deliberately left out or not yet proven |
 | [docs/design-system.md](docs/design-system.md) | the visual identity, themes, typography, RTL rules |
 | [docs/load-test-results.md](docs/load-test-results.md) | 50 WebSocket clients at 10 messages/s: latency, memory |
