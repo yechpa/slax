@@ -427,6 +427,10 @@ for (const [locale, theme] of LOOKS) {
       person = await signInPhone(browser, locale === 'he' ? 'נועה' : `Narrow ${uniq('w')}`, { locale, theme })
       const { page } = person
       const view = ui(person)
+      // A room with the longest name the server allows (40 characters): its label is cut with an
+      // ellipsis in the drawer, never widening it.
+      const longest = `${uniq('l')}-`.padEnd(40, 'x')
+      await api(page).createChannel(longest, 'public')
       const { id } = await roomWithMessages(person, 1)
       // Long words and a long link: they wrap, never push the page wider.
       await api(page).postMessage(id, `${'Antidisestablishmentarianism'.repeat(3)} https://example.test/${'a-very-long-path-segment/'.repeat(6)}?q=1`)
@@ -443,6 +447,11 @@ for (const [locale, theme] of LOOKS) {
         expect(side.start, 'the drawer is at the inline start (the right in Hebrew)').toBeLessThanOrEqual(0.5)
         expect(side.end, 'and leaves some of the conversation visible').toBeGreaterThan(20)
         await expectNoSidewaysScroll(page, `${size.width}: drawer`)
+        const label = view.navItem(longest).locator('.nav-item__label')
+        await label.scrollIntoViewIfNeeded()
+        expect(await label.evaluate((element) => element.scrollWidth > element.clientWidth), 'the longest name is cut (ellipsis)').toBe(true)
+        await expect(label).toHaveCSS('text-overflow', 'ellipsis')
+        await expect(view.navItem(longest)).toBeInViewport({ ratio: 1 })
         // Closed with a tap on what it leaves visible (no swipe needed).
         await page.touchscreen.tap(locale === 'he' ? 8 : size.width - 8, size.height / 2)
         await expect(view.nav).toBeHidden()

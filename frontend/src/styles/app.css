@@ -170,8 +170,11 @@
     margin-block-start: 0;
   }
 
+  /* One column no wider than the sidebar: a long name is cut with an ellipsis (an auto column
+     would grow to the longest name and scroll the list sideways). */
   .sidebar__list {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-1);
   }
 
