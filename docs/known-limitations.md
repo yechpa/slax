@@ -132,29 +132,39 @@ receives the channel's events until it disconnects.
   touched by the worker at all). Offline reading would mean caching private data on the device, which this version
   refuses.
 - **Verified in emulation only.** Playwright runs desktop Chromium: registration, the offline shell (with the worker
-  itself offline), the update banner after a simulated deploy, and sign-out's cleanup, under the production CSP.
-  The iOS Add to Home Screen help and Chromium's Install button are covered by unit tests (user agents and a fake
-  `beforeinstallprompt`), not by a browser: headless Chromium does not offer installation, and the suite runs
-  desktop Chromium only (WebKit and phone emulation come with the mobile pass). **To try on real devices:** install from Chrome on Android (account menu
-  → Install Slax) and from Safari on an iPhone (the three steps), open from the icon, check the status bar colour in
-  both themes, go to airplane mode and reopen (offline notice, then automatic recovery), deploy and check the banner
-  appears when the app comes back to the foreground.
+  itself offline), the update banner after a simulated deploy, the notices and toasts never covering each other or
+  the composer (1280x800 and 375x667, English and Hebrew), and sign-out's cleanup, under the production CSP. The iOS
+  Add to Home Screen help and Chromium's Install button are covered by unit tests (user agents and a fake
+  `beforeinstallprompt`), not by a browser: headless Chromium does not offer installation, and the suite runs desktop
+  Chromium only (WebKit and phone emulation come with the mobile pass). **To try on real devices:** install from
+  Chrome on Android (account menu → Install Slax) and from Safari on an iPhone (the three steps), open from the icon,
+  check the status bar colour in both themes, go to airplane mode and reopen (offline notice, then automatic
+  recovery), deploy and check the banner appears when the app comes back to the foreground.
 - **Safe areas come with the mobile pass.** `viewport-fit=cover` is set so the app can use the whole screen, but the
   safe-area padding (notch, home indicator) is the next task's work; until then, landscape on a notched iPhone can
   put the edges of the sidebar under the notch.
 - **Where install is offered.** Chromium (Android, Windows, macOS, Linux) shows the Install button once the browser
   fires `beforeinstallprompt`; iPhone and iPad (Safari and the other iOS browsers) get the steps. Firefox desktop
   cannot install web apps, and Safari on macOS ("Add to Dock") is not detected: the menu says nothing there.
-- **The update banner cannot be dismissed**, by design: an old app must not run unnoticed against a newer API. It is
-  a band above the screen, which shrinks to make room, so it never covers the composer, its Send or the header
-  (checked at 1280x800 and 375x667 in English and Hebrew). Reloading loses an unsent draft (drafts live in memory). Until the person reloads, the old version keeps working
-  (old worker, old cache); any reload, by the banner or by hand, gets the newest page (navigations are network
-  first). The browser checks for a new `sw.js` on navigations; the app also asks when it returns to the foreground
-  and every hour.
+- **The update banner cannot be dismissed**, by design: an old app must not run unnoticed against a newer API. It
+  shares one band above the screen with the connection notice (toasts hang just under it); the screen shrinks to make
+  room, so neither covers the other, the composer, its Send or the header. Reloading loses an unsent draft (drafts
+  live in memory). Until the person reloads, the old version keeps working (old worker, old cache); any reload, by
+  the banner or by hand, gets the newest page (navigations are network first). The browser checks for a new `sw.js`
+  on navigations; the app also asks when it returns to the foreground and every hour.
+- **The band layout relies on CSS `:has()`.** Firefox before 121 and Safari before 15.4 do not support it: there the
+  band stays in the page's flow but the screen keeps its full height, so the page scrolls and the composer is pushed
+  down by the band's height while a notice shows.
 - **Sign-out empties Cache Storage, not every trace.** All of the origin's caches are deleted at any session end
   (sign-out, expiry, ban), then the public shell is fetched again; API responses carry `Cache-Control: no-store`
-  (nginx), so the HTTP cache keeps none either. The last open channel is forgotten too; local storage keeps only the
-  language and theme chosen on the device (not private), and the browser's own history stays the browser's.
+  (nginx), so the HTTP cache keeps none either. The last open channel is forgotten at those and at a start-up that
+  finds no session; local storage keeps only the language and theme chosen on the device (not private), and the
+  browser's own history stays the browser's.
+- **After a deploy, a sign-out can leave no offline shell for a while.** The refill after a sign-out is all or
+  nothing: the old worker still in control refills its own list, whose hashed files the deploy removed, so it gets
+  404s and stores nothing (never a mixed cache). A new version already waiting refills its own cache at once; one not
+  yet found fills it when it installs. Until that version takes over (the reload the banner offers, or every tab
+  closed), the app works online only.
 - **The icons are rendered from `favicon.svg`** (the `> _` prompt in the console's green on its background). Changing
   the favicon means running `make icons` (a test fails while the icons are out of date); how the mark looks once a
   launcher masks it is to be checked on the real phones.
