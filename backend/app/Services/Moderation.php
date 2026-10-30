@@ -10,6 +10,7 @@ use App\Models\File;
 use App\Models\Message;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /**
  * What administrators do to other people's accounts and content. Authorization is the
@@ -45,8 +46,13 @@ class Moderation
         });
         $user->refresh();
 
-        $this->sessions->destroyAll($user);
-        $this->presence->forget($user->id);
+        try {
+            $this->sessions->destroyAll($user);
+            $this->presence->forget($user->id);
+        } catch (Throwable $e) {
+            // Redis unavailable: the ban stands, and EnsureNotBanned refuses every request anyway.
+            report($e);
+        }
         UserBanned::dispatch($user);
 
         if ($changed) {
