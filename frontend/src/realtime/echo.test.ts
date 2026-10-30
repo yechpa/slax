@@ -6,7 +6,7 @@ import { fakeFetch, flush } from '../test/fakes.ts'
 const pusher = vi.hoisted(() => ({
   options: null as Record<string, unknown> | null,
   stateListeners: [] as ((change: { previous: string; current: string }) => void)[],
-  channels: new Map<string, { bound: Map<string, (data: unknown) => void> }>(),
+  channels: new Map<string, { bound: Map<string, (data: unknown, meta?: unknown) => void>; triggered: [string, unknown][] }>(),
   unsubscribed: [] as string[],
 }))
 
@@ -21,16 +21,25 @@ vi.mock('pusher-js', () => ({
     }
     subscribe(name: string) {
       const channel = {
-        bound: new Map<string, (data: unknown) => void>(),
-        bind(event: string, handler: (data: unknown) => void) {
+        bound: new Map<string, (data: unknown, meta?: unknown) => void>(),
+        triggered: [] as [string, unknown][],
+        subscribed: true,
+        bind(event: string, handler: (data: unknown, meta?: unknown) => void) {
           this.bound.set(event, handler)
         },
         unbind(event: string) {
           this.bound.delete(event)
         },
+        trigger(event: string, data: unknown) {
+          this.triggered.push([event, data])
+          return true
+        },
       }
       pusher.channels.set(name, channel)
       return channel
+    }
+    channel(name: string) {
+      return pusher.channels.get(name)
     }
     unsubscribe(name: string) {
       pusher.unsubscribed.push(name)
@@ -118,5 +127,48 @@ describe('realtime', () => {
     setState('connecting')
     setState('connected')
     expect(reconnected).toHaveBeenCalledOnce()
+  })
+
+  it('whispers on a subscribed channel and passes the sender id Reverb tagged', async () => {
+    vi.stubGlobal('fetch', fakeFetch({}).fetch)
+    const realtime = await connectRealtime('app-key')
+    const typing = vi.fn()
+    realtime.subscribe('private-channel.7', { 'client-typing': typing })
+
+    realtime.whisper('private-channel.7', 'client-typing', { typing: true, parent_id: null })
+    realtime.whisper('private-channel.8', 'client-typing', { typing: true, parent_id: null })
+    expect(pusher.channels.get('private-channel.7')!.triggered).toEqual([['client-typing', { typing: true, parent_id: null }]])
+    expect(pusher.channels.has('private-channel.8')).toBe(false)
+
+    pusher.channels.get('private-channel.7')!.bound.get('client-typing')!({ typing: true }, { user_id: '2' })
+    expect(typing).toHaveBeenCalledWith({ typing: true }, { user_id: '2' })
+  })
+
+  it('maps the presence channel members, joins and leaves to plain people', async () => {
+    vi.stubGlobal('fetch', fakeFetch({}).fetch)
+    const realtime = await connectRealtime('app-key')
+    const listener = { members: vi.fn(), added: vi.fn(), removed: vi.fn() }
+    const unsubscribe = realtime.subscribePresence('presence-workspace.1', listener)
+    const bound = pusher.channels.get('presence-workspace.1')!.bound
+
+    const members = [
+      { id: '1', info: { name: 'Alice', avatar_url: null } },
+      { id: '2', info: { name: 'dana', avatar_url: null } },
+    ]
+    bound.get('pusher:subscription_succeeded')!({ each: (fn: (m: unknown) => void) => members.forEach(fn) })
+    expect(listener.members).toHaveBeenCalledWith([
+      { id: 1, name: 'Alice', avatar_url: null },
+      { id: 2, name: 'dana', avatar_url: null },
+    ])
+    bound.get('pusher:member_added')!({ id: '3', info: { name: 'נעם', avatar_url: null } })
+    expect(listener.added).toHaveBeenCalledWith({ id: 3, name: 'נעם', avatar_url: null })
+    bound.get('pusher:member_removed')!({ id: '2', info: {} })
+    expect(listener.removed).toHaveBeenCalledWith(2)
+    // Malformed entries are dropped.
+    bound.get('pusher:member_added')!({ id: 'x', info: null })
+    expect(listener.added).toHaveBeenCalledOnce()
+
+    unsubscribe()
+    expect(pusher.unsubscribed).toEqual(['presence-workspace.1'])
   })
 })

@@ -20,11 +20,14 @@
  * - While a latest page is on its way, events for that channel are held and applied
  *   after it, through the same merge, so none is lost and none is undone by the page.
  * - Nothing that finishes after `stop()` (sign-out) touches the stores.
+ * - Threads (threads.ts), reactions (reactions.ts) and uploads (uploads.ts) have their own
+ *   modules; this one routes the events to them and owns the sending of messages.
  */
 import { batch } from '@preact/signals'
 import { isApiError } from '../api/client.ts'
 import type { Api } from '../api/endpoints.ts'
-import type { Channel, Message } from '../api/types.ts'
+import type { Channel, FileInfo, Message } from '../api/types.ts'
+import type { UploadFn } from '../api/upload.ts'
 import type { Realtime } from '../realtime/echo.ts'
 import { bumpUnread, channelById, channels, markReadLocally, setChannels, setUnread, upsertChannel } from './channels.ts'
 import {
@@ -38,8 +41,11 @@ import {
   resetTo,
   updatePending,
 } from './merge.ts'
-import { channelKey, peekTimeline, timelineKeys, updateTimeline } from './messages.ts'
+import { applyKnown, channelKey, findMessage, peekTimeline, threadKey, timelineKeys, updateTimeline } from './messages.ts'
+import { createReactions } from './reactions.ts'
 import { me } from './session.ts'
+import { createThreads, type ReplyEvent } from './threads.ts'
+import { createUploads } from './uploads.ts'
 
 export const PAGE_SIZE = 50
 /** Catch-up after a reconnection: up to this many pages of 100 before giving up on continuity. */
@@ -57,11 +63,25 @@ export interface ChatDeps {
   realtime: Realtime | null
   uuid?: () => string
   now?: () => Date
+  /** File uploads (XMLHttpRequest by default). */
+  upload?: UploadFn
+}
+
+interface HeldEvent {
+  event: ReplyEvent
+  message: Message
+}
+
+export interface SendOptions {
+  /** Replying in this thread. */
+  parentId?: number | null
+  /** Finished uploads to attach (the body may then be empty). */
+  files?: FileInfo[]
 }
 
 export type Chat = ReturnType<typeof createChat>
 
-export function createChat({ api, realtime: initialRealtime, uuid = () => crypto.randomUUID(), now = () => new Date() }: ChatDeps) {
+export function createChat({ api, realtime: initialRealtime, uuid = () => crypto.randomUUID(), now = () => new Date(), upload }: ChatDeps) {
   let realtime = initialRealtime
   const subscriptions = new Map<number, () => void>()
   /** Refused subscriptions per channel since the last reconnection (retried once, then left alone). */
@@ -71,7 +91,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   /** Still readable when the debounce ends? (visible, focused, at the bottom), per channel. */
   const readChecks = new Map<number, () => boolean>()
   /** Events received while a latest page is on its way, applied after it. */
-  const held = new Map<number, Message[]>()
+  const held = new Map<number, HeldEvent[]>()
   /** Failed refreshes of the open channel: consecutive failures and the pending retry. */
   const retries = new Map<number, { failures: number; timer?: ReturnType<typeof setTimeout> }>()
   /** Bumped by stop(): anything that finishes under an older generation is ignored. */
@@ -82,6 +102,14 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   let stopReconnect: (() => void) | null = null
 
   const meId = () => me.peek()?.id ?? null
+  /** A check that turns false once stop() ran (whatever started now must then not touch the stores). */
+  const alive = () => {
+    const started = generation
+    return () => started === generation
+  }
+  const reactions = createReactions({ api, meId, alive })
+  const threads = createThreads({ api, meId, alive, prepare: (message) => reactions.overlay(message) })
+  const uploads = createUploads({ upload })
 
   async function refreshChannels(): Promise<void> {
     const started = generation
@@ -120,16 +148,24 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
 
   function onMessageEvent(channelId: number, event: (typeof MESSAGE_EVENTS)[number], payload: unknown): void {
     if (!isMessage(payload) || payload.channel_id !== channelId || !channelById.peek().has(channelId)) return
-    // Thread replies live in their thread (part B), not in the channel timeline.
-    if (payload.parent_id !== null) return
-    const message = fromBroadcast(payload, channelId)
+    const message = reactions.overlay(fromBroadcast(payload))
+    if (message.parent_id !== null) {
+      // A reply: into its thread, and its parent's summary (held with the channel's page if one is coming).
+      batch(() => {
+        threads.onReply(message)
+        if (loads.has(channelId)) held.get(channelId)?.push({ event, message })
+        else threads.noteReply(message, event)
+      })
+      return
+    }
     const key = channelKey(channelId)
     const loaded = peekTimeline(key)
     const known = loaded?.entries.some((e) => e.kind === 'server' && e.message.id === message.id) ?? false
     batch(() => {
+      threads.onParent(message)
       if (loads.has(channelId)) {
         // A latest page is on its way: applied after it (see loadLatest).
-        held.get(channelId)?.push(message)
+        held.get(channelId)?.push({ event, message })
       } else if (loaded && loaded.status !== 'idle' && !loaded.stale) {
         updateTimeline(key, (t) => withEntries(t, mergeMessages(t.entries, [message], meId())))
       }
@@ -147,11 +183,11 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
    * there: derive it from the reactor ids (the first 50), keeping what we knew when the
    * list is truncated.
    */
-  function fromBroadcast(message: Message, channelId: number): Message {
+  function fromBroadcast(message: Message): Message {
     if (message.deleted) return message
     const id = meId()
-    const previous = peekTimeline(channelKey(channelId))?.entries.find((e) => e.kind === 'server' && e.message.id === message.id)
-    const before = previous?.kind === 'server' && !previous.message.deleted ? previous.message.reactions : []
+    const previous = findMessage(message.id)
+    const before = previous && !previous.deleted ? previous.reactions : []
     return {
       ...message,
       reactions: message.reactions.map((r) => ({
@@ -220,35 +256,47 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
       const page = await api.messages(channelId, { limit: PAGE_SIZE }, controller.signal)
       if (started !== generation) return
       const events = takeHeld(channelId)
-      updateTimeline(key, (t) => ({
-        ...t,
-        entries: mergeMessages(resetTo(t.entries, page.data.filter(isTopLevel), meId()), events, meId()),
-        hasMoreBefore: page.has_more,
-        status: 'ready',
-        stale: false,
-        refreshFailed: false,
-      }))
+      batch(() => {
+        updateTimeline(key, (t) => ({
+          ...t,
+          entries: mergeMessages(resetTo(t.entries, prepared(page.data), meId()), topLevel(events), meId()),
+          hasMoreBefore: page.has_more,
+          status: 'ready',
+          stale: false,
+          refreshFailed: false,
+        }))
+        noteHeldReplies(events)
+      })
       refreshed(channelId)
     } catch (error) {
       // Aborted by a newer load, which keeps the held events.
       if (isApiError(error, 'aborted') || started !== generation) return
       const events = takeHeld(channelId)
       const before = peekTimeline(key)
+      const top = topLevel(events)
       updateTimeline(key, (t) => {
-        if (t.status !== 'ready') return { ...t, status: 'error', entries: mergeMessages(t.entries, events, meId()) }
+        if (t.status !== 'ready') return { ...t, status: 'error', entries: mergeMessages(t.entries, top, meId()) }
         // A stale window would show a gap with events after it: they come with the retry.
-        return t.stale ? t : withEntries(t, mergeMessages(t.entries, events, meId()))
+        return t.stale ? t : withEntries(t, mergeMessages(t.entries, top, meId()))
       })
+      noteHeldReplies(events)
       if (before?.status === 'ready') refreshFailed(channelId)
     } finally {
       if (loads.get(channelId) === controller) loads.delete(channelId)
     }
   }
 
-  function takeHeld(channelId: number): Message[] {
+  function takeHeld(channelId: number): HeldEvent[] {
     const events = held.get(channelId) ?? []
     held.delete(channelId)
     return events
+  }
+
+  /** Server messages ready to merge into a channel timeline: top-level, my reactions in flight laid over. */
+  const prepared = (messages: readonly Message[]) => messages.filter(isTopLevel).map(reactions.overlay)
+  const topLevel = (events: readonly HeldEvent[]) => events.filter((e) => e.message.parent_id === null).map((e) => e.message)
+  function noteHeldReplies(events: readonly HeldEvent[]): void {
+    for (const { event, message } of events) if (message.parent_id !== null) threads.noteReply(message, event, { held: true })
   }
 
   /** Brings the open channel up to date: catch-up when its window is sound, else a fresh page. */
@@ -303,7 +351,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
       if (started !== generation) return
       updateTimeline(key, (x) => ({
         ...x,
-        entries: mergeMessages(x.entries, page.data.filter(isTopLevel), meId()),
+        entries: mergeMessages(x.entries, prepared(page.data), meId()),
         hasMoreBefore: page.has_more,
         loadingOlder: false,
       }))
@@ -313,37 +361,53 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     }
   }
 
-  /** Optimistic send. Returns the client_id of the new message. */
-  function send(channelId: number, body: string): string {
+  /** Where a message goes: its thread, or the channel. */
+  const targetKey = (channelId: number, parentId: number | null | undefined) => (parentId ? threadKey(parentId) : channelKey(channelId))
+
+  /**
+   * Optimistic send, to the channel or (parentId) a thread, with finished uploads attached.
+   * The body may be empty when files go with it, as the server allows. Returns the client_id.
+   */
+  function send(channelId: number, body: string, { parentId = null, files = [] }: SendOptions = {}): string {
     const clientId = uuid().toLowerCase()
-    const entry = pendingEntry(channelId, clientId, body, now().toISOString())
-    updateTimeline(channelKey(channelId), (t) => withEntries(t, addPending(t.entries, entry)))
-    void deliver(channelId, clientId)
+    const entry = pendingEntry(channelId, clientId, body, now().toISOString(), parentId, files)
+    updateTimeline(targetKey(channelId, parentId), (t) => withEntries(t, addPending(t.entries, entry)))
+    void deliver(channelId, clientId, parentId)
     return clientId
   }
 
   /** Sends a failed message again, under the same client_id (the server deduplicates). */
-  function retry(channelId: number, clientId: string): void {
-    const key = channelKey(channelId)
+  function retry(channelId: number, clientId: string, parentId: number | null = null): void {
+    const key = targetKey(channelId, parentId)
     const t = peekTimeline(key)
     if (!t || findPending(t.entries, clientId)?.status !== 'failed') return
     updateTimeline(key, (x) => withEntries(x, updatePending(x.entries, clientId, { status: 'sending', error: null })))
-    void deliver(channelId, clientId)
+    void deliver(channelId, clientId, parentId)
   }
 
-  function discard(channelId: number, clientId: string): void {
-    updateTimeline(channelKey(channelId), (t) => withEntries(t, removePending(t.entries, clientId)))
+  function discard(channelId: number, clientId: string, parentId: number | null = null): void {
+    updateTimeline(targetKey(channelId, parentId), (t) => withEntries(t, removePending(t.entries, clientId)))
   }
 
-  async function deliver(channelId: number, clientId: string): Promise<void> {
-    const key = channelKey(channelId)
+  async function deliver(channelId: number, clientId: string, parentId: number | null): Promise<void> {
+    const key = targetKey(channelId, parentId)
     const pending = findPending(peekTimeline(key)?.entries ?? [], clientId)
     if (!pending) return
     const started = generation
     try {
-      const message = await api.postMessage(channelId, { body: pending.body, client_id: clientId, parent_id: pending.parentId })
+      const message = reactions.overlay(
+        await api.postMessage(channelId, {
+          body: pending.body,
+          client_id: clientId,
+          parent_id: pending.parentId,
+          ...(pending.files.length > 0 ? { file_ids: pending.files.map((f) => f.id) } : {}),
+        }),
+      )
       if (started !== generation) return
-      updateTimeline(key, (t) => withEntries(t, mergeMessages(t.entries, [message], meId())))
+      batch(() => {
+        updateTimeline(key, (t) => withEntries(t, mergeMessages(t.entries, [message], meId())))
+        if (message.parent_id !== null) threads.noteReply(message, 'message.created')
+      })
     } catch (error) {
       if (started !== generation) return
       // Still pending unless the realtime copy confirmed it meanwhile (then this is a no-op).
@@ -397,13 +461,75 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     return channel
   }
 
+  /** Saves an edit (not optimistic: the server's time stamps the edit). Errors go to the caller. */
+  async function editMessage(messageId: number, body: string): Promise<void> {
+    const still = alive()
+    const message = await api.editMessage(messageId, body)
+    if (still()) applyKnown(reactions.overlay(message))
+  }
+
+  /** Deletes a message: it becomes a tombstone everywhere (a reply leaves its parent's count). */
+  async function deleteMessage(messageId: number): Promise<void> {
+    const still = alive()
+    const message = await api.deleteMessage(messageId)
+    if (!still()) return
+    batch(() => {
+      applyKnown(message)
+      threads.onParent(message)
+      if (message.parent_id !== null) threads.noteReply(message, 'message.deleted')
+    })
+  }
+
+  /** Opens a thread beside its channel (the parent shows at once when we have it). */
+  function openThread(channelId: number, parentId: number): void {
+    threads.open(channelId, parentId, findMessage(parentId))
+  }
+
+  /** A new room: listed and subscribed at once. */
+  async function createChannel(input: { name: string; kind: 'public' | 'private'; topic: string | null }): Promise<Channel> {
+    const channel = await api.createChannel(input)
+    upsertChannel(channel)
+    syncSubscriptions()
+    return channel
+  }
+
+  /** A conversation with these people: the existing one (200) or a new one (201), listed and subscribed. */
+  async function openConversation(userIds: number[]): Promise<{ channel: Channel; created: boolean }> {
+    const { status, body } = await api.openConversation(userIds)
+    upsertChannel(body)
+    syncSubscriptions()
+    return { channel: body, created: status === 201 }
+  }
+
+  /**
+   * Leaves a room. A public one stays listed (not joined, readable); a private one goes.
+   * Its timeline will be refetched when opened again (events stop with the subscription).
+   */
+  async function leave(channelId: number): Promise<void> {
+    await api.leaveChannel(channelId)
+    updateTimeline(channelKey(channelId), (t) => (t.status === 'idle' ? t : { ...t, stale: true }))
+    const channel = channelById.peek().get(channelId)
+    if (channel?.kind === 'public') upsertChannel({ ...channel, is_member: false, unread_count: 0, member_count: Math.max(0, channel.member_count - 1) })
+    else setChannels(channels.peek().filter((c) => c.id !== channelId))
+    syncSubscriptions()
+    await refreshChannels().catch(() => undefined)
+  }
+
+  /** One channel again from the server (its member count after a change of members). */
+  async function refreshChannel(channelId: number): Promise<void> {
+    const still = alive()
+    const channel = await api.channel(channelId)
+    if (still()) upsertChannel(channel)
+  }
+
   /** After the socket came back: see the module comment. */
   async function reconnect(): Promise<void> {
     refusals.clear()
     for (const key of timelineKeys()) {
-      if (key !== (current === null ? '' : channelKey(current))) updateTimeline(key, (t) => (t.status === 'idle' ? t : { ...t, stale: true }))
+      if (key === (current === null ? '' : channelKey(current)) || threads.isOpen(key)) continue
+      updateTimeline(key, (t) => (t.status === 'idle' ? t : { ...t, stale: true }))
     }
-    await Promise.all([refreshChannels().catch(() => undefined), current === null ? undefined : catchUp(current)])
+    await Promise.all([refreshChannels().catch(() => undefined), current === null ? undefined : catchUp(current), threads.reconnect()])
   }
 
   async function catchUp(channelId: number): Promise<void> {
@@ -423,13 +549,13 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
           // Too much happened meanwhile: start again from the latest page.
           return {
             ...x,
-            entries: resetTo(x.entries, latest.data.filter(isTopLevel), meId()),
+            entries: resetTo(x.entries, prepared(latest.data), meId()),
             hasMoreBefore: latest.has_more,
             stale: false,
             refreshFailed: false,
           }
         }
-        const repaired = mergeMessages(x.entries, [...missed.messages, ...latest.data].filter(isTopLevel), meId())
+        const repaired = mergeMessages(x.entries, prepared([...missed.messages, ...latest.data]), meId())
         return { ...withEntries(x, repaired), stale: false, refreshFailed: false }
       })
       refreshed(channelId)
@@ -481,6 +607,9 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     held.clear()
     for (const retry of retries.values()) clearTimeout(retry.timer)
     retries.clear()
+    threads.stop()
+    reactions.clear()
+    uploads.stop()
     current = null
   }
 
@@ -500,7 +629,19 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     noteReadable,
     markRead,
     join,
+    leave,
+    createChannel,
+    openConversation,
+    refreshChannel,
     reconnect,
+    openThread,
+    closeThread: (parentId: number) => threads.close(parentId),
+    retryThread: (channelId: number, parentId: number) => void threads.load(channelId, parentId),
+    loadOlderReplies: (parentId: number) => void threads.loadOlder(parentId),
+    toggleReaction: (messageId: number, emoji: string) => reactions.toggle(messageId, emoji),
+    editMessage,
+    deleteMessage,
+    uploads,
     /** Exposed for tests and for the realtime fake. */
     onMessageEvent,
   }

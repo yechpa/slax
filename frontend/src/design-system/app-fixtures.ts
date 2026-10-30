@@ -11,7 +11,7 @@ import type { Realtime } from '../realtime/echo.ts'
 const ALICE: UserSummary = { id: 1, name: 'Alice Martin', avatar_url: null }
 const DANA: UserSummary = { id: 2, name: 'dana', avatar_url: null }
 const NOAM: UserSummary = { id: 3, name: 'נעם', avatar_url: null }
-const ME: Me = { ...ALICE, email: 'alice@example.test', locale: 'en', theme: 'console', is_admin: false }
+const ME: Me = { ...ALICE, email: 'alice@example.test', locale: 'en', theme: 'console', is_admin: false, workspace_id: 1 }
 
 const base = new Date()
 const at = (daysAgo: number, hh: number, mm: number) =>
@@ -94,6 +94,8 @@ export function installFixtureServer({ signedIn }: { signedIn: boolean }): void 
 export const fixtureRealtime: Realtime = {
   state: signal('connected'),
   subscribe: () => () => undefined,
+  whisper: () => undefined,
+  subscribePresence: () => () => undefined,
   onReconnect: () => () => undefined,
   disconnect: () => undefined,
 }

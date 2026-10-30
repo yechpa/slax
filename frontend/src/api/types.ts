@@ -15,6 +15,8 @@ export interface Me {
   locale: Locale
   theme: Theme
   is_admin: boolean
+  /** The single workspace (its presence channel is `presence-workspace.{id}`). */
+  workspace_id: number | null
 }
 
 /** A person as embedded in messages and conversations: no e-mail address. */
@@ -56,9 +58,18 @@ export interface FileInfo {
   name: string
   mime: string
   size: number
+  /** image, pdf or other. */
   kind: string
+  /** Same-origin; redirects to a short-lived URL of the object. */
   download_url: string
 }
+
+/** GET /channels/{id}/members: public profile and role, owners first. */
+export interface ChannelMember extends UserSummary {
+  role: 'owner' | 'member'
+}
+
+export type PresenceState = 'online' | 'away' | 'offline'
 
 interface MessageBase {
   id: number
@@ -95,6 +106,13 @@ export interface MessagePage {
 
 export interface RepliesPage extends MessagePage {
   parent: Message
+}
+
+/** Typing whisper on `private-channel.{id}` (client event `client-typing`); `user_id` is tagged by Reverb. */
+export interface TypingWhisper {
+  typing: boolean
+  /** The thread being replied to, or null for the channel itself. */
+  parent_id: number | null
 }
 
 /** Realtime events on `private-channel.{id}`; every payload is a MessageResource. */

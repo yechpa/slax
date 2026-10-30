@@ -11,7 +11,7 @@
  *   (whichever arrives first, the response or the event, wins; the other is a no-op);
  * - a tombstone is final, and an edit is never rolled back by an older snapshot.
  */
-import type { Message } from '../api/types.ts'
+import type { FileInfo, Message } from '../api/types.ts'
 
 export interface ServerEntry {
   kind: 'server'
@@ -27,6 +27,8 @@ export interface PendingEntry {
   channelId: number
   parentId: number | null
   body: string
+  /** Uploads attached to it (sent as file_ids). */
+  files: FileInfo[]
   createdAt: string
   status: 'sending' | 'failed'
   /** ApiError code of the last failure. */
@@ -37,7 +39,14 @@ export type Entry = ServerEntry | PendingEntry
 
 export const serverKey = (id: number) => `m:${id}`
 
-export function pendingEntry(channelId: number, clientId: string, body: string, createdAt: string, parentId: number | null = null): PendingEntry {
+export function pendingEntry(
+  channelId: number,
+  clientId: string,
+  body: string,
+  createdAt: string,
+  parentId: number | null = null,
+  files: FileInfo[] = [],
+): PendingEntry {
   return {
     kind: 'pending',
     key: `p:${clientId.toLowerCase()}`,
@@ -45,6 +54,7 @@ export function pendingEntry(channelId: number, clientId: string, body: string, 
     channelId,
     parentId,
     body,
+    files,
     createdAt,
     status: 'sending',
     error: null,
@@ -77,6 +87,22 @@ export function mergeMessages(entries: readonly Entry[], incoming: readonly Mess
 
   const ordered = [...servers.values()].sort((a, b) => a.message.id - b.message.id)
   return [...ordered, ...stillPending]
+}
+
+/**
+ * A newer snapshot of a message already in the entries (an edit, a deletion, reactions):
+ * replaces it through `fresher`; a message that is not there is not added (it may belong
+ * to a part of the history that is not loaded).
+ */
+export function replaceKnown(entries: readonly Entry[], message: Message): Entry[] {
+  const index = entries.findIndex((entry) => entry.kind === 'server' && entry.message.id === message.id)
+  if (index === -1) return entries as Entry[]
+  const current = (entries[index] as ServerEntry).message
+  const chosen = fresher(current, message)
+  if (chosen === current) return entries as Entry[]
+  const next = [...entries]
+  next[index] = { kind: 'server', key: serverKey(message.id), message: chosen }
+  return next
 }
 
 /**

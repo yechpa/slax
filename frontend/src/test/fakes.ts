@@ -4,7 +4,7 @@
  */
 import { signal } from '@preact/signals'
 import { vi } from 'vitest'
-import type { ConnectionState, EventHandlers, Realtime } from '../realtime/echo.ts'
+import type { ConnectionState, EventHandlers, PresenceListener, Realtime } from '../realtime/echo.ts'
 
 export interface FakeRequest {
   method: string
@@ -67,7 +67,26 @@ export const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 export class FakeRealtime implements Realtime {
   readonly state = signal<ConnectionState>('connected')
   readonly subscriptions = new Map<string, { handlers: EventHandlers; onError?: (status: number | null) => void }>()
+  readonly presence = new Map<string, PresenceListener>()
+  /** Every whisper sent, in order. */
+  readonly whispers: { channel: string; event: string; data: unknown }[] = []
   private readonly reconnectListeners = new Set<() => void>()
+
+  whisper(channel: string, event: string, data: unknown) {
+    if (this.subscriptions.has(channel)) this.whispers.push({ channel, event, data })
+  }
+
+  subscribePresence(name: string, listener: PresenceListener) {
+    this.presence.set(name, listener)
+    return () => {
+      this.presence.delete(name)
+    }
+  }
+
+  /** A whisper from another member, tagged with their id as Reverb does. */
+  emitWhisper(channel: string, event: string, data: unknown, userId: number) {
+    this.subscriptions.get(channel)?.handlers[event]?.(data, { user_id: String(userId) })
+  }
 
   subscribe(name: string, handlers: EventHandlers, onError?: (status: number | null) => void) {
     this.subscriptions.set(name, { handlers, onError })

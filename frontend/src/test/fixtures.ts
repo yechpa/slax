@@ -9,6 +9,7 @@ export const ME: Me = {
   locale: 'en',
   theme: 'console',
   is_admin: false,
+  workspace_id: 1,
 }
 
 export const DANA: UserSummary = { id: 2, name: 'dana', avatar_url: null }

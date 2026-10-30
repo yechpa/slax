@@ -1,8 +1,10 @@
 /** Typed calls to the Slax API. Permissions are the server's business: callers show its errors. */
 import type { Locale } from '../i18n/index.ts'
 import type { Theme } from '../theme.ts'
-import { apiPath, request } from './client.ts'
-import type { Channel, Me, Message, MessagePage } from './types.ts'
+import { apiPath, request, requestWithStatus } from './client.ts'
+import type { Channel, ChannelMember, Me, Message, MessagePage, PresenceState, RepliesPage, UserSummary } from './types.ts'
+
+const emojiPath = (messageId: number, emoji: string) => apiPath(`/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`)
 
 export const api = {
   /** 401 (ApiError 'unauthenticated') when signed out; quiet: start-up decides what that means. */
@@ -20,6 +22,15 @@ export const api = {
   channels: (signal?: AbortSignal) => request<Channel[]>(apiPath('/channels'), { signal }),
   channel: (id: number, signal?: AbortSignal) => request<Channel>(apiPath(`/channels/${id}`), { signal }),
   joinChannel: (id: number) => request<Channel>(apiPath(`/channels/${id}/join`), { method: 'POST' }),
+  leaveChannel: (id: number) => request<void>(apiPath(`/channels/${id}/leave`), { method: 'POST' }),
+  createChannel: (channel: { name: string; kind: 'public' | 'private'; topic: string | null }) =>
+    request<Channel>(apiPath('/channels'), { method: 'POST', body: channel }),
+  channelMembers: (id: number, signal?: AbortSignal) => request<ChannelMember[]>(apiPath(`/channels/${id}/members`), { signal }),
+  addMember: (id: number, userId: number) => request<unknown>(apiPath(`/channels/${id}/members`), { method: 'POST', body: { user_id: userId } }),
+  removeMember: (id: number, userId: number) => request<void>(apiPath(`/channels/${id}/members/${userId}`), { method: 'DELETE' }),
+  /** 201 for a new conversation, 200 for the existing one with exactly these people. */
+  openConversation: (userIds: number[]) => requestWithStatus<Channel>(apiPath('/dms'), { method: 'POST', body: { user_ids: userIds } }),
+  searchUsers: (q: string, signal?: AbortSignal) => request<UserSummary[]>(apiPath('/users'), { query: { q }, signal }),
   markRead: (channelId: number, messageId: number) =>
     request<void>(apiPath(`/channels/${channelId}/read`), { method: 'POST', body: { message_id: messageId } }),
 
@@ -27,8 +38,20 @@ export const api = {
   messages: (channelId: number, cursor: { before?: number; after?: number; limit?: number } = {}, signal?: AbortSignal) =>
     request<MessagePage>(apiPath(`/channels/${channelId}/messages`), { query: cursor, signal }),
   /** 201 for a new message, 200 for a replay of the same client_id: the same message either way. */
-  postMessage: (channelId: number, message: { body: string; client_id: string; parent_id?: number | null }) =>
+  postMessage: (channelId: number, message: { body: string; client_id: string; parent_id?: number | null; file_ids?: number[] }) =>
     request<Message>(apiPath(`/channels/${channelId}/messages`), { method: 'POST', body: message }),
+  /** A thread: its parent (or tombstone) and one page of replies, ascending ids. */
+  replies: (parentId: number, cursor: { before?: number; after?: number; limit?: number } = {}, signal?: AbortSignal) =>
+    request<RepliesPage>(apiPath(`/messages/${parentId}/replies`), { query: cursor, signal }),
+  editMessage: (id: number, body: string) => request<Message>(apiPath(`/messages/${id}`), { method: 'PATCH', body: { body } }),
+  deleteMessage: (id: number) => request<Message>(apiPath(`/messages/${id}`), { method: 'DELETE' }),
+  react: (id: number, emoji: string) => request<Message>(emojiPath(id, emoji), { method: 'PUT' }),
+  unreact: (id: number, emoji: string) => request<Message>(emojiPath(id, emoji), { method: 'DELETE' }),
+
+  /** Quiet: presence is background work, its 429 is not worth a toast. */
+  heartbeat: (active: boolean) => request<void>(apiPath('/presence/heartbeat'), { method: 'POST', body: { active }, quiet: true }),
+  presence: (userIds: number[], signal?: AbortSignal) =>
+    request<Record<string, PresenceState>>(apiPath('/presence'), { query: { 'user_ids[]': userIds }, signal, quiet: true }),
 }
 
 export type Api = typeof api
