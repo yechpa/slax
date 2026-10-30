@@ -8,6 +8,7 @@ use App\Events\UserBanned;
 use App\Models\Channel;
 use App\Models\File;
 use App\Models\Message;
+use App\Models\PushSubscription;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -50,6 +51,8 @@ class Moderation
         if ($changed) {
             $this->audit->record(AuditLogger::USER_BANNED, $user);
         }
+        // No more notifications on any of their devices (SendPushNotification checks the ban too).
+        PushSubscription::where('user_id', $user->id)->delete();
 
         try {
             $this->sessions->destroyAll($user);

@@ -12,6 +12,9 @@ use App\Services\FakeScannerClient;
 use App\Services\FakeTurnstile;
 use App\Services\Identity\E2eIdentityProvider;
 use App\Services\Identity\GoogleIdentityProvider;
+use App\Services\Push\FakeWebPushSender;
+use App\Services\Push\VapidWebPushSender;
+use App\Services\Push\WebPushSender;
 use App\Services\ScannerClient;
 use App\Services\Turnstile;
 use Illuminate\Broadcasting\BroadcastManager;
@@ -37,6 +40,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(Turnstile::class, $this->app->environment(['testing', 'e2e']) ? FakeTurnstile::class : Turnstile::class);
         // The scanner runs in the compose stack, E2E runs included: only unit and feature tests fake it.
         $this->app->singleton(ScannerClient::class, $this->app->environment('testing') ? FakeScannerClient::class : ScannerClient::class);
+        // No automated run (tests, the e2e stack) ever reaches a real push service.
+        $this->app->singleton(WebPushSender::class, $this->app->environment(['testing', 'e2e']) ? FakeWebPushSender::class : VapidWebPushSender::class);
         // Telegram when configured (never in tests), nothing otherwise.
         $this->app->singleton(AdminNotifier::class, fn ($app) => NotifierFactory::make($app->environment()));
     }
@@ -61,6 +66,9 @@ class AppServiceProvider extends ServiceProvider
         // Clients debounce typing (250 ms) and abort stale searches: about four a second at most.
         RateLimiter::for('user-search', fn (Request $request) => Limit::perMinute(60)->by('user:'.$request->user()->id));
         RateLimiter::for('uploads', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
+        // Turning notifications on or off on a device; the test button sends to every device.
+        RateLimiter::for('push-subscriptions', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
+        RateLimiter::for('push-test', fn (Request $request) => Limit::perMinute(3)->by('user:'.$request->user()->id));
         RateLimiter::for('admin-writes', fn (Request $request) => Limit::perMinute(30)->by('user:'.$request->user()->id));
 
         // Administrators are the ADMIN_EMAILS accounts (set at each sign-in); a banned one is not.

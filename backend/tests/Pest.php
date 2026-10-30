@@ -14,7 +14,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
+use Minishlink\WebPush\VAPID;
 use Tests\TestCase;
 
 /*
@@ -166,4 +168,43 @@ function uploadTo(User $user, Channel $channel, UploadedFile $file): TestRespons
 function storedFile(User $user, Channel $channel, array $attributes = []): File
 {
     return File::factory()->create(['user_id' => $user->id, 'channel_id' => $channel->id] + $attributes);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Web Push (a fake sender under APP_ENV=testing: no test reaches a push service)
+|--------------------------------------------------------------------------
+*/
+
+/** Push on, with a VAPID pair generated for this test run (never a real deployment's). */
+function enablePush(): array
+{
+    $keys = VAPID::createVapidKeys();
+    config([
+        'slax.push.public_key' => $keys['publicKey'],
+        'slax.push.private_key' => $keys['privateKey'],
+        'slax.push.subject' => 'mailto:push-test@example.test',
+    ]);
+
+    return $keys;
+}
+
+function base64url(string $bytes): string
+{
+    return rtrim(strtr(base64_encode($bytes), '+/', '-_'), '=');
+}
+
+/** What a browser sends: a push service URL and its own keys (a P-256 point and 16 random bytes). */
+function browserSubscription(string $endpoint = ''): array
+{
+    $key = openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]);
+    $ec = openssl_pkey_get_details($key)['ec'];
+
+    return [
+        'endpoint' => $endpoint ?: 'https://fcm.googleapis.com/fcm/send/'.Str::random(40),
+        'keys' => [
+            'p256dh' => base64url("\x04".str_pad($ec['x'], 32, "\0", STR_PAD_LEFT).str_pad($ec['y'], 32, "\0", STR_PAD_LEFT)),
+            'auth' => base64url(random_bytes(16)),
+        ],
+    ];
 }
