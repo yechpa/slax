@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-8s %s\n", $$1, $$2}'
@@ -79,3 +79,12 @@ fmt: env deps ## Fix formatting with Pint and Ruff
 	$(RUN) --no-deps app vendor/bin/pint
 	$(PYRUN) ruff check --fix .
 	$(PYRUN) ruff format .
+
+PLAYWRIGHT_IMAGE := mcr.microsoft.com/playwright:v1.64.1-noble
+
+screenshots: env deps ## Capture the design-system kitchen sink (2 themes x 3 languages) into docs/design
+	$(RUN) --no-deps frontend npx vite build --logLevel warn
+	docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) -e HOME=/tmp \
+		-v $(CURDIR)/frontend/dist:/dist:ro -v $(CURDIR)/frontend/scripts:/scripts:ro -v $(CURDIR)/docs/design:/out \
+		$(PLAYWRIGHT_IMAGE) sh -c 'npm install --silent --no-audit --no-fund --prefix /tmp/pw playwright-core@1.64.1 \
+		&& PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core/index.mjs node /scripts/design-screenshots.mjs'
