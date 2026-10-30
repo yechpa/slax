@@ -110,13 +110,17 @@ receives the channel's events until it disconnects.
 **Where:** `deploy/helm/slax/`, `docker/app/`, `docker/web/`, `.github/workflows/images.yml`,
 `.github/workflows/deploy-dev.yml`, `deploy/dev/BOOTSTRAP.md`.
 
+- **Reverb holds fewer secrets than the other Laravel pods** (its own keys, Redis's, the alert keys) and reaches
+  Redis only; the app, queue, scheduler and migration pods get every secret key, since they run the whole API.
 - **Single node, single replicas.** Reverb (no Redis scaling), the queue worker (ordering) and the scheduler run
   once, replaced with `Recreate`: a deployment drops WebSocket connections for a few seconds (clients reconnect).
   PostgreSQL and Redis restart only when their own settings change, not on an app deployment.
 - **A deployment does not wait for the CI tests.** Deploy dev follows the Images workflow on `main`; the tests ran
   on the pull request before the merge (require them with branch protection).
-- **Dev is reachable from the LAN** as well as the tailnet unless the optional firewall rule of BOOTSTRAP.md
-  step 4 is applied (k3s's ServiceLB listens on every node address); nothing is forwarded from the Internet.
+- **Dev is tailnet-only by a host firewall rule, not by k3s.** k3s's ServiceLB and API server listen on every node
+  address; the mandatory LAN guard (`deploy/dev/slax-lan-guard.sh`, BOOTSTRAP.md step 4.1, required by k3s) drops
+  80/443/6443 on the interfaces listed in `/etc/default/slax-lan-guard`. A new physical interface (USB adapter,
+  Wi-Fi switched on) is exposed to its LAN until it is added there. Nothing is forwarded from the Internet.
 - **Turnstile is allowed by the CSP on every page.** The SPA is one document, so `challenges.cloudflare.com` is in
   `script-src` and `frame-src` everywhere, not only on the sign-in screen.
 - **Dev file downloads** come from MinIO on `files.dev.slax.yechpa.com`, with `nosniff` and a sandboxing CSP added

@@ -14,7 +14,8 @@ push to main ──> Images (.github/workflows/images.yml)
 ```
 
 Steps marked **YOU DO THIS** need your accounts, your server or your secrets: nothing in the
-repository can do them for you. Commands run on `slax-dev` unless they say otherwise. Never
+repository can do them for you. Commands run on `slax-dev` unless they say otherwise, from a
+clone of the repository (it is public): `git clone https://github.com/yechpa/slax.git && cd slax`. Never
 paste a secret into a command line, a file in the repository, an issue or a chat: the
 commands below read secrets at hidden prompts.
 
@@ -119,10 +120,11 @@ install time).
      -o jsonpath='{.data.config\.json}'; echo      # "paths":["/mnt/ssd/k3s-storage"]
    ```
 
-   If `local-path-config` still shows another path, the cluster was first started without
-   the option: edit it once with
-   `sudo k3s kubectl -n kube-system edit configmap local-path-config` (set `paths` to
-   `["/mnt/ssd/k3s-storage"]`); no volume exists yet, so nothing has to move.
+   The setting that counts is `default-local-storage-path` in `config.yaml`: k3s writes
+   `local-path-config` from it at every start. If the ConfigMap still shows another path,
+   k3s was not restarted after the change (restart it), or someone edited the ConfigMap by
+   hand: such an edit is overwritten at the next start, so never rely on it; revert it if you
+   made one. No volume exists yet, so nothing has to move.
 
    What stays on the system disk: `/var/lib/kubelet` (pods' small `emptyDir` volumes, each
    capped by the chart) and `/var/log/pods` (container logs, rotated by the kubelet).
@@ -198,40 +200,63 @@ open to the Internet**.
 
 Check from any machine: `dig +short dev.slax.yechpa.com` → `100.x.y.z`.
 
-How Traefik is reached: k3s runs Traefik behind its built-in ServiceLB, which listens on
-ports 80 and 443 of **every** address of the node: the Tailscale address, and also the LAN
-address. Nothing reaches it from the Internet as long as your router forwards no port to
-`slax-dev` (**YOU DO THIS**: check that it does not). The ingress serves HTTPS only (port 80
-answers 404).
+### 4.1 Tailnet only: the LAN guard (mandatory)
 
-Optional hardening, so that even the LAN cannot reach 80, 443 and 6443 (only the tailnet
-can): drop those ports when they arrive on the physical interface. Find its name with
-`ip -br link` (e.g. `enp0s31f6`); the rule is in the `mangle` table so it applies before
-Kubernetes' port mappings:
+k3s runs Traefik behind its built-in ServiceLB, which listens on ports 80 and 443 of
+**every** address of the node, and the Kubernetes API listens on 6443 everywhere too: the
+Tailscale address, but also the LAN address. The DNS records alone do not stop a machine on
+your LAN from connecting. The LAN guard does: it drops TCP 80, 443 and 6443 arriving on the
+physical interfaces (rules in the `mangle` table, before Kubernetes' port mappings, IPv4 and
+IPv6). Traffic on `tailscale0`, on the loopback and between pods is untouched, **and so is
+every other port: SSH (22) keeps working from the LAN and from the tailnet**, so the guard
+cannot lock you out. k3s is made to require it, so the cluster never starts unguarded.
 
-```sh
-LAN_IF=enp0s31f6   # your interface
-sudo iptables -t mangle -I PREROUTING -i "$LAN_IF" -p tcp -m multiport --dports 80,443,6443 -j DROP
-# Persist it (re-applied at boot, before k3s):
-sudo tee /etc/systemd/system/slax-lan-guard.service >/dev/null <<EOF
-[Unit]
-Description=Drop 80/443/6443 arriving on the LAN interface (dev is tailnet-only)
-Before=k3s.service
-After=network-pre.target
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/sbin/iptables -t mangle -I PREROUTING -i $LAN_IF -p tcp -m multiport --dports 80,443,6443 -j DROP
-ExecStop=/usr/sbin/iptables -t mangle -D PREROUTING -i $LAN_IF -p tcp -m multiport --dports 80,443,6443 -j DROP
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload && sudo systemctl enable slax-lan-guard
-```
+**YOU DO THIS**
 
-SSH (22) is not affected. Test from another LAN machine: `curl -k https://<LAN IP>` must
-time out, while `curl https://dev.slax.yechpa.com/api/v1/health` from a tailnet device
-answers (after step 10).
+1. Your physical interfaces (every one that is not `lo`, `tailscale0`, `cni0`, `flannel.*` or
+   `veth*`; e.g. `enp0s31f6`, and `wlp2s0` if Wi-Fi is up):
+
+   ```sh
+   ip -br link
+   ```
+
+2. Install the guard, its settings and its unit, and make k3s require it:
+
+   ```sh
+   sudo install -m 0755 deploy/dev/slax-lan-guard.sh /usr/local/sbin/slax-lan-guard
+   echo 'LAN_INTERFACES="enp0s31f6"' | sudo tee /etc/default/slax-lan-guard   # your interface(s), space separated
+   sudo install -m 0644 deploy/dev/slax-lan-guard.service /etc/systemd/system/slax-lan-guard.service
+   sudo tee /etc/systemd/system/k3s.service.d/lan-guard.conf >/dev/null <<'EOF'
+   [Unit]
+   Requires=slax-lan-guard.service
+   After=slax-lan-guard.service
+   EOF
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now slax-lan-guard
+   sudo slax-lan-guard status          # every interface "guarded", for iptables and ip6tables
+   ```
+
+3. Prove it, from **another machine on the LAN** (Tailscale off on it, or another device),
+   with `LAN_IP` the server's LAN address (`ip -br addr`):
+
+   ```sh
+   curl -k --max-time 5 https://LAN_IP/            # must time out (exit code 28)
+   curl -k --max-time 5 https://LAN_IP:6443/version # must time out (exit code 28)
+   ssh you@LAN_IP true                              # still works
+   ```
+
+   and from a device on the tailnet: `curl https://dev.slax.yechpa.com/api/v1/health`
+   answers (after step 10).
+
+If something goes wrong, from the machine's own console (keyboard and screen), or over SSH
+(never blocked): `sudo systemctl disable --now slax-lan-guard` removes the rules (k3s then
+refuses to start until the guard is back, or until you delete `lan-guard.conf`). A new
+network interface (a USB adapter, Wi-Fi turned on) must be added to `LAN_INTERFACES`, then
+`sudo systemctl restart slax-lan-guard`.
+
+Also **YOU DO THIS**: check that your router forwards no port to `slax-dev`. Nothing is
+then reachable from the Internet, and the ingress serves HTTPS only (port 80 answers 404
+even on the tailnet).
 
 ## 5. Helm and cert-manager
 
@@ -302,7 +327,7 @@ the repository only has an example (`deploy/dev/cluster-issuer.example.yaml`, Cl
 
 ## 7. Namespace and the CI deployer
 
-Get the repository on the server (it is public): `git clone https://github.com/yechpa/slax.git && cd slax`.
+From the repository's clone on the server (see the top of this guide):
 
 **YOU DO THIS**
 
@@ -487,6 +512,10 @@ Once steps 1-10 are done, check the whole chain (Task 12, step 5). Tick each lin
         the same from `deploy/slax-app -c php` → `bool(true)`.
 12. [ ] Not reachable outside the tailnet: from a phone on mobile data with Tailscale off,
         `https://dev.slax.yechpa.com` does not load.
+12a. [ ] Not reachable from the LAN: from another LAN machine, `curl -k --max-time 5 https://<LAN IP>/`
+        and `curl -k --max-time 5 https://<LAN IP>:6443/version` both time out, while
+        `ssh <LAN IP>` still works; on the server `sudo slax-lan-guard status` says "guarded"
+        for every interface, and after a reboot too.
 13. [ ] Failure alert, once: in the Tailscale policy, temporarily remove the `tag:ci` rule;
         re-run the last *Deploy dev* run (Actions → Re-run jobs); it fails reaching the API
         and Telegram gets `[Dev] Deploy FAILED (failure): <sha>`. Put the rule back.
@@ -537,7 +566,7 @@ keeps them (StatefulSet volume claims are never deleted by Helm); delete the cla
 
 | Symptom | Look at | Usual cause |
 |---|---|---|
-| k3s does not start after a reboot | `systemctl status k3s`, `findmnt /mnt/ssd` | the disk is not mounted: by design (`RequiresMountsFor`); fix the mount |
+| k3s does not start after a reboot | `systemctl status k3s`, `findmnt /mnt/ssd`, `systemctl status slax-lan-guard` | the disk is not mounted, or the LAN guard failed: by design (k3s requires both); fix the cause |
 | Pods `ImagePullBackOff` | `kubectl -n slax describe pod <pod>` | packages still private on GHCR (step 9.3), or the SHA has no image (Images failed) |
 | Pod `CreateContainerConfigError` | `kubectl -n slax describe pod <pod>` | a required key missing from `slax-secrets` (step 8) |
 | `helm upgrade` fails in `pre-upgrade hooks` | `kubectl -n slax logs job/slax-migrate` | a migration failed; the release is rolled back, the old pods keep running |

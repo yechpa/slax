@@ -10,8 +10,9 @@
 # https://cert-manager.io/docs/configuration/acme/dns01/ . The credentials Secret lives in the
 # cert-manager namespace, never in this repository.
 #
-# Try the staging issuer first (untrusted certificates, generous rate limits), then switch
-# ingress.tls.clusterIssuer in values-dev.yaml to letsencrypt-dns.
+# values-dev.yaml uses letsencrypt-dns. For a first try that cannot hit Let's Encrypt's rate
+# limits, deploy once with --set ingress.tls.clusterIssuer=letsencrypt-dns-staging (untrusted
+# certificate), then deploy again without it.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
