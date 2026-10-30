@@ -26,3 +26,8 @@ ingress:
   tls:
     # The ClusterIssuer created by hand (deploy/dev/cluster-issuer.example.yaml).
     clusterIssuer: letsencrypt-dns
+
+# The uptime monitor checks the services inside the cluster only: dev.slax.yechpa.com
+# resolves to a tailnet address, and reaching it from a pod is not part of the design.
+monitor:
+  checkPublicUrl: false

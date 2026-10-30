@@ -210,6 +210,34 @@ backup:
       requests: { cpu: 20m, memory: 64Mi }
       limits: { cpu: "1", memory: 384Mi }
 
+# Uptime and disk watch from outside the app, every minute (deploy/monitoring/uptime.sh in
+# the slax-backup image; templates/monitor-cronjob.yaml): the web pod's health, Reverb,
+# PostgreSQL, Redis and, optionally, the public URL; the node's disks. Telegram alerts
+# "[<envLabel>] ..." with the Secret's TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID (none: logged only).
+monitor:
+  enabled: true
+  schedule: "* * * * *"
+  # Also GET https://<publicHost>/api/v1/health from the cluster: DNS, the edge proxy and its
+  # certificate. Needs the public name to resolve and route from inside the cluster.
+  checkPublicUrl: false
+  # A DOWN alert after this many failed checks in a row (one a minute).
+  failThreshold: 3
+  timeoutSeconds: 10
+  disk:
+    # Alert above this usage, again every realertHours while above; all clear below
+    # recoverPercent (nothing in between).
+    alertPercent: 80
+    recoverPercent: 75
+    realertHours: 6
+  activeDeadlineSeconds: 50
+  # Its state file (a few hundred bytes) and the probe of the volumes' disk.
+  storage:
+    size: 16Mi
+    storageClassName: local-path
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { cpu: 200m, memory: 64Mi }
+
 networkPolicy:
   enabled: true
   # Where the ingress controller runs (k3s: Traefik in kube-system). Used with
@@ -220,8 +248,9 @@ networkPolicy:
     podLabels:
       app.kubernetes.io/name: traefik
   # Pods that need no AWS credentials cannot reach the instance metadata service
-  # (169.254.169.254), so a compromised one cannot borrow the instance role: Reverb (the
-  # scanner has no egress at all). For clusters on EC2 (production).
+  # (169.254.169.254), so a compromised one cannot borrow the instance role: Reverb,
+  # PostgreSQL, Redis, the migrations and the uptime monitor (the scanner has no egress at
+  # all). For clusters on EC2 (production).
   denyInstanceMetadata: false
 
 migrations:

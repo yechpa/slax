@@ -1,0 +1,118 @@
+{{- if .Values.monitor.enabled }}
+{{- $component := "monitor" -}}
+{{- $m := .Values.monitor -}}
+{{- if ge (int $m.disk.recoverPercent) (int $m.disk.alertPercent) }}
+{{- fail "monitor.disk.recoverPercent must be below monitor.disk.alertPercent" }}
+{{- end }}
+{{- if ge (int $m.activeDeadlineSeconds) 60 }}
+{{- fail "monitor.activeDeadlineSeconds must be under 60 (a run must end before the next minute's)" }}
+{{- end }}
+# Uptime and disk watch from outside the app (deploy/monitoring/uptime.sh in the slax-backup
+# image), every minute: the web pod's /api/v1/health, Reverb's /up, PostgreSQL and Redis
+# (answering, no password sent) and, with monitor.checkPublicUrl, the public URL through the
+# edge (DNS, Caddy, TLS); the usage of the node's disk and of the volumes' disk. Telegram
+# "[Prod] ..." / "[Dev] ...": DOWN after monitor.failThreshold failures in a row, RECOVERED
+# once, DISK above monitor.disk.alertPercent (reminded every realertHours, all clear below
+# recoverPercent). It needs nothing from Laravel, so it still speaks when the app cannot.
+#
+# Least privilege: no Kubernetes API access at all (no token, no Role). Its state (failure
+# counts, what was alerted) lives in a file on its own small volume, which also measures the
+# volumes' disk: a local-path volume is a directory of the node's filesystem, so `df` on it
+# reports that filesystem (the disk PostgreSQL and Redis write to), and `df` on its emptyDir
+# reports the kubelet's (the node's system disk). No hostPath, no other pod's volume, no
+# kubelet API (nodes/proxy would allow far more than reading statistics).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" $component) }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ $m.storage.storageClassName | quote }}
+  resources:
+    requests:
+      storage: {{ $m.storage.size }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" $component) }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  schedule: {{ $m.schedule | quote }}
+  concurrencyPolicy: Forbid
+  # A run that could not start within 30 s is skipped: the next minute's comes soon.
+  startingDeadlineSeconds: 30
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      backoffLimit: 0
+      # Shorter than the schedule's minute: two runs never overlap.
+      activeDeadlineSeconds: {{ $m.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 12 }}
+        spec:
+          {{- include "slax.podCommon" . | nindent 10 }}
+          restartPolicy: Never
+          securityContext:
+            {{- include "slax.podSecurityContext" 70 | nindent 12 }}
+          containers:
+            - name: monitor
+              image: {{ include "slax.image" (dict "ctx" . "name" "backup") }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["uptime.sh"]
+              env:
+                - name: SLAX_ENV_LABEL
+                  value: {{ required "envLabel is required (Dev or Prod)" .Values.envLabel | quote }}
+                - name: MONITOR_CHECKS
+                  value: {{ include "slax.monitorChecks" . | quote }}
+                # The node's system disk (the kubelet's, holding emptyDir volumes and logs)
+                # and the disk of the local-path volumes; one filesystem counts once.
+                - name: MONITOR_DISKS
+                  value: "node=/tmp volumes=/state"
+                - name: MONITOR_STATE_FILE
+                  value: /state/uptime.state
+                - name: MONITOR_FAIL_THRESHOLD
+                  value: {{ $m.failThreshold | quote }}
+                - name: MONITOR_DISK_ALERT_PERCENT
+                  value: {{ $m.disk.alertPercent | quote }}
+                - name: MONITOR_DISK_RECOVER_PERCENT
+                  value: {{ $m.disk.recoverPercent | quote }}
+                - name: MONITOR_DISK_REALERT_SECONDS
+                  value: {{ mul $m.disk.realertHours 3600 | quote }}
+                - name: MONITOR_TIMEOUT
+                  value: {{ $m.timeoutSeconds | quote }}
+                # The names pg_isready presents (no password: it never signs in).
+                - name: PGUSER
+                  value: {{ .Values.postgres.username | quote }}
+                - name: PGDATABASE
+                  value: {{ .Values.postgres.database | quote }}
+                - name: HOME
+                  value: /tmp
+                {{- include "slax.secretRef" (dict "ctx" . "key" "TELEGRAM_BOT_TOKEN" "optional" true) | nindent 16 }}
+                {{- include "slax.secretRef" (dict "ctx" . "key" "TELEGRAM_CHAT_ID" "optional" true) | nindent 16 }}
+              securityContext:
+                {{- include "slax.containerSecurityContext" 70 | nindent 16 }}
+              resources:
+                {{- toYaml $m.resources | nindent 16 }}
+              volumeMounts:
+                - name: state
+                  mountPath: /state
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: state
+              persistentVolumeClaim:
+                claimName: {{ include "slax.name" (dict "ctx" . "component" $component) }}
+            - name: tmp
+              emptyDir:
+                sizeLimit: 16Mi
+{{- end }}

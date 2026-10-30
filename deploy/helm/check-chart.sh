@@ -79,9 +79,9 @@ for env in dev prod; do
     expect "$env: the scanner Service is ClusterIP" \
         "$(yq ea -N 'select(.kind == "Service" and .metadata.name == "slax-scanner") | .spec.type' "$file")" \
         "ClusterIP"
-    expect "$env: Reverb (and its /apps/ HTTP API) is reachable from the Laravel pods only" \
+    expect "$env: Reverb (and its /apps/ HTTP API) is reachable from the Laravel pods and the uptime monitor only" \
         "$(yq ea -N 'select(.kind == "NetworkPolicy" and .spec.podSelector.matchLabels["app.kubernetes.io/component"] == "reverb") | [.spec.ingress[].from[].podSelector.matchLabels["app.kubernetes.io/component"]] | sort | join(",")' "$file")" \
-        "app,queue,scheduler"
+        "app,monitor,queue,scheduler"
     empty "$env: no ingress routes to Reverb or under /app" \
         "$(yq ea -N 'select(.kind == "Ingress") | .spec.rules[].http.paths[] | select((.backend.service.name | test("reverb")) or (.path | test("^/apps?"))) | .path' "$file")"
 
@@ -100,6 +100,34 @@ for env in dev prod; do
     expect "$env: migrations seed the default workspace" \
         "$(yq ea -N 'select(.kind == "Job" and .metadata.name == "slax-migrate") | .spec.template.spec.containers[0].args[2] | test("db:seed --class=DefaultWorkspaceSeeder --force")' "$file")" \
         "true"
+
+    empty "$env: no pod uses the host (hostPath, host network/PID/IPC) or runs privileged" \
+        "$(yq e -N "$PODS"' | select((.spec.volumes // [] | any_c(has("hostPath"))) or .spec.hostNetwork == true or .spec.hostPID == true or .spec.hostIPC == true or ([.spec.containers[], (.spec.initContainers // [])[]] | any_c(.securityContext.privileged == true))) | .name' "$file")"
+    empty "$env: the chart grants no Kubernetes API access (no Role, ClusterRole or binding)" \
+        "$(yq ea -N 'select(.kind == "Role" or .kind == "ClusterRole" or .kind == "RoleBinding" or .kind == "ClusterRoleBinding") | .kind + "/" + .metadata.name' "$file")"
+
+    # The uptime monitor (deploy/monitoring/uptime.sh): outside the app, every minute.
+    expect "$env: the uptime monitor runs every minute, never two at once, each run ending within the minute" \
+        "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | .spec.schedule + "/" + .spec.concurrencyPolicy + "/" + (.spec.startingDeadlineSeconds | tostring) + "/" + (.spec.jobTemplate.spec.backoffLimit | tostring) + "/" + ((.spec.jobTemplate.spec.activeDeadlineSeconds < 60) | tostring)' "$file")" \
+        "* * * * */Forbid/30/0/true"
+    expect "$env: the uptime monitor keeps one finished Job of each kind" \
+        "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | (.spec.successfulJobsHistoryLimit | tostring) + "/" + (.spec.failedJobsHistoryLimit | tostring)' "$file")" \
+        "1/1"
+    expect "$env: the uptime monitor gets the alert keys only" \
+        "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | [.spec.jobTemplate.spec.template.spec.containers[0].env[].valueFrom.secretKeyRef.key | select(. != null)] | sort | join(",")' "$file")" \
+        "TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID"
+    expect "$env: the uptime monitor mounts its own volume and an emptyDir, nothing else" \
+        "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | [.spec.jobTemplate.spec.template.spec.volumes[] | .name + ":" + ([keys[] | select(. != "name")] | join("+")) + ":" + (.persistentVolumeClaim.claimName // "-")] | join(",")' "$file")" \
+        "state:persistentVolumeClaim:slax-monitor,tmp:emptyDir:-"
+    expect "$env: the uptime monitor watches the node's disk and the volumes' disk" \
+        "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | .spec.jobTemplate.spec.template.spec.containers[0].env[] | select(.name == "MONITOR_DISKS") | .value' "$file")" \
+        "node=/tmp volumes=/state"
+    expect "$env: the uptime monitor alerts after 3 failures, disk above 80 % (6 h reminders, all clear below 75 %)" \
+        "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | [.spec.jobTemplate.spec.template.spec.containers[0].env[] | select(.name == "MONITOR_FAIL_THRESHOLD" or .name == "MONITOR_DISK_ALERT_PERCENT" or .name == "MONITOR_DISK_RECOVER_PERCENT" or .name == "MONITOR_DISK_REALERT_SECONDS") | .value] | join(",")' "$file")" \
+        "3,80,75,21600"
+    expect "$env: PostgreSQL and Redis admit the uptime monitor (no password given to it)" \
+        "$(yq e -N 'select(.kind == "NetworkPolicy" and (.metadata.name == "slax-postgres" or .metadata.name == "slax-redis")) | .metadata.name + ":" + ([.spec.ingress[].from[].podSelector.matchLabels["app.kubernetes.io/component"] | select(. == "monitor")] | join(","))' "$file" | sort | tr '\n' ' ')" \
+        "slax-postgres:monitor slax-redis:monitor "
 done
 
 echo "== dev and prod differences"
@@ -114,13 +142,16 @@ echo "== dev: Traefik in front"
 expect "dev: the app's ingress sends / to the web pod only" \
     "$(yq ea -N 'select(.kind == "Ingress" and .metadata.name == "slax") | [.spec.rules[].http.paths[] | .path + ">" + .backend.service.name] | join(",")' "$dev")" \
     "/>slax-app"
-expect "dev: the web pod admits the ingress controller only" \
-    "$(yq ea -N 'select(.kind == "NetworkPolicy" and .metadata.name == "slax-app") | [.spec.ingress[].from[].podSelector.matchLabels["app.kubernetes.io/name"]] | join(",")' "$dev")" \
-    "traefik"
+expect "dev: the web pod admits the ingress controller and the uptime monitor only" \
+    "$(yq ea -N 'select(.kind == "NetworkPolicy" and .metadata.name == "slax-app") | [.spec.ingress[].from[].podSelector.matchLabels | (.["app.kubernetes.io/component"] // .["app.kubernetes.io/name"])] | join(",")' "$dev")" \
+    "traefik,monitor"
 expect "dev: MinIO's static keys are given to the Laravel pods" \
     "$(yq ea -N 'select(.kind == "Deployment" and .metadata.name == "slax-queue") | [.spec.template.spec.containers[0].env[].name | select(test("^AWS_"))] | join(",")' "$dev")" \
     "AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY"
-empty "dev: no backup CronJob (no real S3)" "$(yq ea -N 'select(.kind == "CronJob") | .metadata.name' "$dev")"
+empty "dev: no backup CronJob (no real S3)" "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name != "slax-monitor") | .metadata.name' "$dev")"
+expect "dev: the uptime monitor checks the services inside the cluster, says [Dev]" \
+    "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | .spec.jobTemplate.spec.template.spec.containers[0].env[] | select(.name == "MONITOR_CHECKS" or .name == "SLAX_ENV_LABEL") | .value' "$dev" | tr '\n' ' ')" \
+    "Dev app=http://slax-app/api/v1/health reverb=http://slax-reverb:8080/up postgres=pg://slax-postgres:5432 redis=redis://slax-redis:6379 "
 
 echo "== prod: Caddy on the host in front, real S3 through the instance role"
 empty "prod: no Ingress (no ingress controller; Caddy on the host)" "$(yq ea -N 'select(.kind == "Ingress" or .kind == "Middleware") | .metadata.name' "$prod")"
@@ -129,9 +160,12 @@ expect "prod: the web Service has the fixed address Caddy proxies to (deploy/aws
     "ClusterIP 10.43.0.80:80"
 caddy_upstream="$(grep -Eo 'SLAX_UPSTREAM:[0-9.]+:[0-9]+' deploy/aws/Caddyfile 2>/dev/null | head -1)"
 expect "prod: the Caddyfile's default upstream is that address" "$caddy_upstream" "SLAX_UPSTREAM:10.43.0.80:80"
-expect "prod: no pod may connect to the web pod (only the node: Caddy, probes)" \
-    "$(yq ea -N 'select(.kind == "NetworkPolicy" and .metadata.name == "slax-app") | (.spec.policyTypes | join(",")) + "/" + (.spec.ingress | length | tostring)' "$prod")" \
-    "Ingress/0"
+expect "prod: no pod may connect to the web pod but the uptime monitor (otherwise only the node: Caddy, probes)" \
+    "$(yq e -N 'select(.kind == "NetworkPolicy" and .metadata.name == "slax-app") | (.spec.policyTypes | join(",")) + "/" + ([.spec.ingress[].from[] | (.podSelector.matchLabels["app.kubernetes.io/component"] // "other") + "+namespaces:" + ((.namespaceSelector != null) | tostring)] | join(",")) + "/" + ([.spec.ingress[].ports[].port] | join(","))' "$prod")" \
+    "Ingress/monitor+namespaces:false/8080"
+expect "prod: the uptime monitor also checks the public URL (DNS, Caddy, TLS), says [Prod]" \
+    "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | .spec.jobTemplate.spec.template.spec.containers[0].env[] | select(.name == "MONITOR_CHECKS" or .name == "SLAX_ENV_LABEL") | .value' "$prod" | tr '\n' ' ')" \
+    "Prod app=http://slax-app/api/v1/health reverb=http://slax-reverb:8080/up postgres=pg://slax-postgres:5432 redis=redis://slax-redis:6379 public=https://slax.yechpa.com/api/v1/health "
 empty "prod: no static AWS key anywhere (instance role)" \
     "$(yq ea -N '.. | select(tag == "!!map" and has("name")) | .name | select(test("^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)$"))' "$prod")"
 expect "prod: S3 on AWS itself in eu-central-1 (no endpoint override)" \
@@ -142,7 +176,7 @@ expect "prod: previews come from the bucket's own host (CSP img-src = presigned 
     "https://slax-files-example.s3.eu-central-1.amazonaws.com"
 expect "prod: only app, queue, scheduler, backup and restore-check may reach the instance metadata service" \
     "$(yq e -N 'select(.kind == "NetworkPolicy" and (.spec.policyTypes | any_c(. == "Egress"))) | .spec.podSelector.matchLabels["app.kubernetes.io/component"] + ":" + ((.spec.egress[0].to[0].ipBlock.except // ["none"]) | join(","))' "$prod" | sort | tr '\n' ' ')" \
-    "migrate:169.254.169.254/32 postgres:169.254.169.254/32 redis:169.254.169.254/32 reverb:169.254.169.254/32 scanner:none "
+    "migrate:169.254.169.254/32 monitor:169.254.169.254/32 postgres:169.254.169.254/32 redis:169.254.169.254/32 reverb:169.254.169.254/32 scanner:none "
 expect "prod: the app's scheduler knows the backups bucket (backups:check-freshness)" \
     "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SLAX_BACKUP_BUCKET + " " + .data.SLAX_BACKUP_PREFIX' "$prod")" \
     "slax-backups-example pg"
@@ -151,7 +185,7 @@ expect "prod: the Service address is in the static band (10.43.0.0-10.43.0.255),
     "$(yq e -N 'select(.kind == "Service" and .metadata.name == "slax-app") | .spec.clusterIP' "$prod" | grep -Ex '10\.43\.0\.([1-9]?[0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-4])' | grep -vEx '10\.43\.0\.(0|1|10)' | sed 's/.*/true/')" \
     "true"
 expect "prod: daily backup at 02:30 and weekly restore check Sunday 03:30, Jerusalem time, never overlapping" \
-    "$(yq e -N 'select(.kind == "CronJob") | .metadata.name + "=" + .spec.schedule + "@" + .spec.timeZone + "/" + .spec.concurrencyPolicy' "$prod" | sort | tr '\n' ' ')" \
+    "$(yq e -N 'select(.kind == "CronJob" and .metadata.name != "slax-monitor") | .metadata.name + "=" + .spec.schedule + "@" + .spec.timeZone + "/" + .spec.concurrencyPolicy' "$prod" | sort | tr '\n' ' ')" \
     "slax-backup=30 2 * * *@Asia/Jerusalem/Forbid slax-restore-check=30 3 * * 0@Asia/Jerusalem/Forbid "
 expect "prod: the backup gets the database password and the alert keys only" \
     "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-backup") | [.spec.jobTemplate.spec.template.spec.containers[0].env[].valueFrom.secretKeyRef.key | select(. != null)] | sort | join(",")' "$prod")" \
@@ -162,9 +196,9 @@ expect "prod: the restore check gets the alert keys only" \
 expect "prod: the restore check's throwaway PostgreSQL is a sidecar on the pod's loopback" \
     "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-restore-check") | .spec.jobTemplate.spec.template.spec.initContainers[0] | .restartPolicy + " " + (.args | join(" ") | test("listen_addresses=127.0.0.1") | tostring)' "$prod")" \
     "Always true"
-expect "prod: PostgreSQL admits the backup (not the restore check)" \
+expect "prod: PostgreSQL admits the backup and the uptime monitor (not the restore check)" \
     "$(yq ea -N 'select(.kind == "NetworkPolicy" and .metadata.name == "slax-postgres") | [.spec.ingress[].from[].podSelector.matchLabels["app.kubernetes.io/component"] | select(. != null)] | join(",")' "$prod")" \
-    "backup"
+    "backup,monitor"
 expect "prod: backups need the instance role: credentials from IMDS, region set, HOME writable" \
     "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-backup") | [.spec.jobTemplate.spec.template.spec.containers[0].env[] | select(.name == "AWS_REGION" or .name == "HOME" or .name == "BACKUP_BUCKET") | .name + "=" + .value] | join(",")' "$prod")" \
     "BACKUP_BUCKET=slax-backups-example,AWS_REGION=eu-central-1,HOME=/tmp"

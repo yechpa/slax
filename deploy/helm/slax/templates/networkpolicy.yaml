@@ -17,11 +17,12 @@ spec:
   policyTypes: ["Ingress"]
 ---
 {{- if .Values.ingress.enabled }}
-# The web pod: from the ingress controller only.
+# The web pod: from the ingress controller{{ if .Values.monitor.enabled }} and the uptime monitor (GET /api/v1/health){{ end }} only.
 {{- else }}
-# The web pod: from no pod at all. Only its own node reaches it: the front proxy on the host
-# (production's Caddy, through app.service.clusterIP) and the kubelet's probes. k3s's
-# network policy engine (kube-router) always admits traffic from the pod's local node.
+# The web pod: from no pod at all{{ if .Values.monitor.enabled }} but the uptime monitor (GET /api/v1/health){{ end }}. Otherwise
+# only its own node reaches it: the front proxy on the host (production's Caddy, through
+# app.service.clusterIP) and the kubelet's probes. k3s's network policy engine (kube-router)
+# always admits traffic from the pod's local node.
 {{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -34,15 +35,22 @@ spec:
     matchLabels:
       {{- include "slax.selectorLabels" (dict "ctx" . "component" "app") | nindent 6 }}
   policyTypes: ["Ingress"]
-  {{- if .Values.ingress.enabled }}
+  {{- if or .Values.ingress.enabled .Values.monitor.enabled }}
   ingress:
     - from:
+        {{- if .Values.ingress.enabled }}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $ic.namespace }}
           podSelector:
             matchLabels:
               {{- toYaml $ic.podLabels | nindent 14 }}
+        {{- end }}
+        {{- if .Values.monitor.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" . "component" "monitor") | nindent 14 }}
+        {{- end }}
       ports:
         - port: 8080
           protocol: TCP
@@ -51,7 +59,8 @@ spec:
   {{- end }}
 ---
 # Reverb: the WebSocket through the web pod's nginx, and its HTTP API (/apps/) from the
-# Laravel processes. Nobody else.
+# Laravel processes{{ if .Values.monitor.enabled }}; the uptime monitor for GET /up (the API itself needs the app's
+# secret){{ end }}. Nobody else.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -65,7 +74,7 @@ spec:
   policyTypes: ["Ingress"]
   ingress:
     - from:
-        {{- range list "app" "queue" "scheduler" }}
+        {{- range concat (list "app" "queue" "scheduler") (ternary (list "monitor") list .Values.monitor.enabled) }}
         - podSelector:
             matchLabels:
               {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" .) | nindent 14 }}
@@ -74,7 +83,7 @@ spec:
         - port: 8080
           protocol: TCP
 {{- if .Values.networkPolicy.denyInstanceMetadata }}
-{{- range $component := list "reverb" "postgres" "redis" "migrate" }}
+{{- range $component := concat (list "reverb" "postgres" "redis" "migrate") (ternary (list "monitor") list .Values.monitor.enabled) }}
 ---
 # {{ $component }} needs no AWS credentials: everything but the EC2 instance metadata service,
 # so it can never borrow the instance role. (Pods that may: app, queue, scheduler, backup,
@@ -125,7 +134,8 @@ spec:
   egress: []
 {{- range $component, $port := dict "postgres" 5432 "redis" 6379 }}
 ---
-# {{ $component }}: from the Laravel processes (app, queue, scheduler, migrations){{ if eq $component "redis" }} and Reverb{{ end }}{{ if and (eq $component "postgres") $ctx.Values.backup.enabled }} and the backup{{ end }}.
+# {{ $component }}: from the Laravel processes (app, queue, scheduler, migrations){{ if eq $component "redis" }} and Reverb{{ end }}{{ if and (eq $component "postgres") $ctx.Values.backup.enabled }} and the backup{{ end }}{{ if $ctx.Values.monitor.enabled }};
+# the uptime monitor too (is it answering? no password: it never signs in){{ end }}.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -153,6 +163,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" "backup") | nindent 14 }}
+        {{- end }}
+        {{- if $ctx.Values.monitor.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" "monitor") | nindent 14 }}
         {{- end }}
       ports:
         - port: {{ $port }}

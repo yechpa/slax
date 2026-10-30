@@ -309,6 +309,22 @@ volumes.
 checksum/config: {{ include "slax.config" . | sha256sum }}
 {{- end -}}
 
+{{/*
+The uptime monitor's checks (deploy/monitoring/uptime.sh): "name=URL ..." through the
+in-cluster Services, plus the public URL with monitor.checkPublicUrl.
+*/}}
+{{- define "slax.monitorChecks" -}}
+{{- $checks := list
+  (printf "app=http://%s/api/v1/health" (include "slax.name" (dict "ctx" . "component" "app")))
+  (printf "reverb=http://%s:8080/up" (include "slax.name" (dict "ctx" . "component" "reverb")))
+  (printf "postgres=pg://%s:5432" (include "slax.name" (dict "ctx" . "component" "postgres")))
+  (printf "redis=redis://%s:6379" (include "slax.name" (dict "ctx" . "component" "redis"))) -}}
+{{- if .Values.monitor.checkPublicUrl -}}
+{{- $checks = append $checks (printf "public=%s/api/v1/health" (include "slax.publicUrl" .)) -}}
+{{- end -}}
+{{- join " " $checks -}}
+{{- end -}}
+
 {{/* env: of the backup and restore-check containers (deploy/backup/*.sh). */}}
 {{- define "slax.backupEnv" -}}
 {{- $bucket := required "backup.bucket is required with backup.enabled (--set backup.bucket=<backups bucket printed by deploy/aws/provision.sh>)" .Values.backup.bucket -}}

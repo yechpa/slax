@@ -62,6 +62,12 @@ backup:
   enabled: true
   bucket: ""
 
+# The uptime monitor also checks https://slax.yechpa.com/api/v1/health from the node: the
+# Elastic IP, Caddy and its certificate (a pod reaches the instance's own public address
+# through the Internet gateway, like any visitor).
+monitor:
+  checkPublicUrl: true
+
 # Sized for 2 GiB with k3s beside it (docs/runbook.md, "Sizing"): the sum of the requests
 # stays under 800 MiB; limits allow short bursts. Task 14's load test may move to t4g.medium.
 reverb:
