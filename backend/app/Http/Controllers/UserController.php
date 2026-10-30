@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Channel;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * The people directory, for picking someone (a new conversation, a member to add).
@@ -17,7 +19,12 @@ class UserController extends Controller
 
     public const MAX_QUERY = 50;
 
-    /** GET /users?q=&limit=: non-banned users (not the caller) whose name contains `q`, case-insensitively. */
+    /**
+     * GET /users?q=&limit=&not_in_channel=: non-banned users (not the caller) whose name contains
+     * `q`, case-insensitively. `not_in_channel` leaves out the members of that channel (adding
+     * people to it), whatever their number; a channel the caller may not see is a 404, like
+     * one that does not exist.
+     */
     public function index(Request $request): JsonResponse
     {
         if (is_string($q = $request->query('q'))) {
@@ -26,7 +33,14 @@ class UserController extends Controller
         $data = $request->validate([
             'q' => ['required', 'string', 'min:1', 'max:'.self::MAX_QUERY],
             'limit' => ['sometimes', 'integer', 'between:1,'.self::MAX_RESULTS],
+            'not_in_channel' => ['sometimes', 'integer', 'min:1'],
         ]);
+
+        $channel = null;
+        if (isset($data['not_in_channel'])) {
+            $channel = Channel::findOrFail((int) $data['not_in_channel']);
+            Gate::authorize('view', $channel);
+        }
 
         // LIKE wildcards in the query are literal characters.
         $pattern = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $data['q']).'%';
@@ -34,6 +48,7 @@ class UserController extends Controller
         $users = User::query()
             ->whereNull('banned_at')
             ->whereKeyNot($request->user()->id)
+            ->when($channel, fn ($users) => $users->whereDoesntHave('channels', fn ($channels) => $channels->whereKey($channel->id)))
             ->whereRaw("name ILIKE ? ESCAPE '\\'", [$pattern])
             // Case-insensitive, whatever the database collation: "amy" before "Bob".
             ->orderByRaw('lower(name)')

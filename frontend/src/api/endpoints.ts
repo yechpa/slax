@@ -43,7 +43,9 @@ export const api = {
   removeMember: (id: number, userId: number) => request<void>(apiPath(`/channels/${id}/members/${userId}`), { method: 'DELETE' }),
   /** 201 for a new conversation, 200 for the existing one with exactly these people. */
   openConversation: (userIds: number[]) => requestWithStatus<Channel>(apiPath('/dms'), { method: 'POST', body: { user_ids: userIds } }),
-  searchUsers: (q: string, signal?: AbortSignal) => request<UserSummary[]>(apiPath('/users'), { query: { q }, signal }),
+  /** `notInChannel`: its members are left out (by the server, however many they are). */
+  searchUsers: (q: string, signal?: AbortSignal, notInChannel?: number) =>
+    request<UserSummary[]>(apiPath('/users'), { query: { q, not_in_channel: notInChannel }, signal }),
   markRead: (channelId: number, messageId: number) =>
     request<void>(apiPath(`/channels/${channelId}/read`), { method: 'POST', body: { message_id: messageId } }),
 

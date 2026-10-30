@@ -150,3 +150,30 @@ test('me_tells_the_workspace_id_for_the_presence_channel', function () {
 
     asUser($user)->getJson('/api/v1/me')->assertOk()->assertJsonPath('workspace_id', Workspace::default()->id);
 });
+
+test('user_search_can_leave_out_the_members_of_a_channel_whatever_their_number', function () {
+    $caller = User::factory()->create(['name' => 'Owner']);
+    $room = Channel::factory()->private()->create(['workspace_id' => Workspace::default()->id]);
+    $room->addMember($caller, Channel::ROLE_OWNER);
+    // More members than the member list shows (200): none of them is offered again.
+    $members = User::factory()->count(205)->sequence(fn ($s) => ['name' => sprintf('Member %03d', $s->index)])->create();
+    foreach ($members as $member) {
+        $room->addMember($member);
+    }
+    $outsider = User::factory()->create(['name' => 'Member outside']);
+
+    expect(searchUsers($caller, ['q' => 'member', 'not_in_channel' => $room->id])->assertOk()->json('*.id'))->toBe([$outsider->id])
+        // Without it, the directory as usual.
+        ->and(searchUsers($caller, ['q' => 'member', 'limit' => 3])->assertOk()->json('*.id'))->toHaveCount(3);
+});
+
+test('user_search_never_reveals_the_members_of_a_channel_the_caller_cannot_see', function () {
+    $caller = User::factory()->create(['name' => 'Curious']);
+    $secret = Channel::factory()->private()->create(['workspace_id' => Workspace::default()->id]);
+    $secret->addMember(User::factory()->create(['name' => 'Hidden member']));
+
+    // Same answer for a private channel of others and for one that does not exist.
+    searchUsers($caller, ['q' => 'hidden', 'not_in_channel' => $secret->id])->assertNotFound();
+    searchUsers($caller, ['q' => 'hidden', 'not_in_channel' => 999999])->assertNotFound();
+    searchUsers($caller, ['q' => 'hidden', 'not_in_channel' => 'abc'])->assertUnprocessable()->assertJsonValidationErrors('not_in_channel');
+});

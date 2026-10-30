@@ -7,7 +7,7 @@
  * At the limit (`full`) the field takes no more text, says why (`fullText`, announced), and
  * keeps the focus: Backspace still removes the last chip.
  */
-import { useEffect, useId, useState } from 'preact/hooks'
+import { useEffect, useId, useRef, useState } from 'preact/hooks'
 import { api } from '../api/endpoints.ts'
 import type { UserSummary } from '../api/types.ts'
 import { t } from '../i18n/index.ts'
@@ -28,6 +28,8 @@ type Props = {
   onRemove?: (person: UserSummary) => void
   /** Not offered (already chosen, already members). */
   exclude?: readonly number[]
+  /** Not offered: the members of this channel, however many (left out by the server). */
+  notInChannel?: number
   /** No more can be picked: the field says so (`fullText`) and takes no more. */
   full?: boolean
   /** Why no more can be picked ("7 people at most."). */
@@ -35,9 +37,11 @@ type Props = {
   disabled?: boolean
 }
 
-export function PeoplePicker({ label, placeholder, hint, selected, onSelect, onRemove, exclude = [], full = false, fullText, disabled = false }: Props) {
+export function PeoplePicker({ label, placeholder, hint, selected, onSelect, onRemove, exclude = [], notInChannel, full = false, fullText, disabled = false }: Props) {
   const chat = useChat()
-  const [search] = useState(() => createSearch<UserSummary>((q, signal) => api.searchUsers(q, signal)))
+  const channel = useRef(notInChannel)
+  channel.current = notInChannel
+  const [search] = useState(() => createSearch<UserSummary>((q, signal) => api.searchUsers(q, signal, channel.current)))
   const [text, setText] = useState('')
   const [active, setActive] = useState(0)
   const inputId = useId()

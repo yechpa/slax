@@ -186,6 +186,8 @@ describe('channels', () => {
     await new Promise((resolve) => setTimeout(resolve, 300))
     await settle()
     expect([...dialog.querySelectorAll('[role="option"] .people-picker__name')].map((n) => plain(n.textContent))).toEqual(['נעם'])
+    // However many members there are (the list shows 200 at most), the server leaves them out.
+    expect(app.server.calls.filter((c) => c.path === '/api/v1/users').map((c) => c.query.get('not_in_channel'))).toEqual(['7'])
     ;(dialog.querySelector('[role="option"]') as HTMLElement).click()
     await settle()
     expect(calls).toEqual([`add ${NOAM.id}`])

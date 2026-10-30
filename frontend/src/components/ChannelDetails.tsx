@@ -169,6 +169,8 @@ export function ChannelDetails({ channel, label, onClose }: Props) {
             placeholder={t('people.placeholder')}
             selected={[]}
             exclude={list.map((m) => m.id)}
+            // The list above shows at most 200 members: the server leaves all of them out.
+            notInChannel={channel.id}
             disabled={busy}
             onSelect={(person) => void add(person)}
           />
