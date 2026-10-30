@@ -49,8 +49,8 @@ receives the channel's events until it disconnects.
 **Where:** `frontend/src/components/Workspace.tsx`, `frontend/src/store/threads.ts`, `frontend/src/store/presence.ts`.
 
 - **New conversations and invitations.** Nothing is pushed to a user who is added to a private room or a new
-  conversation (there is no per-user event channel yet), so the client refetches `GET /channels` every minute and
-  when the tab comes back after 15 s away. A conversation started by someone else therefore shows up within a
+  conversation (there is no per-user event channel yet), so the client refetches `GET /channels` every minute while
+  the tab is visible (never in a hidden tab), and once when the tab comes back after 15 s away. A conversation started by someone else therefore shows up within a
   minute, and its messages from then on are live. *Intended fix:* a `user.{id}` private channel with
   `channel.added`, which the "rekey" channel above would also need.
 - **Thread summaries.** The server does not push a parent's `reply_count`/`last_reply_at` when a reply comes or
@@ -60,6 +60,14 @@ receives the channel's events until it disconnects.
   is loading, in the same second as the page's own last reply, is assumed to be counted by the page.
 - **Presence** is polled every 30 s for the people on screen; the workspace presence channel only says who
   connected or disconnected (shown at once). Going idle, or coming back, shows for others at their next poll.
+- **REST answers against live events.** Messages carry no version. A REST answer (a page, the answer to my
+  reaction, edit or post) gives way, message by message, to the copy the client holds when a live event reached
+  that message while the request was on its way (the event may be newer); an edit answer still applies its body
+  when it is the newer edit, and a deletion always applies. This relies on every change being broadcast to every
+  member, the requester included, in the order of the changes. The single queue worker (see below) keeps the
+  order in which broadcasts are queued; two requests changing one message at the same moment could still queue
+  theirs in the other order (as could several workers), and the older snapshot would show until the next change.
+  *Intended fix:* a per-message version, bumped with every change (reply counts included) and compared on merge.
 - **Reactions beyond the 50 listed reactors.** A broadcast lists the first 50 reactors only, so for a reaction
   with more, whether I am one of them is kept from what the client knew (a REST answer, or my own toggle), never
   guessed from the broadcast.
