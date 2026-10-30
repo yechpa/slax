@@ -50,6 +50,34 @@
         <!-- Redis holds presence: a database of its own (flushed by the presence tests), never the dev one. -->
         <env name="REDIS_DB" value="15" force="true"/>
         <server name="REDIS_DB" value="15" force="true"/>
+        <!-- Hermetic: CI starts from `cp .env.example .env`, a developer's .env may be older or
+             edited. Everything below that the suite relies on is pinned here, whatever .env says.
+             The SPA helpers send `Referer: http://localhost/`; Sanctum only starts a session for a
+             stateful origin, so that origin is pinned (.env.example's localhost:8080 would make
+             every session-based endpoint answer 400 session_unavailable). -->
+        <env name="APP_URL" value="http://localhost" force="true"/>
+        <server name="APP_URL" value="http://localhost" force="true"/>
+        <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost" force="true"/>
+        <server name="SANCTUM_STATEFUL_DOMAINS" value="localhost" force="true"/>
+        <env name="SESSION_DOMAIN" value="null" force="true"/>
+        <server name="SESSION_DOMAIN" value="null" force="true"/>
+        <env name="GOOGLE_CLIENT_ID" value="" force="true"/>
+        <server name="GOOGLE_CLIENT_ID" value="" force="true"/>
+        <env name="GOOGLE_CLIENT_SECRET" value="" force="true"/>
+        <server name="GOOGLE_CLIENT_SECRET" value="" force="true"/>
+        <env name="GOOGLE_REDIRECT_URI" value="http://localhost/auth/google/callback" force="true"/>
+        <server name="GOOGLE_REDIRECT_URI" value="http://localhost/auth/google/callback" force="true"/>
+        <env name="TURNSTILE_SECRET" value="" force="true"/>
+        <server name="TURNSTILE_SECRET" value="" force="true"/>
+        <!-- Never a real alert from a test run, whatever the developer's .env holds. -->
+        <env name="TELEGRAM_BOT_TOKEN" value="" force="true"/>
+        <server name="TELEGRAM_BOT_TOKEN" value="" force="true"/>
+        <env name="TELEGRAM_CHAT_ID" value="" force="true"/>
+        <server name="TELEGRAM_CHAT_ID" value="" force="true"/>
+        <env name="SLAX_ENV_LABEL" value="Dev" force="true"/>
+        <server name="SLAX_ENV_LABEL" value="Dev" force="true"/>
+        <env name="SLAX_DEMO_RESET_ENABLED" value="false" force="true"/>
+        <server name="SLAX_DEMO_RESET_ENABLED" value="false" force="true"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
