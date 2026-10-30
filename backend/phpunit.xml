@@ -47,6 +47,9 @@
         <server name="SESSION_DRIVER" value="array" force="true"/>
         <env name="ADMIN_EMAILS" value="" force="true"/>
         <server name="ADMIN_EMAILS" value="" force="true"/>
+        <!-- Redis holds presence: a database of its own (flushed by the presence tests), never the dev one. -->
+        <env name="REDIS_DB" value="15" force="true"/>
+        <server name="REDIS_DB" value="15" force="true"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

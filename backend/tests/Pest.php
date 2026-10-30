@@ -2,7 +2,9 @@
 
 use App\Models\Channel;
 use App\Models\User;
+use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /*
@@ -43,4 +45,26 @@ function publicChannel(User $owner, string $name = 'team'): Channel
     $channel->members()->attach($owner->id, ['role' => 'owner']);
 
     return $channel;
+}
+
+/** Channel callbacks live on the driver instance: register them again on the fresh Reverb one. */
+function useReverbDriver(): void
+{
+    config(['broadcasting.default' => 'reverb']);
+    app(BroadcastManager::class)->purge('reverb');
+    require base_path('routes/channels.php');
+}
+
+/** POST /broadcasting/auth for any channel name, e.g. `private-channel.3` or `presence-workspace.1`. */
+function authorizeChannelName(User $user, string $channelName, string $socketId = '1234.5678'): TestResponse
+{
+    return asUser($user)->postJson('/broadcasting/auth', [
+        'socket_id' => $socketId,
+        'channel_name' => $channelName,
+    ]);
+}
+
+function authorizeChannel(User $user, int $channelId, string $socketId = '1234.5678'): TestResponse
+{
+    return authorizeChannelName($user, "private-channel.{$channelId}", $socketId);
 }

@@ -12,7 +12,6 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Message as GuzzleMessage;
 use GuzzleHttp\Psr7\Response;
-use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
@@ -21,7 +20,6 @@ use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
-use Illuminate\Testing\TestResponse;
 use Psr\Http\Message\RequestInterface;
 use Tests\Support\WebSocketClient;
 
@@ -54,22 +52,6 @@ function fakeReverb(Response ...$responses): ArrayObject
     useReverbDriver();
 
     return $history;
-}
-
-/** Channel callbacks live on the driver instance: register them again on the fresh Reverb one. */
-function useReverbDriver(): void
-{
-    config(['broadcasting.default' => 'reverb']);
-    app(BroadcastManager::class)->purge('reverb');
-    require base_path('routes/channels.php');
-}
-
-function authorizeChannel(User $user, int $channelId, string $socketId = '1234.5678'): TestResponse
-{
-    return asUser($user)->postJson('/broadcasting/auth', [
-        'socket_id' => $socketId,
-        'channel_name' => "private-channel.{$channelId}",
-    ]);
 }
 
 /** Checks a Pusher HTTP API signature the way Reverb does. */
