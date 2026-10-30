@@ -23,3 +23,4 @@ dist-design-system
 *.njsproj
 *.sln
 *.sw?
+dist-e2e

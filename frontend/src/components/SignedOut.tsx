@@ -59,7 +59,7 @@ export function isAllowedSignInRedirect(value: string, { allowSameOrigin }: { al
   return allowSameOrigin && url.origin === location.origin
 }
 
-/** The Vite dev server, or a build made for end-to-end tests (VITE_E2E=true). */
+/** The Vite dev server, or the end-to-end build (`vite build --mode e2e`, the only one allowed VITE_E2E: see vite.config.ts). */
 const fakeProviderAllowed = () => import.meta.env.DEV || import.meta.env.VITE_E2E === 'true'
 
 type Props = {

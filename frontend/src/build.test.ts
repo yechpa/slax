@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { build } from 'vite'
+import { build, resolveConfig } from 'vite'
 import { afterAll, describe, expect, it } from 'vitest'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -25,6 +25,24 @@ describe('production build', () => {
     expect(existsSync(join(out, 'design-system.html'))).toBe(false)
     expect(existsSync(join(out, 'app-preview.html'))).toBe(false)
     expect(existsSync(join(out, 'fonts', 'OFL.txt'))).toBe(true)
+  }, 60_000)
+
+  it('refuses VITE_E2E in any build but the end-to-end one, so production can never carry it', async () => {
+    process.env.VITE_E2E = 'true'
+    try {
+      await expect(buildInto()).rejects.toThrow(/VITE_E2E is reserved for the end-to-end build/)
+      await expect(buildInto('design-system')).rejects.toThrow(/VITE_E2E is reserved/)
+    } finally {
+      delete process.env.VITE_E2E
+    }
+  }, 60_000)
+
+  it('builds the end-to-end app (make e2e) into its own directory, never dist', async () => {
+    const config = await resolveConfig({ root, mode: 'e2e', logLevel: 'silent' }, 'build')
+    expect(config.build.outDir).toMatch(/dist-e2e$/)
+    expect(config.define?.['import.meta.env.VITE_E2E']).toBe('"true"')
+    const production = await resolveConfig({ root, logLevel: 'silent' }, 'build')
+    expect(production.define?.['import.meta.env.VITE_E2E']).toBeUndefined()
   }, 60_000)
 
   it('builds the kitchen sink only in the design-system mode (used by make screenshots)', async () => {
