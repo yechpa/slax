@@ -69,6 +69,9 @@ for env in dev prod; do
         "$(yq ea -N 'select(.kind == "ConfigMap") | .data.APP_URL' "$file")"
 
     # Sessions: 14 days, rolling, from session.lifetimeMinutes (a tapped notification must not land on sign-in).
+    expect "$env: sessions in Redis, a guest's kept 2 hours at most (SESSION_DRIVER=redis-tiered)" \
+        "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SESSION_DRIVER' "$file")" \
+        "redis-tiered"
     expect "$env: sessions last 14 days, rolling (SESSION_LIFETIME=20160 from session.lifetimeMinutes; never expire on close)" \
         "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SESSION_LIFETIME + "/" + (.data.SESSION_EXPIRE_ON_CLOSE // "unset")' "$file")" \
         "20160/unset"

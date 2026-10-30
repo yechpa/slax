@@ -17,14 +17,17 @@ use App\Services\Push\VapidWebPushSender;
 use App\Services\Push\WebPushSender;
 use App\Services\ScannerClient;
 use App\Services\Turnstile;
+use App\Session\TieredSessionHandler;
 use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Session;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -48,6 +51,19 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Redis sessions with a short lifetime for guests (TieredSessionHandler); the same Redis
+        // connection and cache store as Laravel's own `redis` driver.
+        Session::extend('redis-tiered', function (Application $app) {
+            $config = $app['config'];
+            if ($config->get('session.encrypt')) {
+                throw new \LogicException('SESSION_DRIVER=redis-tiered needs SESSION_ENCRYPT off: it reads who is signed in from the payload.');
+            }
+            $cache = clone $app['cache']->store($config->get('session.store') ?: 'redis');
+            $cache->getStore()->setConnection($config->get('session.connection'));
+
+            return new TieredSessionHandler($cache, (int) $config->get('session.lifetime'), (int) $config->get('session.guest_lifetime', 120));
+        });
+
         // The API returns bare resources and arrays, not {"data": ...} envelopes.
         JsonResource::withoutWrapping();
 

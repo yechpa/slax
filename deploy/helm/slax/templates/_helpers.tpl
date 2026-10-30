@@ -135,7 +135,7 @@ DB_USERNAME: {{ .Values.postgres.username | quote }}
 REDIS_CLIENT: phpredis
 REDIS_HOST: {{ include "slax.name" (dict "ctx" . "component" "redis") | quote }}
 REDIS_PORT: "6379"
-SESSION_DRIVER: redis
+SESSION_DRIVER: redis-tiered
 SESSION_SECURE_COOKIE: "true"
 SESSION_LIFETIME: {{ include "slax.sessionLifetime" . | quote }}
 CACHE_STORE: redis

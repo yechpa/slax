@@ -38,6 +38,10 @@ return [
     // session.lifetimeMinutes.
     'lifetime' => (int) env('SESSION_LIFETIME', 20160),
 
+    // Slax: a session nobody is signed in to (a visitor, a crawler, a sign-in on its way) is
+    // kept this many minutes at most by the redis-tiered store (App\Session\TieredSessionHandler).
+    'guest_lifetime' => (int) env('SESSION_GUEST_LIFETIME', 120),
+
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
 
     /*
