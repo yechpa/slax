@@ -482,18 +482,20 @@ In the app, as an administrator (`ADMIN_EMAILS`): Administration → a person �
 "Banned" list lifts a ban. Every action lands in the audit log (Administration → Audit), with
 the visitor's real address. An administrator listed in `ADMIN_EMAILS` cannot be banned.
 
-**Family accounts (members).** Everyone who signs up with Google is a `demo` account, like
-any visitor of the public demo: in production the nightly reset (4.7) deletes what they
-write, and the account after 7 days without activity. To keep a relative's messages:
-Administration → Accounts (most recently seen first; ask them to sign in once, then look at
-the top) → **Make member** → confirm. It is audited (`user.made_member`) and sent to Telegram;
-**Make demo account** undoes it (`user.made_demo`, a warning: their content goes at the next
-reset). An administrator (`ADMIN_EMAILS`) is always a member and has no button. No e-mail
-address is configured anywhere for this (decision: the click, not an allowlist in env). Do it
-the same day they sign up: whatever they wrote before the promotion and the next 03:00 reset
-is deleted with the demo content. In production the public channels are the demo's, readable
-by every visitor: create a **private** channel for the family (New channel → private) and add
-each member to it. The family guide for them: [family-guide.md](family-guide.md).
+**Family accounts (members).** Everyone who signs up with Google is a `demo` account, like any
+visitor of the public demo: in production the nightly reset (4.7) deletes what they write, and
+the account after 7 days without activity. To keep a relative's messages: Administration →
+Accounts (most recently seen first; ask them to sign in once, then look at the top) → **Make
+member** → confirm. It is audited (`user.made_member`) and sent to Telegram; **Make demo
+account** undoes it (`user.made_demo`, a warning: their content goes at the next reset). An
+administrator (`ADMIN_EMAILS`) is always a member and has no button. Promote during the day,
+not around 03:00: the reset decides who is a demo account when it starts, so a promotion while
+it runs counts only the next night. No e-mail address is configured anywhere for this
+(decision: the click, not an allowlist in env). Do it the same day they sign up: whatever they
+wrote before the promotion and the next 03:00 reset is deleted with the demo content. In
+production the public channels are the demo's, readable by every visitor: create a **private**
+channel for the family (New channel → private) and add each member to it. The family guide for
+them: [family-guide.md](family-guide.md).
 
 ### 4.7 Demo reset
 
@@ -523,18 +525,56 @@ conversations, not with the demo's visitors.
 | k3s, the node | `journalctl -u k3s --since -1h`; `free -m`; `df -h /`; `vmstat 5` |
 | First boot | `/var/log/slax-bootstrap.log`, `cloud-init status --long` |
 
-**Sessions** (Redis, `SESSION_LIFETIME` from the chart's `session.lifetimeMinutes`, default
-20160 = 14 days, rolling: every request starts the count again). A tapped notification after a
-quiet week opens the conversation, not Google sign-in. Sign-out and a ban end a session at once
-whatever the lifetime (the id is tombstoned in Redis for that long, so a late request cannot
-bring it back). To change it: `--set session.lifetimeMinutes=<minutes>` (a whole number, at
-least 1; `config.extraEnv` cannot set it), the pods restart on the config checksum; existing
-sessions keep the expiry they were last given until their next request. Every session (also a
-visitor's without an account, from the app's first call) stays in Redis that long, a few
-hundred bytes each, under the `noeviction` limit (96 MB in production): check with `kubectl -n
-slax exec statefulset/slax-redis -- redis-cli info memory | grep used_memory_human` and `...
-redis-cli info keyspace` (sessions are in the cache database). Should it fill up, lower
-`session.lifetimeMinutes` first.
+**Sessions** (Redis, `SESSION_DRIVER=redis-tiered`). A signed-in session lasts
+`SESSION_LIFETIME`, the chart's `session.lifetimeMinutes` (default 20160 = 14 days), rolling:
+every request starts the count again, so a tapped notification after a quiet week opens the
+conversation, not Google sign-in. A session nobody is signed in to (the app's first call from a
+visitor, a crawler, the CSRF cookie, a sign-in on its way to Google, the fresh session after a
+sign-out) is kept **2 hours at most** (`session.guest_lifetime`), so anonymous traffic cannot
+pile up for two weeks. Sign-out and a ban end a session at once whatever the lifetime (the id
+is tombstoned in Redis, so a late request cannot bring it back). To change the lifetime:
+`--set session.lifetimeMinutes=<minutes>` (a whole number, at least 1; `config.extraEnv`
+cannot set it); the pods restart on the config checksum.
+
+**Redis memory.** One Redis holds, in database 0, the sessions (keys
+`slax-database-slax-cache-<40 characters>`), presence, the session index and tombstones,
+and the **queue** (`slax-database-queues:*`); database 1 holds the cache and the rate limits.
+`maxmemory` is 96 MB in production with `--maxmemory-policy volatile-lru`: when full, Redis
+evicts the least recently used keys **that have an expiry** (all of the above but the queue)
+instead of refusing writes, so the app keeps working; the price is that some people are signed
+out (their session evicted) and presence or a rate-limit window may restart. A guest session is
+about 420 bytes: 96 MB holds roughly 200 000 of them, a sustained 30 new visitors a second for 2
+hours. Check:
+
+```sh
+kubectl -n slax exec statefulset/slax-redis -- redis-cli info memory | grep -E '^(used_memory_human|maxmemory_human|maxmemory_policy)'
+kubectl -n slax exec statefulset/slax-redis -- redis-cli info stats | grep -E '^(evicted_keys|rejected_connections)'
+kubectl -n slax exec statefulset/slax-redis -- redis-cli info keyspace
+kubectl -n slax exec statefulset/slax-redis -- redis-cli -n 0 llen slax-database-queues:default
+```
+
+What to expect and do:
+
+- **`evicted_keys` grows, the app works.** A burst of visitors or a crawler: their sessions
+  expire within 2 hours of the burst ending, and memory comes back by itself. Nothing to do,
+  unless signed-in people complain of being signed out: then find the source (Caddy has no
+  access log by design; `kubectl -n slax logs deploy/slax-app -c web` shows nginx's) and block
+  it upstream.
+- **Requests fail with 500 and the logs say `OOM command not allowed`.** Nothing evictable is
+  left: the queue itself has grown (a stopped or failing queue worker, `llen` above in the
+  thousands). Fix the worker first (`kubectl -n slax logs deploy/slax-queue`, `rollout restart
+  deployment/slax-queue`); the backlog drains.
+- **Free the sessions at once** (everyone is signed out and signs in again with Google; the
+  family keeps their notifications): delete the session keys of database 0, never the whole
+  database (it holds the queue):
+
+  ```sh
+  kubectl -n slax exec statefulset/slax-redis -- sh -c \
+    "redis-cli -n 0 --scan --pattern 'slax-database-slax-cache-*' | xargs -r -n 500 redis-cli -n 0 unlink"
+  ```
+
+  `redis-cli -n 1 flushdb` empties the cache database only: harmless (rate limits and alert
+  grouping start again) but it frees no session.
 
 ### 4.9 Scale
 

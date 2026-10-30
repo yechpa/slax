@@ -175,8 +175,12 @@ receives the channel's events until it disconnects.
 - **Sessions last 14 days without use, renewed by every request** (`session.lifetimeMinutes`, was 2 hours), so a
   notification tapped after a quiet week opens the conversation, not Google sign-in. The cost: a lost or shared
   device that nobody signs out of stays signed in that long after its last use (indefinitely while used); sign-out
-  there, or a ban by an administrator, ends it at once. Every session, a visitor's without an account too, stays
-  in Redis that long (runbook 4.8, memory). There is no "sign out everywhere" for oneself yet; an administrator's
+  there, or a ban by an administrator, ends it at once. Only a signed-in session gets the 14 days: a session
+  nobody signed in to (a visitor, a crawler, the CSRF cookie, a sign-in on its way) is kept 2 hours at most
+  (`SESSION_DRIVER=redis-tiered`), and Redis evicts sessions and cache before it refuses writes (`volatile-lru`,
+  never the queue; runbook 4.8). A flood of new visitors can therefore sign some people out, not stop the app.
+  **No rate limit per address on session creation** (`GET /sanctum/csrf-cookie`, the app's first call): nginx's
+  `limit_req` would need the visitor's real address behind Caddy (trusted `X-Forwarded-For`), deferred. There is no "sign out everywhere" for oneself yet; an administrator's
   ban, then lifting it, does it (and also removes the account's notification devices).
 - **After a deploy, a sign-out can leave no offline shell for a while.** The refill after a sign-out is all or
   nothing: the old worker still in control refills its own list, whose hashed files the deploy removed, so it gets
@@ -344,6 +348,9 @@ receives the channel's events until it disconnects.
   account, an administrator's or a member's messages in it included (Ruling P, pinned by `DemoResetTest`); so are a
   channel a demo account created and a thread a demo account started, with the members' messages and replies in
   them. The demo's sample messages get exactly their sample reactions back each night, anyone's others go.
+- **A promotion during the 03:00 reset can still lose content.** The reset lists the demo accounts first, then
+  deletes files from S3, then the rows: an account made a member while it runs (a few seconds, longer with many
+  files) is still treated as demo in that run. Promote people during the day, ideally before they write anything.
 - **Family accounts are promoted by hand.** A relative signs up as a demo account like any visitor and becomes a
   `member` when an administrator clicks "Make member" (Administration → Accounts). Until then, what they write is
   demo content: it goes at the next nightly reset on the public showcase. No e-mail allowlist exists (addresses

@@ -166,8 +166,11 @@ postgres:
 
 redis:
   image: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
-  # Sessions, cache and queue. noeviction: a full Redis refuses writes instead of dropping
-  # queued jobs.
+  # Sessions, cache, rate limits, presence and the queue. volatile-lru: when full, Redis evicts
+  # the least recently used keys that carry an expiry (sessions, cache, throttles, presence,
+  # tombstones: all of them do), never the queue's lists and sets (they have none), so a flood
+  # of sessions signs a few people out instead of failing every request. A guest's session
+  # lives 2 hours at most (SESSION_DRIVER=redis-tiered).
   maxmemory: 128mb
   storage:
     size: 1Gi

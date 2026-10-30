@@ -254,8 +254,10 @@ Short records: the choice, why, and what it costs.
    transactions around every write, and room for full-text search later.
 3. **Redis for presence, with TTLs.** A heartbeat refreshes a key that expires on its own:
    presence is right after a crash or a deploy without any cleanup. Redis also carries
-   sessions, cache and the queue (`noeviction`: a full Redis refuses rather than dropping
-   jobs).
+   sessions, cache and the queue (`volatile-lru`: when full, Redis evicts the least recently
+   used keys that carry an expiry, which every session, cache entry, rate limit and presence
+   key does, and never the queue, whose keys have none; a guest's session lives 2 hours at
+   most, a signed-in one 14 days).
 4. **The scanner as a separate Python service.** Parsing hostile files is the riskiest
    code; it runs alone, read-only, with no network egress, behind one small API. It also
    shows the multi-service shape the spec asked for.
@@ -296,9 +298,11 @@ Short records: the choice, why, and what it costs.
     notification tap must not land on a sign-in (on iOS the installed app keeps its own cookies,
     and Google sign-in from there is a chore). Sign-out and an administrator's ban end sessions
     at once whatever the lifetime: the session id is tombstoned in Redis, and the client stops
-    presence and holds every request before it sends the logout. Cost: a lost, unlocked device
-    stays signed in until someone signs out there or an administrator bans the account; idle
-    visitors' sessions sit in Redis longer.
+    presence and holds every request before it sends the logout. Only signed-in sessions get the
+    14 days: a session nobody signed in to (a visitor of the demo, a crawler) is kept 2 hours at
+    most (`SESSION_DRIVER=redis-tiered`), so anonymous traffic cannot fill Redis. Cost: a lost,
+    unlocked device stays signed in until someone signs out there or an administrator bans the
+    account.
 16. **Family accounts by an administrator's click, not an allowlist.** Everyone signs up as a
     `demo` account; Administration → Accounts makes a relative a `member`, whose content the
     nightly demo reset keeps. No e-mail address in configuration or the repository. Cost: one

@@ -111,3 +111,34 @@ test('signing in with Google: the guest session is short, the signed-in one long
         ->and(app(UserSessions::class)->ended($signedIn))->toBeTrue();
     withSessionCookie($signedIn)->getJson('/api/v1/me')->assertUnauthorized();
 });
+
+test('everything Slax keeps in Redis but the queue carries an expiry, so volatile-lru can evict it when full', function () {
+    // Production's stores, on the test database: cache and rate limits in Redis too.
+    config(['cache.default' => 'redis', 'cache.stores.redis.connection' => 'default', 'cache.stores.redis.lock_connection' => 'default']);
+    app('cache')->forgetDriver(['redis', 'array']);
+    app()->forgetInstance('cache.store');
+    app('session')->forgetDrivers();
+    app()->forgetInstance('session.store');
+    $this->seed(Database\Seeders\DefaultWorkspaceSeeder::class);
+    app(IdentityProvider::class)->returns(new GoogleProfile(sub: 'sub-2', email: 'bob@example.com', emailVerified: true, name: 'Bob', avatar: null));
+
+    $guest = sessionIdOf(test()->withHeaders(['Referer' => 'http://localhost/'])->postJson('/api/v1/auth/google/start', ['turnstile_token' => 'ok'])->assertOk());
+    $id = sessionIdOf(withSessionCookie($guest)->get('/auth/google/callback?'.http_build_query(['code' => 'c', 'state' => session('google_oauth')['state']]))->assertRedirect('/'));
+    $general = App\Models\Channel::where('name', 'general')->sole();
+    withSessionCookie($id)->postJson('/api/v1/presence/heartbeat', ['active' => true])->assertNoContent();
+    withSessionCookie($id)->getJson('/api/v1/presence?'.http_build_query(['user_ids' => [1]]))->assertOk();
+    withSessionCookie($id)->postJson("/api/v1/channels/{$general->id}/join")->assertSuccessful();
+    withSessionCookie($id)->postJson("/api/v1/channels/{$general->id}/messages", ['body' => 'hello', 'client_id' => (string) Str::uuid()])->assertCreated();
+    withSessionCookie($id)->postJson('/api/v1/auth/logout')->assertNoContent();
+    // The rate limiters (built at boot on the test's array store) and the audit's once-per keys, on Redis.
+    $limiter = new Illuminate\Cache\RateLimiter(app('cache')->store('redis'));
+    $limiter->hit('messages:user:1', 60);
+    app('cache')->store('redis')->add('audit:once:x', 1, 600);
+    app(UserSessions::class)->remember(User::sole(), 'another-session');
+
+    $keys = Redis::connection()->keys('*');
+    expect(count($keys))->toBeGreaterThan(5);
+    $prefix = (string) config('database.redis.options.prefix');
+    $forever = collect($keys)->filter(fn (string $key) => Redis::connection()->ttl(Str::after($key, $prefix)) < 0)->values()->all();
+    expect($forever)->toBe([]);
+});

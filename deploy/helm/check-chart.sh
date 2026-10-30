@@ -82,6 +82,11 @@ for env in dev prod; do
         "$(yq e -N 'select(.kind == "Job") | .spec.template.spec.containers[].env[]? | select(.name == "SESSION_LIFETIME") | .value' "$file")" \
         "20160"
 
+    # Redis evicts only keys with an expiry when full (sessions, cache), never the queue.
+    expect "$env: Redis is capped and evicts keys with an expiry only (volatile-lru: never the queue)" \
+        "$(yq e -N 'select(.kind == "StatefulSet" and .metadata.name == "slax-redis") | .spec.template.spec.containers[0].args[0] | capture("--maxmemory-policy (?P<p>[a-z-]+)") | .p' "$file")" \
+        "volatile-lru"
+
     # Pod specs of every workload: Deployments, StatefulSets, Jobs and CronJobs.
     empty "$env: every pod runs as non-root with the RuntimeDefault seccomp profile and no API token" \
         "$(yq ea -N "$PODS"' | select(.spec.securityContext.runAsNonRoot != true or .spec.securityContext.seccompProfile.type != "RuntimeDefault" or .spec.automountServiceAccountToken != false) | .name' "$file")"
