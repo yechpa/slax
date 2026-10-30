@@ -11,7 +11,7 @@
  * a real notch, Safari's own toolbars) is listed in docs/known-limitations.md for a real device.
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { api, closeAll, isolated, ui, uniq, type Person } from '../support/app.ts'
+import { api, closeAll, isolated, realtimeSwitch, ui, uniq, type Person } from '../support/app.ts'
 import { plural, t, type Locale, type Theme } from '../support/i18n.ts'
 import {
   drawerToggle,
@@ -310,7 +310,8 @@ for (const locale of ['en', 'he'] satisfies Locale[]) {
   test(`the notch and the home indicator stay clear: header, composer, drawer, thread, notices (${locale})`, async ({ browser }) => {
     let person: Person | undefined
     try {
-      person = await signInPhone(browser, `Notch ${uniq('n')}`, { locale })
+      let realtime: Awaited<ReturnType<typeof realtimeSwitch>> | undefined
+      person = await signInPhone(browser, `Notch ${uniq('n')}`, { locale, beforeSignIn: async (page) => void (realtime = await realtimeSwitch(page)) })
       const { page } = person
       const view = ui(person)
       const { last } = await roomWithMessages(person, 1)
@@ -343,7 +344,8 @@ for (const locale of ['en', 'he'] satisfies Locale[]) {
       // The drawer itself opens from the very edge at the inline start (its background under the notch)…
       expect(gaps(await box(drawer), width, locale).start).toBeLessThanOrEqual(0.5)
       // …and its content is clear of it.
-      await clear('first channel', page.locator('.sidebar a.nav-item').first(), { top: true, start: true })
+      await clear('brand', page.locator('.sidebar__brand'), { top: true, start: true })
+      await clear('current channel', page.locator('.sidebar a.nav-item[aria-current="page"]'), { start: true })
       await clear('account menu', view.userMenu, { bottom: true, start: true })
       await page.keyboard.press('Escape')
       await expect(view.nav).toBeHidden()
@@ -357,7 +359,9 @@ for (const locale of ['en', 'he'] satisfies Locale[]) {
       await expect(view.thread).toHaveCount(0)
 
       // A notice in the top band (the connection lost): the band takes the inset, the header no longer does.
+      // (Offline emulation alone does not drop an open WebSocket in Chromium: it is cut too.)
       await person.context.setOffline(true)
+      await realtime?.cut()
       const notice = page.locator('.conn-banner')
       await expect(notice).toBeVisible({ timeout: 20_000 })
       await clear('connection notice', notice, { top: true })
@@ -388,7 +392,17 @@ async function expectNoSidewaysScroll(page: Page, where: string): Promise<void> 
     const width = document.documentElement.clientWidth
     const scrollers = document.querySelectorAll<HTMLElement>('.message-list, .thread__log, .sidebar__scroll, .dialog__body, .shell__main')
     for (const element of [document.documentElement, document.body, ...scrollers]) {
-      if (element.scrollWidth > element.clientWidth + 1) found.push(`${element.className || element.tagName} scrolls sideways (${element.scrollWidth} > ${element.clientWidth})`)
+      if (element.scrollWidth <= element.clientWidth + 1) continue
+      // Which of its descendants stick out (to fix the right one).
+      const frame = element.getBoundingClientRect()
+      const culprits = [...element.querySelectorAll<HTMLElement>('*')]
+        .filter((child) => {
+          const rect = child.getBoundingClientRect()
+          return rect.width > 0 && (rect.right > frame.right + 1 || rect.left < frame.left - 1)
+        })
+        .slice(0, 3)
+        .map((child) => `${child.className || child.tagName} "${(child.textContent ?? '').trim().slice(0, 24)}"`)
+      found.push(`${element.className || element.tagName} scrolls sideways (${element.scrollWidth} > ${element.clientWidth}): ${culprits.join(', ')}`)
     }
     for (const element of document.querySelectorAll<HTMLElement>('button, a[href], input, textarea, select, [role="menuitem"]')) {
       if (element.closest('[inert]')) continue
@@ -468,6 +482,18 @@ test('dialogs fit the screen and scroll inside, not the page behind them', async
     expect(await page.evaluate(() => [scrollX, scrollY])).toEqual([0, 0])
     await expect(dialog.locator('.dialog__header')).toBeInViewport({ ratio: 1 })
     await expectNoSidewaysScroll(page, 'browse dialog')
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+
+    // A form with its buttons, on a short screen: the buttons stay in view, the body scrolls.
+    await page.setViewportSize({ width: 360, height: 420 })
+    await openDrawer(person)
+    await page.getByRole('button', { name: t('en', 'nav.newChannel') }).tap()
+    const create = page.getByRole('dialog', { name: t('en', 'channel.create.title') })
+    await expect(create).toBeInViewport({ ratio: 1 })
+    await expect(create.getByRole('button', { name: t('en', 'channel.create.submit') })).toBeInViewport({ ratio: 1 })
+    await expect(create.getByLabel(t('en', 'channel.create.name'))).toBeInViewport({ ratio: 1 })
+    expect(await create.locator('.dialog__body').evaluate((element) => element.scrollHeight > element.clientHeight), 'its body scrolls').toBe(true)
   } finally {
     await closeAll(person)
   }

@@ -7,10 +7,15 @@ import { api, newContext, signInThroughGoogle, ui, uniq, type Person } from './a
 import { dirOf, t, type Locale, type Theme } from './i18n.ts'
 
 /** A new person, signed in on a phone (the project's device), on their first channel. */
-export async function signInPhone(browser: Browser, name: string, { locale = 'en', theme = 'console', keyboard = false }: { locale?: Locale; theme?: Theme; keyboard?: boolean } = {}): Promise<Person> {
+export async function signInPhone(
+  browser: Browser,
+  name: string,
+  { locale = 'en', theme = 'console', keyboard = false, beforeSignIn }: { locale?: Locale; theme?: Theme; keyboard?: boolean; beforeSignIn?: (page: Page) => Promise<void> } = {},
+): Promise<Person> {
   const context = await newContext(browser, { locale, theme })
   if (keyboard) await emulateKeyboard(context)
   const page = await context.newPage()
+  await beforeSignIn?.(page)
   const email = `${uniq('phone')}@example.test`
   await signInThroughGoogle(page, { email, name, locale })
   await expect(page.locator('.shell__main .message-list')).toBeVisible()
