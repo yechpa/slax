@@ -153,7 +153,8 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
         edited={message.edited_at !== null}
         compact={compact}
         presence={presence}
-        class={actionsOpen || editing ? 'message--actions-open' : undefined}
+        // message--menu: on touch screens its "more" button gets a column of its own (chat.css).
+        class={actionsOpen || editing ? 'message--menu message--actions-open' : actions ? 'message--menu' : undefined}
         editor={
           editing ? (
             <MessageEditor

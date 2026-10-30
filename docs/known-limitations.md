@@ -43,3 +43,24 @@ receives the channel's events until it disconnects.
 - Authorization for `channel.{id}.{epoch}` requires current membership *and* the current epoch.
 - An alternative with the same shape is end-to-end encrypted channels (`private-encrypted-`) with a per-epoch
   shared secret.
+
+## Chat client: what is polled rather than pushed
+
+**Where:** `frontend/src/components/Workspace.tsx`, `frontend/src/store/threads.ts`, `frontend/src/store/presence.ts`.
+
+- **New conversations and invitations.** Nothing is pushed to a user who is added to a private room or a new
+  conversation (there is no per-user event channel yet), so the client refetches `GET /channels` every minute and
+  when the tab comes back after 15 s away. A conversation started by someone else therefore shows up within a
+  minute, and its messages from then on are live. *Intended fix:* a `user.{id}` private channel with
+  `channel.added`, which the "rekey" channel above would also need.
+- **Thread summaries.** The server does not push a parent's `reply_count`/`last_reply_at` when a reply comes or
+  goes; the client recomputes them from the replies' own events (each reply counted once). Two gaps remain until
+  the next refresh of the channel: deleting the *latest* reply of a thread that is not open keeps the old "last
+  reply" time (the previous reply's time is not known), and a reply event that arrives while the channel's page
+  is loading, in the same second as the page's own last reply, is assumed to be counted by the page.
+- **Presence** is polled every 30 s for the people on screen; the workspace presence channel only says who
+  connected or disconnected (shown at once). Going idle, or coming back, shows for others at their next poll.
+- **Reactions beyond the 50 listed reactors.** A broadcast lists the first 50 reactors only, so for a reaction
+  with more, whether I am one of them is kept from what the client knew (a REST answer, or my own toggle), never
+  guessed from the broadcast.
+

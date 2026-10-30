@@ -319,17 +319,28 @@
     flex: none;
   }
 
-  /* dir="auto": a long topic is clipped at its own end (an English topic in a Hebrew header
-     keeps its beginning); match-parent: a short one still sits at the interface's start. */
   .channel-header__topic {
     flex: 1 1 0;
     min-inline-size: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--color-text-dim);
     font-size: var(--text-xs);
-    text-align: match-parent;
+    text-align: start;
+  }
+
+  /*
+   * One line of user text in its own direction (dir="auto"), placed at the interface's start
+   * by its parent, and clipped with an ellipsis at its own end: an English topic in a Hebrew
+   * header keeps its beginning (a clip done by the parent would cut it at the RTL end).
+   */
+  .clip-own {
+    display: inline-block;
+    max-inline-size: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
   }
 
   /* ── Message pane ────────────────────────────────────── */

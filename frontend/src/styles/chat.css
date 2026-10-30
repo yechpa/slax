@@ -28,11 +28,11 @@
 
   /* No hover on a touch screen: the "more" button stays, in its own column, 44px. */
   @media (hover: none) {
-    .message {
+    .message--menu {
       grid-template-columns: var(--avatar-size) minmax(0, 1fr) auto;
     }
 
-    .message__actions {
+    .message--menu .message__actions {
       position: static;
       align-self: start;
       padding: 0;
@@ -169,6 +169,12 @@
     .reaction {
       min-block-size: 2.75rem;
       padding-inline: var(--space-2);
+    }
+
+    /* The way into a thread on a phone: a full-height target, not a line of small text. */
+    .thread-link {
+      align-items: center;
+      min-block-size: 2.75rem;
     }
   }
 
@@ -376,7 +382,8 @@
     grid-template-columns: minmax(0, 1fr) min(26rem, 42%);
   }
 
-  .shell__main--thread > :not(.thread) {
+  .shell__main--thread > :not(.thread),
+  .shell__main--thread > .drop-zone > * {
     grid-column: 1;
   }
 
@@ -722,7 +729,8 @@
   }
 
   @media (pointer: coarse) {
-    .people-picker__option {
+    .people-picker__option,
+    .people-picker__input {
       min-block-size: 2.75rem;
     }
 
@@ -773,13 +781,12 @@
     white-space: nowrap;
   }
 
-  /* Its own direction, clipped at its own end, aligned with the interface. */
+  /* Aligned with the interface; the text itself is a .clip-own (app.css). */
   .browse__topic {
     overflow: hidden;
     color: var(--color-text-dim);
     font-size: var(--text-xs);
-    text-align: match-parent;
-    text-overflow: ellipsis;
+    text-align: start;
     white-space: nowrap;
   }
 

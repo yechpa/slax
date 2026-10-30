@@ -205,6 +205,18 @@ function layoutProblems() {
   for (const el of document.querySelectorAll('.composer__placeholder')) {
     if (el.scrollWidth > el.clientWidth + 1) problems.push(`composer placeholder clipped: ${el.textContent}`)
   }
+  // Phones: every control of the app is at least 44px tall (links inside text excepted).
+  if (document.documentElement.clientWidth < 700 && document.querySelector('.shell--app')) {
+    const controls = document.querySelectorAll(
+      '.shell--app button, .shell--app a.nav-item, dialog button, dialog input, .popover button',
+    )
+    for (const el of controls) {
+      if (!el.offsetParent || el.closest('[inert]') || el.matches('.composer__input, .message-editor__input')) continue
+      const box = el.getBoundingClientRect()
+      if (box.width === 0) continue
+      if (box.height < 43.5) problems.push(`touch target ${Math.round(box.height)}px tall: ${el.className || el.tagName} "${el.textContent.trim().slice(0, 30)}"`)
+    }
+  }
   return problems
 }
 

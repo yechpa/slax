@@ -7,6 +7,8 @@ The look of an old monitor, built with modern CSS. Two themes, three languages (
   - **It checks before it saves.** All 12 combinations (2 themes × 3 languages × 1280/390px) are loaded and checked.
   - **It fails on:** any sideways page scroll, a clipped input or composer placeholder (text measured against the field's content box), console errors, and failed requests.
   - **The application too:** `app-preview.html` (same build, never in production) runs the real app on fixtures: a stand-in `fetch` and a silent realtime client (`src/design-system/app-fixtures.ts`). Its shots go to `docs/design/app/`: the sign-in screen and the workspace in 2 themes × 3 languages at 1280×800, the account menu, a sign-in error, and 390px phones (conversation, open channel drawer, sign-in) in `console`/French and `listing`/Hebrew. The same checks apply.
+  - **Chat interactions** (`{name}-console-{en,he}.png`, most of them in `listing-fr` too): `thread`, `thread-deleted-parent`, `reaction-picker`, `message-menu`, `edit`, `delete-confirm`, `new-message`, `create-channel` (with a name error), `browse-channels`, `channel-details`, `files-upload` (done, 45 %, refused) and `files-drop`. Typing ("dana is typing…") and presence dots show on every app shot. Phones: `mobile-thread`, `mobile-menu` and `mobile-new-message` in `console-fr` and `listing-he`. The other combinations are loaded and checked with a thread and a dialog open.
+  - **On phones it also fails on** any control of the app under 44px tall.
 - **Code:** tokens and styles are in `frontend/src/styles/`, reusable components in `frontend/src/components/ui/`, i18n in `frontend/src/i18n/`, and the theme logic in `frontend/src/theme.ts`.
 
 > Status: first version, submitted for yechpa's review before Task 9. The Hebrew strings in particular are a proposal, not final.
@@ -163,6 +165,7 @@ Every interactive element shows `:focus-visible` as a 2px solid `--color-focus` 
 - **Interpolated values are isolated too.** `t()` wraps them in FSI/PDI (U+2068/U+2069), the plain-text `<bdi>`. That keeps `"נעם is typing…"` or `"dana מקליד/ה…"` in order even in a `title` or `aria-label`.
 - **Directional glyphs:** `>`, `->`, `[ ]` and `( )` are Unicode *Bidi_Mirrored* characters. Write them once, in logical order, and the browser draws the mirror in RTL: `> slax_` becomes `slax_ <` and `-> 3 replies` becomes `3 תשובות <-`. Never swap them by hand, or they flip twice. Use a `:dir(rtl)` rule only for glyphs that are not mirrored, such as arrows like `→`. None are used yet.
 - **The composer's textarea** follows the page direction while empty, so the caret and the drawn placeholder start on the same side. Once text is typed, it is `dir="auto"`.
+- **One line of user text clipped with an ellipsis** (a channel topic in the header or in "Browse channels") is a `.clip-own` span with `dir="auto"` inside a box that follows the interface. The box places it at the interface's start; the span clips it at *its own* end. Clipping in the box itself would cut an English topic's beginning in a Hebrew header (the RTL line ends on the left).
 
 ## i18n
 
@@ -196,5 +199,16 @@ All components are presentational Preact components, one job each, for Task 9 to
 - `Toast`: errors use `role=alert`, others `role=status`
 - `Composer`: IME-safe Enter, optional `maxLength` with a counter in the last 200 characters (code points, like the server), `+` only when `onAttach` is given
 - `EmptyState`
+- `Dialog`: a native `<dialog>` opened with `showModal()` (the page behind is inert, nothing clips it), title and close button, optional description, body (a `<form>` when it has `onSubmit`) and footer; Escape closes it and focus returns to what had it; `role="alertdialog"` for confirmations
+- `Popover`: a fixed panel placed against its anchor (under it, aligned with its inline end, or above when there is no room), kept inside the window; Escape (focus back to the anchor), a click elsewhere, a scroll or a resize close it. Its position goes through two custom properties set from script, so the CSP needs no `unsafe-inline`
+- `EmojiPicker`: 40 common emoji in their emoji-presentation form (`❤️`, not `❤`), one Tab stop, arrow keys (Left/Right follow the reading direction), Home/End
+- `FileChip` (extended): `uploading` with a progress bar, `scanning`, `error` (with the reason, retry), a link to the file (`href`), remove or cancel
+- `ReactionChip` (extended): `disabled` for readers who are not members
+- `Avatar` and `PresenceDot` (extended): `presenceHidden` keeps a dot decorative where it would be repeated on every row (message authors)
+- `Message` (extended): `attachments` under the body, `editor` in place of the body, `presence` on the avatar; `Tombstone`: a `footer` (a deleted parent keeps its thread link)
+
+The chat's own pieces (`frontend/src/components/`): `MessageActions` (toolbar and menu), `Reactions`, `MessageEditor`, `Attachments`, `ChatComposer` (drafts, uploads, paste, typing), `DropZone`, `ThreadPanel`, `PeoplePicker` (a combobox over the people search), `NewMessageDialog`, `CreateChannelDialog`, `BrowseChannelsDialog`, `ChannelDetails`, `Typing`. Their styles are in `styles/chat.css`.
+
+**Touch screens** (`hover: none`): no action depends on hovering. The quick buttons of the message toolbar (react, reply) are hidden there, and the "more" button, which opens every action, stays visible in a column of its own. On coarse pointers every control of the app is at least 44px tall; `make screenshots` checks it on the 390px shots.
 
 Layout classes: `.shell` collapses below 44rem *of its own width* (a container query): the sidebar becomes an overlay opened from the channel header.

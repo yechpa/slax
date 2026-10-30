@@ -104,9 +104,11 @@ export function ChannelView({ channel, threadId, threadModal, navOpen, onToggleN
             {plural('channel.members', channel.member_count)}
           </button>
           {channel.topic && (
-            // Its own direction (clipped at its own end), aligned with the interface (see app.css).
-            <span class="channel-header__topic" dir="auto" title={channel.topic}>
-              {channel.topic}
+            // Aligned with the interface; the text takes its own direction and is clipped at its own end (app.css).
+            <span class="channel-header__topic" title={channel.topic}>
+              <span class="clip-own" dir="auto">
+                {channel.topic}
+              </span>
             </span>
           )}
         </div>

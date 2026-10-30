@@ -62,8 +62,10 @@ export function BrowseChannelsDialog({ onClose }: { onClose: () => void }) {
                 </a>
                 <span class="browse__meta">{plural('channel.members', channel.member_count)}</span>
                 {channel.topic && (
-                  <span class="browse__topic" dir="auto" title={channel.topic}>
-                    {channel.topic}
+                  <span class="browse__topic" title={channel.topic}>
+                    <span class="clip-own" dir="auto">
+                      {channel.topic}
+                    </span>
                   </span>
                 )}
               </div>
