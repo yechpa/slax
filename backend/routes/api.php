@@ -62,11 +62,13 @@ Route::prefix('v1')->group(function () {
         Route::prefix('admin')->middleware('can:admin')->group(function () {
             Route::get('/status', [AdminController::class, 'status']);
             Route::get('/audit', [AdminController::class, 'audit']);
+            Route::get('/users', [AdminController::class, 'users']);
             Route::get('/users/banned', [AdminController::class, 'bannedUsers']);
             Route::get('/channels', [AdminController::class, 'channels']);
 
             Route::middleware('throttle:admin-writes')->group(function () {
                 Route::post('/users/{id}/ban', [AdminController::class, 'ban'])->whereNumber('id');
+                Route::post('/users/{id}/account-type', [AdminController::class, 'accountType'])->whereNumber('id');
                 Route::delete('/messages/{id}', [AdminController::class, 'destroyMessage'])->whereNumber('id');
                 Route::delete('/files/{id}', [AdminController::class, 'destroyFile'])->whereNumber('id');
                 Route::post('/channels/{id}/lock', [AdminController::class, 'lock'])->whereNumber('id');

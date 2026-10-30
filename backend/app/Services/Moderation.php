@@ -75,6 +75,24 @@ class Moderation
     }
 
     /**
+     * `member` (a family account: the nightly demo reset keeps its content and never deletes
+     * it) or `demo` (a visitor's: content reset nightly, deleted after a week without
+     * activity). Administrators and the seed people are not the caller's to change.
+     */
+    public function setAccountType(User $user, string $type): void
+    {
+        $changed = User::whereKey($user->id)
+            ->whereIn('account_type', [User::ACCOUNT_MEMBER, User::ACCOUNT_DEMO])
+            ->where('account_type', '!=', $type)
+            ->update(['account_type' => $type]) > 0;
+        $user->refresh();
+
+        if ($changed) {
+            $this->audit->record($type === User::ACCOUNT_MEMBER ? AuditLogger::USER_MADE_MEMBER : AuditLogger::USER_MADE_DEMO, $user);
+        }
+    }
+
+    /**
      * The message becomes a tombstone for everyone (broadcast), then its files are deleted,
      * objects first. Returns false when some file could not be deleted: it stays attached to
      * the tombstone (so nobody can download it) and calling again retries.

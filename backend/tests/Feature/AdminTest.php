@@ -52,11 +52,11 @@ function adminUri(RoutingRoute $route, int $id): string
 
 test('non_admin_gets_403_on_every_admin_route', function () {
     $routes = adminRoutes();
-    // Ban, unban list, message, file, lock, audit, status: a new route is covered automatically.
-    expect(count($routes))->toBeGreaterThanOrEqual(7);
+    // Ban, unban list, message, file, lock, audit, status, accounts, account type: a new route is covered automatically.
+    expect(count($routes))->toBeGreaterThanOrEqual(9);
 
     $member = User::factory()->create();
-    $target = User::factory()->create();
+    $target = User::factory()->demo()->create();
     $channel = publicChannel($member);
     $message = Message::factory()->create(['channel_id' => $channel->id, 'user_id' => $member->id]);
     storedFile($member, $channel, ['message_id' => $message->id]);
@@ -72,7 +72,7 @@ test('non_admin_gets_403_on_every_admin_route', function () {
             }
             // Ids that exist, so a 403 is the gate and not a missing record; banned or not, a member is refused.
             foreach ([$target->id, $message->id] as $id) {
-                asUser($member)->json($method, adminUri($route, $id), ['banned' => true, 'locked' => true])
+                asUser($member)->json($method, adminUri($route, $id), ['banned' => true, 'locked' => true, 'account_type' => 'member'])
                     ->assertForbidden();
             }
             app('auth')->forgetGuards();
@@ -81,6 +81,7 @@ test('non_admin_gets_403_on_every_admin_route', function () {
     }
 
     expect($target->fresh()->isBanned())->toBeFalse()
+        ->and($target->fresh()->account_type)->toBe(User::ACCOUNT_DEMO)
         ->and($message->fresh()->isDeleted())->toBeFalse()
         ->and($channel->fresh()->isLocked())->toBeFalse()
         ->and(File::count())->toBe(1);
@@ -456,4 +457,91 @@ test('administrators list every room to lock, private ones they are not in inclu
         ->and($byId[$private->id])->toMatchArray(['name' => 'hidden', 'kind' => 'private', 'locked' => true, 'member_count' => 1])
         ->and($byId->has($dm->id))->toBeFalse()
         ->and(collect($list)->pluck('name')->all())->toBe(collect($list)->pluck('name')->sort()->values()->all());
+});
+
+test('administrators make a demo account a member and back, audited (and alerted) once per change', function () {
+    $admin = admin();
+    $relative = User::factory()->demo()->create(['name' => 'Rivka Relative']);
+
+    asUser($admin)->postJson("/api/v1/admin/users/{$relative->id}/account-type", ['account_type' => 'member'])
+        ->assertOk()
+        ->assertExactJson([
+            'id' => $relative->id,
+            'name' => 'Rivka Relative',
+            'avatar_url' => null,
+            'account_type' => 'member',
+            'administrator' => false,
+            'banned' => false,
+            'last_seen_at' => $relative->last_seen_at->toISOString(),
+        ]);
+    expect($relative->fresh()->account_type)->toBe(User::ACCOUNT_MEMBER);
+
+    // Idempotent: the same change again records nothing more.
+    asUser($admin)->postJson("/api/v1/admin/users/{$relative->id}/account-type", ['account_type' => 'member'])->assertOk();
+    expect(AuditLog::where('action', 'user.made_member')->count())->toBe(1);
+    $entry = AuditLog::where('action', 'user.made_member')->sole();
+    expect($entry->actor_id)->toBe($admin->id)
+        ->and($entry->target_type)->toBe('user')
+        ->and($entry->target_id)->toBe($relative->id);
+
+    asUser($admin)->postJson("/api/v1/admin/users/{$relative->id}/account-type", ['account_type' => 'demo'])
+        ->assertOk()->assertJson(['account_type' => 'demo']);
+    expect($relative->fresh()->account_type)->toBe(User::ACCOUNT_DEMO)
+        ->and(AuditLog::where('action', 'user.made_demo')->count())->toBe(1)
+        ->and($this->notifier->withTitle('user.made_member'))->toHaveCount(1)
+        ->and($this->notifier->withTitle('user.made_demo'))->toHaveCount(1);
+
+    // The audit log names the person, never an address.
+    asUser($admin)->getJson('/api/v1/admin/audit')
+        ->assertJsonPath('data.0.action', 'user.made_demo')
+        ->assertJsonPath('data.0.target.label', 'Rivka Relative');
+});
+
+test('only member or demo; administrators and the seed people are not changed; unknown ids are 404', function () {
+    $admin = admin();
+    $other = admin();
+    $seed = User::factory()->create(['account_type' => User::ACCOUNT_SEED]);
+    $demo = User::factory()->demo()->create();
+    config(['slax.admin_emails' => ['boss@example.com']]);
+    $listed = User::factory()->demo()->create(['email' => 'Boss@Example.com']);
+    $uri = fn (User $user) => "/api/v1/admin/users/{$user->id}/account-type";
+
+    foreach ([['account_type' => 'seed'], ['account_type' => 'admin'], ['account_type' => ''], []] as $body) {
+        asUser($admin)->postJson($uri($demo), $body)->assertUnprocessable();
+    }
+    foreach ([$admin, $other, $listed] as $administrator) {
+        asUser($admin)->postJson($uri($administrator), ['account_type' => 'demo'])
+            ->assertUnprocessable()->assertExactJson(['error' => 'cannot_change_admin']);
+    }
+    asUser($admin)->postJson($uri($seed), ['account_type' => 'member'])
+        ->assertUnprocessable()->assertExactJson(['error' => 'cannot_change_seed']);
+    asUser($admin)->postJson('/api/v1/admin/users/999999/account-type', ['account_type' => 'member'])->assertNotFound();
+
+    expect($demo->fresh()->account_type)->toBe(User::ACCOUNT_DEMO)
+        ->and($listed->fresh()->account_type)->toBe(User::ACCOUNT_DEMO)
+        ->and($seed->fresh()->account_type)->toBe(User::ACCOUNT_SEED)
+        ->and(AuditLog::count())->toBe(0);
+});
+
+test('administrators list the accounts that sign in, most recently seen first, without addresses or the seed people', function () {
+    $admin = admin();
+    $admin->forceFill(['last_seen_at' => now()])->save();
+    $old = User::factory()->demo(daysAgo: 5)->create(['name' => 'Old Visitor']);
+    $recent = User::factory()->demo()->create(['name' => 'New Relative', 'last_seen_at' => now()->addMinute()]);
+    $never = User::factory()->demo()->create(['name' => 'Never Seen', 'last_seen_at' => null]);
+    $banned = User::factory()->banned()->create(['name' => 'Banned Member', 'last_seen_at' => now()->subDays(2)]);
+    User::factory()->create(['account_type' => User::ACCOUNT_SEED, 'name' => 'Seed Person']);
+
+    $list = asUser($admin)->getJson('/api/v1/admin/users')
+        ->assertOk()
+        ->assertJsonMissingPath('data.0.email')
+        ->json('data');
+
+    expect(collect($list)->pluck('name')->all())->toBe(['New Relative', 'Ada Admin', 'Banned Member', 'Old Visitor', 'Never Seen'])
+        ->and($list[0])->toMatchArray(['id' => $recent->id, 'account_type' => 'demo', 'administrator' => false, 'banned' => false])
+        ->and($list[1])->toMatchArray(['id' => $admin->id, 'account_type' => 'member', 'administrator' => true])
+        ->and($list[2])->toMatchArray(['id' => $banned->id, 'banned' => true])
+        ->and($list[4])->toMatchArray(['id' => $never->id, 'last_seen_at' => null])
+        ->and(json_encode($list))->not->toContain('@');
+    expect($old->id)->toBe($list[3]['id']);
 });

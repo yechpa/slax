@@ -14,6 +14,7 @@ use App\Services\ServiceStatus;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\Rule;
 
 /**
  * /api/v1/admin/*: moderation, the audit log and the status of the services.
@@ -31,6 +32,8 @@ class AdminController extends Controller
 
     public const MAX_BANNED_LISTED = 200;
 
+    public const MAX_ACCOUNTS_LISTED = 200;
+
     public function __construct(private readonly Moderation $moderation) {}
 
     /** POST /admin/users/{id}/ban {banned?: bool = true}: idempotent; false lifts the ban. */
@@ -47,6 +50,44 @@ class AdminController extends Controller
         ($data['banned'] ?? true) ? $this->moderation->ban($user) : $this->moderation->unban($user);
 
         return response()->json(self::person($user));
+    }
+
+    /**
+     * GET /admin/users: the accounts people sign in with (members, demo accounts,
+     * administrators; not the seed's fictional people), most recently seen first, so someone
+     * who just signed in for the first time is at the top. Names, never addresses.
+     */
+    public function users(): JsonResponse
+    {
+        $users = User::whereIn('account_type', [User::ACCOUNT_MEMBER, User::ACCOUNT_DEMO])
+            ->orderByRaw('last_seen_at desc nulls last')
+            ->orderByDesc('id')
+            ->limit(self::MAX_ACCOUNTS_LISTED)
+            ->get();
+
+        return response()->json(['data' => $users->map(self::account(...))->all()]);
+    }
+
+    /**
+     * POST /admin/users/{id}/account-type {account_type: member|demo}: idempotent, audited.
+     * A member's content is kept by the nightly demo reset; a demo account's is not.
+     */
+    public function accountType(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate(['account_type' => ['required', 'string', Rule::in([User::ACCOUNT_MEMBER, User::ACCOUNT_DEMO])]]);
+        $user = User::findOrFail($id);
+
+        // Administrators are members whatever this says (set at each sign-in), and never reset.
+        if ($user->isAdministrator()) {
+            return response()->json(['error' => 'cannot_change_admin'], 422);
+        }
+        if ($user->account_type === User::ACCOUNT_SEED) {
+            return response()->json(['error' => 'cannot_change_seed'], 422);
+        }
+
+        $this->moderation->setAccountType($user, $data['account_type']);
+
+        return response()->json(self::account($user));
     }
 
     /** GET /admin/users/banned: who is banned, most recent first (to lift a ban). */
@@ -172,6 +213,20 @@ class AdminController extends Controller
             'checked_at' => now()->toISOString(),
             'services' => $status->check(),
         ]);
+    }
+
+    /** @return array{id: int, name: string, avatar_url: ?string, account_type: string, administrator: bool, banned: bool, last_seen_at: ?string} */
+    private static function account(User $user): array
+    {
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'avatar_url' => $user->avatar_url,
+            'account_type' => $user->account_type,
+            'administrator' => $user->isAdministrator(),
+            'banned' => $user->isBanned(),
+            'last_seen_at' => $user->last_seen_at?->toISOString(),
+        ];
     }
 
     /** @return array{id: int, name: string, avatar_url: ?string, banned: bool, banned_at: ?string} */

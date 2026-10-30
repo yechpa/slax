@@ -32,6 +32,12 @@ class AuditLogger
 
     public const USER_UNBANNED = 'user.unbanned';
 
+    /** A family account: kept by the nightly demo reset (account_type member). */
+    public const USER_MADE_MEMBER = 'user.made_member';
+
+    /** Back to a demo account: its content goes at the next nightly demo reset. */
+    public const USER_MADE_DEMO = 'user.made_demo';
+
     public const MESSAGE_MODERATED_DELETE = 'message.moderated_delete';
 
     public const FILE_MODERATED_DELETE = 'file.moderated_delete';
@@ -48,6 +54,8 @@ class AuditLogger
     private const ALERTS = [
         self::USER_BANNED => 'warning',
         self::USER_UNBANNED => 'info',
+        self::USER_MADE_MEMBER => 'info',
+        self::USER_MADE_DEMO => 'warning',
         self::MESSAGE_MODERATED_DELETE => 'warning',
         self::FILE_MODERATED_DELETE => 'warning',
         self::CHANNEL_LOCKED => 'warning',
