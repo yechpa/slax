@@ -61,13 +61,23 @@ receives the channel's events until it disconnects.
 - **Presence** is polled every 30 s for the people on screen; the workspace presence channel only says who
   connected or disconnected (shown at once). Going idle, or coming back, shows for others at their next poll.
 - **REST answers against live events.** Messages carry no version. A REST answer (a page, the answer to my
-  reaction, edit or post) gives way, message by message, to the copy the client holds when a live event reached
-  that message while the request was on its way (the event may be newer); an edit answer still applies its body
-  when it is the newer edit, and a deletion always applies. This relies on every change being broadcast to every
+  reaction, edit or post) gives way, message by message, to the copy the client holds when a live event carrying
+  the whole message reached it while the request was on its way (the event may be newer); an edit answer still
+  applies its body when it is the newer edit, and a deletion always applies. A thread summary moved by a reply
+  event is laid over the answer instead (the answer may be the repair of a stale count): a reply counts unless the
+  answer's last reply is as recent, and a reply deleted during the request is assumed already left out of the
+  answer (off by one at most until the next refresh, as for events held during a page load). This relies on every change being broadcast to every
   member, the requester included, in the order of the changes. The single queue worker (see below) keeps the
   order in which broadcasts are queued; two requests changing one message at the same moment could still queue
   theirs in the other order (as could several workers), and the older snapshot would show until the next change.
   *Intended fix:* a per-message version, bumped with every change (reply counts included) and compared on merge.
+- **Older pages and events.** An event for a message that is not loaded yet is not kept anywhere (it would have
+  nothing to merge into): if it arrives while the page holding that message (an older page of a channel or a
+  thread) is on its way, the page's older copy shows until that message changes again. The window is the
+  duration of one request, scrolled into history at that moment.
+- **"Name taken" is recognized by its message.** The API refuses a channel name in use with a validation
+  message, and the client says "taken" in the reader's language only when it reads exactly
+  `ChannelController::NAME_TAKEN` (pinned by tests on both sides). *Intended fix:* a stable error code.
 - **Reactions beyond the 50 listed reactors.** A broadcast lists the first 50 reactors only, so for a reaction
   with more, whether I am one of them is kept from what the client knew (a REST answer, or my own toggle), never
   guessed from the broadcast.
