@@ -326,6 +326,7 @@
   "admin.target.channel": "canal",
   "admin.ban.title": "Bannir quelqu'un",
   "admin.ban.who": "Personne",
+  "admin.ban.one": "Une personne à la fois.",
   "admin.ban.hint": "Une personne bannie est déconnectée partout à la fois et ne peut plus se connecter.",
   "admin.ban.submit": "Bannir",
   "admin.ban.list": "Personnes bannies",

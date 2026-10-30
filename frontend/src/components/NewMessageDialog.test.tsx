@@ -127,4 +127,38 @@ describe('new message', () => {
     await settle()
     expect(plain(document.querySelector('dialog [role="alert"]')?.textContent)).toBe('One of these people can no longer receive messages.')
   })
+
+  it('says why no one more can be added at the limit, and keeps the field usable', async () => {
+    const people = Array.from({ length: 8 }, (_, i) => ({ id: 20 + i, name: `person ${i + 1}`, avatar_url: null }))
+    app = await mountApp(
+      {
+        'GET /api/v1/channels': () => ({ body: [channel(7, { name: 'general' })] }),
+        'GET /api/v1/channels/7/messages': () => ({ body: { data: [], has_more: false } }),
+        'GET /api/v1/users': () => ({ body: people }),
+      },
+      '/c/7',
+    )
+    const input = await openDialog(app.host)
+    const status = () => plain(document.querySelector('dialog .people-picker__status')?.textContent)
+    for (let picked = 0; picked < 7; picked += 1) {
+      typeInto(input, 'person')
+      await wait(SEARCH_DELAY_MS + 30)
+      await settle()
+      key(input, { key: 'Enter' })
+      await settle()
+    }
+    expect(document.querySelectorAll('dialog .person-chip')).toHaveLength(7)
+    // At the limit: said (announced), the field keeps the focus and still takes Backspace.
+    expect(status()).toBe('7 people at most.')
+    expect(document.activeElement).toBe(input)
+    expect(input.disabled).toBe(false)
+    expect(input.readOnly).toBe(true)
+    expect(input.getAttribute('aria-disabled')).toBe('true')
+    key(input, { key: 'Backspace' })
+    await settle()
+    expect(document.querySelectorAll('dialog .person-chip')).toHaveLength(6)
+    expect(status()).toBe('')
+    expect(input.readOnly).toBe(false)
+    expect(input.hasAttribute('aria-disabled')).toBe(false)
+  })
 })

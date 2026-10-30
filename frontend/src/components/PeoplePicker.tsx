@@ -3,6 +3,9 @@
  * stale requests aborted), the choices shown as chips before the field. Up and Down move
  * through the suggestions, Enter takes one, Backspace in an empty field removes the last
  * chip, Escape clears what was typed (a second Escape is the dialog's).
+ *
+ * At the limit (`full`) the field takes no more text, says why (`fullText`, announced), and
+ * keeps the focus: Backspace still removes the last chip.
  */
 import { useEffect, useId, useState } from 'preact/hooks'
 import { api } from '../api/endpoints.ts'
@@ -25,12 +28,14 @@ type Props = {
   onRemove?: (person: UserSummary) => void
   /** Not offered (already chosen, already members). */
   exclude?: readonly number[]
-  /** No more can be picked: the field says so and takes no more. */
+  /** No more can be picked: the field says so (`fullText`) and takes no more. */
   full?: boolean
+  /** Why no more can be picked ("7 people at most."). */
+  fullText?: string
   disabled?: boolean
 }
 
-export function PeoplePicker({ label, placeholder, hint, selected, onSelect, onRemove, exclude = [], full = false, disabled = false }: Props) {
+export function PeoplePicker({ label, placeholder, hint, selected, onSelect, onRemove, exclude = [], full = false, fullText, disabled = false }: Props) {
   const chat = useChat()
   const [search] = useState(() => createSearch<UserSummary>((q, signal) => api.searchUsers(q, signal)))
   const [text, setText] = useState('')
@@ -77,7 +82,8 @@ export function PeoplePicker({ label, placeholder, hint, selected, onSelect, onR
   }
 
   let status = ''
-  if (open) {
+  if (full) status = fullText ?? ''
+  else if (open) {
     if (state.status === 'error') status = t('people.error')
     else if (state.status === 'searching' && options.length === 0) status = t('people.searching')
     else if (state.status === 'done' && options.length === 0) status = t('people.none', { query: state.query })
@@ -115,7 +121,10 @@ export function PeoplePicker({ label, placeholder, hint, selected, onSelect, onR
           aria-describedby={hint ? hintId : undefined}
           placeholder={full ? '' : placeholder}
           value={text}
-          disabled={disabled || full}
+          disabled={disabled}
+          // Not disabled at the limit: it would lose the focus, and Backspace with it.
+          readOnly={full}
+          aria-disabled={full || undefined}
           onInput={(event) => {
             setText(event.currentTarget.value)
             search.query(event.currentTarget.value)

@@ -326,6 +326,7 @@
   "admin.target.channel": "ערוץ",
   "admin.ban.title": "חסימת משתמש",
   "admin.ban.who": "משתמש",
+  "admin.ban.one": "אדם אחד בכל פעם.",
   "admin.ban.hint": "משתמש חסום מנותק מיד מכל מקום ולא יכול להתחבר שוב.",
   "admin.ban.submit": "חסימה",
   "admin.ban.list": "חסומים",

@@ -358,6 +358,7 @@ function BanSection() {
           }}
           onRemove={() => setPicked(null)}
           full={picked !== null}
+          fullText={t('admin.ban.one')}
         />
         <Button variant="danger" onClick={() => setConfirming(true)} disabled={!picked || busy}>
           {t('admin.ban.submit')}

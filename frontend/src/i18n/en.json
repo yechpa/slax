@@ -326,6 +326,7 @@
   "admin.target.channel": "channel",
   "admin.ban.title": "Ban someone",
   "admin.ban.who": "Person",
+  "admin.ban.one": "One person at a time.",
   "admin.ban.hint": "A banned person is signed out everywhere at once and can't sign in again.",
   "admin.ban.submit": "Ban",
   "admin.ban.list": "Banned",

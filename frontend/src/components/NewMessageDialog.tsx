@@ -59,10 +59,11 @@ export function NewMessageDialog({ onClose }: { onClose: () => void }) {
       <PeoplePicker
         label={t('dm.to')}
         placeholder={t('people.placeholder')}
-        hint={people.length >= MAX_OTHERS ? plural('dm.max', MAX_OTHERS) : t('dm.hint')}
+        hint={t('dm.hint')}
         selected={people}
         exclude={me.value ? [me.value.id] : []}
         full={people.length >= MAX_OTHERS}
+        fullText={plural('dm.max', MAX_OTHERS)}
         disabled={busy}
         onSelect={(person) => {
           setError(null)
