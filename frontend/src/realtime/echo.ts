@@ -127,14 +127,26 @@ export async function connectRealtime(appKey: string): Promise<Realtime> {
     if (reconnected) for (const listener of [...reconnectListeners]) listener()
   })
 
+  // Client events (whispers) are read from the raw incoming events: pusher-js passes the
+  // `user_id` Reverb tags them with to presence channels' handlers only, never to a private
+  // channel's (its metadata is always empty), so typing would never know who types.
+  const clientHandlers = new Map<string, EventHandlers>()
+  pusher.connection.bind('message', (event: { event?: unknown; channel?: unknown; data?: unknown; user_id?: string | number }) => {
+    if (typeof event?.event !== 'string' || !event.event.startsWith('client-') || typeof event.channel !== 'string') return
+    clientHandlers.get(event.channel)?.[event.event]?.(event.data, event.user_id === undefined ? {} : { user_id: event.user_id })
+  })
+
   const subscribe: Realtime['subscribe'] = (name, handlers, onError) => {
     const channel = pusher.subscribe(name)
-    const bound = Object.entries(handlers)
+    const bound = Object.entries(handlers).filter(([event]) => !event.startsWith('client-'))
+    const whispers = Object.fromEntries(Object.entries(handlers).filter(([event]) => event.startsWith('client-')))
     for (const [event, handler] of bound) channel.bind(event, handler)
+    if (Object.keys(whispers).length > 0) clientHandlers.set(name, whispers)
     const failed = () => onError?.(authStatus.get(name) ?? null)
     channel.bind('pusher:subscription_error', failed)
     return () => {
       for (const [event, handler] of bound) channel.unbind(event, handler)
+      if (clientHandlers.get(name) === whispers) clientHandlers.delete(name)
       channel.unbind('pusher:subscription_error', failed)
       pusher.unsubscribe(name)
       authStatus.delete(name)

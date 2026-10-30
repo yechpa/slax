@@ -2,10 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetClientState } from '../api/client.ts'
 import { fakeFetch, flush } from '../test/fakes.ts'
 
-/** A stand-in for pusher-js: records options, exposes the connection's state_change. */
+/**
+ * A stand-in for pusher-js: records options, exposes the connection's state_change and its
+ * raw incoming events ('message'). Like pusher-js 8, a private channel calls its bound
+ * handlers with empty metadata: only the raw event carries Reverb's `user_id`.
+ */
 const pusher = vi.hoisted(() => ({
   options: null as Record<string, unknown> | null,
   stateListeners: [] as ((change: { previous: string; current: string }) => void)[],
+  messageListeners: [] as ((event: Record<string, unknown>) => void)[],
   channels: new Map<string, { bound: Map<string, (data: unknown, meta?: unknown) => void>; triggered: [string, unknown][] }>(),
   unsubscribed: [] as string[],
 }))
@@ -14,7 +19,10 @@ vi.mock('pusher-js', () => ({
   default: class {
     connection = {
       state: 'initialized',
-      bind: (_event: string, listener: (change: { previous: string; current: string }) => void) => pusher.stateListeners.push(listener),
+      bind: (event: string, listener: (value: never) => void) =>
+        event === 'message'
+          ? pusher.messageListeners.push(listener as (event: Record<string, unknown>) => void)
+          : pusher.stateListeners.push(listener as (change: { previous: string; current: string }) => void),
     }
     constructor(_key: string, options: Record<string, unknown>) {
       pusher.options = options
@@ -55,6 +63,7 @@ const setState = (current: string) => pusher.stateListeners.forEach((listener) =
 beforeEach(() => {
   resetClientState()
   pusher.stateListeners = []
+  pusher.messageListeners = []
   pusher.channels.clear()
   pusher.unsubscribed = []
 })
@@ -140,8 +149,16 @@ describe('realtime', () => {
     expect(pusher.channels.get('private-channel.7')!.triggered).toEqual([['client-typing', { typing: true, parent_id: null }]])
     expect(pusher.channels.has('private-channel.8')).toBe(false)
 
-    pusher.channels.get('private-channel.7')!.bound.get('client-typing')!({ typing: true }, { user_id: '2' })
+    // What Reverb sends: the whisper tagged with the sender's id, on the raw event only.
+    const raw = { event: 'client-typing', channel: 'private-channel.7', data: { typing: true }, user_id: '2' }
+    pusher.channels.get('private-channel.7')!.bound.get('client-typing')?.({ typing: true }, {})
+    pusher.messageListeners.forEach((listener) => listener(raw))
+    expect(typing).toHaveBeenCalledOnce()
     expect(typing).toHaveBeenCalledWith({ typing: true }, { user_id: '2' })
+
+    // Another channel's whisper, or one after unsubscribing, reaches nobody.
+    pusher.messageListeners.forEach((listener) => listener({ ...raw, channel: 'private-channel.9' }))
+    expect(typing).toHaveBeenCalledOnce()
   })
 
   it('maps the presence channel members, joins and leaves to plain people', async () => {
