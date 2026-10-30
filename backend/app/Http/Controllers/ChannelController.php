@@ -83,6 +83,12 @@ class ChannelController extends Controller
         return ChannelResource::withMembership($channel, $channel->hasMember($request->user()));
     }
 
+    /**
+     * The validation message of a name already in use, and only of that refusal: the SPA
+     * recognizes it and says "taken" in the reader's language (other refusals are shown as sent).
+     */
+    public const NAME_TAKEN = 'The name has already been taken.';
+
     public function store(Request $request): JsonResponse
     {
         $workspace = Workspace::default();
@@ -93,7 +99,7 @@ class ChannelController extends Controller
             ],
             'kind' => ['required', Rule::in([Channel::KIND_PUBLIC, Channel::KIND_PRIVATE])],
             'topic' => ['nullable', 'string', 'max:250'],
-        ]);
+        ], ['name.unique' => self::NAME_TAKEN]);
 
         try {
             $channel = DB::transaction(function () use ($request, $workspace, $data) {
@@ -104,7 +110,7 @@ class ChannelController extends Controller
             });
         } catch (UniqueConstraintViolationException) {
             // Lost a race against another creator of the same name.
-            throw ValidationException::withMessages(['name' => __('validation.unique', ['attribute' => 'name'])]);
+            throw ValidationException::withMessages(['name' => self::NAME_TAKEN]);
         }
 
         return ChannelResource::withMembership($channel, true)->response()->setStatusCode(201);

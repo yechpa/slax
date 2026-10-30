@@ -24,6 +24,36 @@ async function action(host: HTMLElement, label: string): Promise<HTMLDialogEleme
 const button = (root: ParentNode, label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === label)!
 
 describe('channels', () => {
+  it("says the server's reason for a refused name, and 'taken' only when it is taken", async () => {
+    let refusal = ['The name field format is invalid.']
+    app = await mountApp(
+      {
+        'GET /api/v1/channels': () => ({ body: [channel(7, { name: 'general' })] }),
+        'GET /api/v1/channels/7/messages': empty,
+        'POST /api/v1/channels': () => ({ status: 422, body: { message: refusal[0], errors: { name: refusal } } }),
+      },
+      '/c/7',
+    )
+    const dialog = await action(app.host, 'New channel')
+    const name = dialog.querySelector<HTMLInputElement>('input')!
+    typeInto(name, 'ops')
+    await settle()
+    dialog.querySelector('form')!.requestSubmit()
+    await settle()
+    expect(plain(dialog.querySelector('.field__error')?.textContent)).toBe('The name field format is invalid.')
+    expect(document.activeElement).toBe(name)
+    // Changing the name clears it.
+    typeInto(name, 'ops-2')
+    await settle()
+    expect(dialog.querySelector('.field__error')).toBeNull()
+
+    // backend ChannelController::NAME_TAKEN
+    refusal = ['The name has already been taken.']
+    dialog.querySelector('form')!.requestSubmit()
+    await settle()
+    expect(plain(dialog.querySelector('.field__error')?.textContent)).toBe('This name is already taken.')
+  })
+
   it('creates a channel: the name is checked as typed, a taken one is said, the new one opens', async () => {
     let attempt = 0
     const sent: unknown[] = []

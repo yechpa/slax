@@ -2,6 +2,7 @@
 
 use App\Events\MemberRemoved;
 use App\Events\UserRegistered;
+use App\Http\Controllers\ChannelController;
 use App\Models\Channel;
 use App\Models\User;
 use App\Models\Workspace;
@@ -123,6 +124,21 @@ test('channel_name_unique_per_workspace', function () {
     // The API reports it as a validation error.
     asUser(User::factory()->create())->postJson('/api/v1/channels', ['name' => 'general', 'kind' => 'public'])
         ->assertUnprocessable()->assertJsonValidationErrors('name');
+});
+
+test('a taken name is refused with its own message, which other name refusals never use', function () {
+    $user = User::factory()->create();
+
+    // #general exists (seeded). The SPA says "taken" in the reader's language when, and only when, it reads this message.
+    asUser($user)->postJson('/api/v1/channels', ['name' => 'general', 'kind' => 'public'])
+        ->assertUnprocessable()->assertExactJsonStructure(['message', 'errors' => ['name']])
+        ->assertJsonPath('errors.name', [ChannelController::NAME_TAKEN]);
+
+    foreach (['-starts-with-dash', 'Capitals', str_repeat('a', 41)] as $name) {
+        $messages = asUser($user)->postJson('/api/v1/channels', ['name' => $name, 'kind' => 'public'])
+            ->assertUnprocessable()->json('errors.name');
+        expect($messages)->not->toBeEmpty()->not->toContain(ChannelController::NAME_TAKEN);
+    }
 });
 
 test('channels require a session', function () {

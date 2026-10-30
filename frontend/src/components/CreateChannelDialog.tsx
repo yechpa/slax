@@ -16,6 +16,8 @@ import { TextField } from './ui/TextField.tsx'
 import { useChat } from './chatContext.ts'
 
 export const TOPIC_MAX = 250
+/** backend ChannelController::NAME_TAKEN: the one name refusal said in the reader's language. */
+export const NAME_TAKEN = 'The name has already been taken.'
 
 export function CreateChannelDialog({ onClose }: { onClose: () => void }) {
   const chat = useChat()
@@ -23,12 +25,13 @@ export function CreateChannelDialog({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<'public' | 'private'>('public')
   const [topic, setTopic] = useState('')
   const [tried, setTried] = useState(false)
-  const [taken, setTaken] = useState<string | null>(null)
+  /** The server refused this name (shown while the name stays the same): taken (reason null) or the server's reason. */
+  const [refused, setRefused] = useState<{ name: string; reason: string | null } | null>(null)
   const [busy, setBusy] = useState(false)
   const nameField = useRef<HTMLInputElement>(null)
   const problem = channelNameProblem(name)
   // Said as soon as there is something to say about it; "empty" only once Create was tried.
-  const nameError = taken === name ? t('channel.create.error.taken') : problem && (problem !== 'empty' || tried) ? t(`channel.create.error.${problem}`) : undefined
+  const nameError = refused?.name === name ? (refused.reason ?? t('channel.create.error.taken')) : problem && (problem !== 'empty' || tried) ? t(`channel.create.error.${problem}`) : undefined
 
   const create = async () => {
     setTried(true)
@@ -44,8 +47,11 @@ export function CreateChannelDialog({ onClose }: { onClose: () => void }) {
       showToast({ tone: 'success', text: t('channel.created', { channel: `#${channel.name}` }), key: 'create' })
     } catch (error) {
       setBusy(false)
-      if (isApiError(error, 'validation') && error.fields.name) {
-        setTaken(name)
+      const reasons = isApiError(error, 'validation') ? error.fields.name : undefined
+      if (reasons && reasons.length > 0) {
+        // Taken: said in the reader's language. Anything else (the rules checked as typed
+        // should prevent it): the server's own reason.
+        setRefused({ name, reason: reasons.includes(NAME_TAKEN) ? null : reasons[0] })
         nameField.current?.focus()
       } else if (!isApiError(error, 'rate_limited')) showToast({ tone: 'error', text: t('error.createFailed'), key: 'create' })
     }
