@@ -555,9 +555,11 @@
     outline: none;
   }
 
+  /* A column whose body shrinks and scrolls: header and buttons stay in view however long the
+     body. Flex, not a grid with a 1fr row: WebKit does not shrink that row to a max-block-size. */
   .dialog__form {
-    display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    display: flex;
+    flex-direction: column;
     max-block-size: calc(100vh - 2rem);
     max-block-size: calc(100dvh - 2rem);
   }
@@ -596,8 +598,13 @@
     padding-block-start: 0;
   }
 
+  .dialog__form > :not(.dialog__body) {
+    flex: none;
+  }
+
   .dialog__body {
     display: grid;
+    flex: 1 1 auto;
     align-content: start;
     gap: var(--space-4);
     min-block-size: 0;
