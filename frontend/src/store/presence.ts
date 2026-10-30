@@ -8,8 +8,9 @@
  *   once, and so does the first interaction after a while idle. Stops with the session.
  * - Polling: `GET /presence` every 30 s for the people on screen (what components track),
  *   in batches of 200 ids, the server's limit. Newly shown people are asked for shortly.
- * - The workspace presence channel tells joins and leaves at once (a hint until the next
- *   poll), and the names of the people connected.
+ * - The workspace presence channel tells joins and leaves at once, and the names of the
+ *   people connected. A leave is trusted over the polls for a minute: the server keeps the
+ *   last heartbeat that long and would otherwise bring a closed app back "online".
  * My own state is known locally: online while active, away when idle.
  */
 import { signal } from '@preact/signals'
@@ -23,6 +24,8 @@ export const HIDDEN_HEARTBEAT_MS = 50_000
 export const POLL_MS = 30_000
 export const IDLE_AFTER_MS = 5 * 60_000
 export const BATCH = 200
+/** The server forgets a connection a minute after its last heartbeat (PresenceService::CONNECTION_TTL). */
+export const LEFT_TRUST_MS = 60_000
 /** A newly shown person is asked for after this pause (several lists appear at once). */
 const SOON_MS = 300
 
@@ -34,6 +37,8 @@ export function createPresence({ api }: { api: Api }) {
   const states = signal<ReadonlyMap<number, PresenceState>>(new Map())
   const tracked = new Map<string, readonly number[]>()
   const asked = new Set<number>()
+  /** When the presence channel said someone left (their polls may say "online" for a while). */
+  const leftAt = new Map<number, number>()
   let meId: number | null = null
   let lastActivity = Date.now()
   let beatTimer: ReturnType<typeof setTimeout> | undefined
@@ -97,9 +102,20 @@ export function createPresence({ api }: { api: Api }) {
     const answers = await Promise.all(batches.map((batch) => api.presence(batch).catch(() => ({}) as Record<string, PresenceState>)))
     set(
       answers.flatMap((answer) =>
-        Object.entries(answer).filter(([, state]) => state === 'online' || state === 'away' || state === 'offline').map(([id, state]) => [Number(id), state] as [number, PresenceState]),
+        Object.entries(answer)
+          .filter(([, state]) => state === 'online' || state === 'away' || state === 'offline')
+          .map(([id, state]) => [Number(id), state] as [number, PresenceState])
+          .filter(([id, state]) => state === 'offline' || !justLeft(id)),
       ),
     )
+  }
+
+  function justLeft(id: number): boolean {
+    const at = leftAt.get(id)
+    if (at === undefined) return false
+    if (Date.now() - at < LEFT_TRUST_MS) return true
+    leftAt.delete(id)
+    return false
   }
 
   function schedulePoll(): void {
@@ -145,14 +161,18 @@ export function createPresence({ api }: { api: Api }) {
     unsubscribe = realtime.subscribePresence(`presence-workspace.${workspaceId}`, {
       members(members) {
         rememberPeople(members)
+        for (const m of members) leftAt.delete(m.id)
         set(members.filter((m) => m.id !== meId).map((m) => [m.id, connected(m.id)]))
       },
       added(member) {
         rememberPeople([member])
+        leftAt.delete(member.id)
         if (member.id !== meId) set([[member.id, connected(member.id)]])
       },
       removed(id) {
-        if (id !== meId) set([[id, 'offline']])
+        if (id === meId) return
+        leftAt.set(id, Date.now())
+        set([[id, 'offline']])
       },
     })
   }
@@ -168,6 +188,7 @@ export function createPresence({ api }: { api: Api }) {
     unsubscribe = null
     tracked.clear()
     asked.clear()
+    leftAt.clear()
     states.value = new Map()
   }
 

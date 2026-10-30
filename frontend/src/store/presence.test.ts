@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetClientState } from '../api/client.ts'
 import { api } from '../api/endpoints.ts'
 import { FakeRealtime, fakeFetch } from '../test/fakes.ts'
-import { HEARTBEAT_MS, HIDDEN_HEARTBEAT_MS, IDLE_AFTER_MS, POLL_MS, createPresence } from './presence.ts'
+import { HEARTBEAT_MS, HIDDEN_HEARTBEAT_MS, IDLE_AFTER_MS, LEFT_TRUST_MS, POLL_MS, createPresence } from './presence.ts'
 import { personName, resetPeople } from './people.ts'
 
 let visibility: DocumentVisibilityState
@@ -123,5 +123,31 @@ describe('presence', () => {
     expect(presence.stateOf(2)).toBe('online')
     presence.stop()
     expect(realtime.presence.size).toBe(0)
+  })
+  it('someone who just left stays offline although the server keeps their last heartbeat for a minute', async () => {
+    const { presence } = setup()
+    const realtime = new FakeRealtime()
+    presence.attach(realtime, 1)
+    const listener = realtime.presence.get('presence-workspace.1')!
+    listener.members([{ id: 2, name: 'dana', avatar_url: null }])
+    presence.track('dm', [2, 4])
+    listener.removed(2)
+
+    // The next poll: the server still has dana's heartbeat (60 s TTL) and answers "online".
+    await presence.poll()
+    expect(presence.stateOf(2)).toBe('offline')
+    expect(presence.stateOf(4)).toBe('online')
+
+    // Once the server's own window has passed, its answer is trusted again.
+    await vi.advanceTimersByTimeAsync(LEFT_TRUST_MS)
+    await presence.poll()
+    expect(presence.stateOf(2)).toBe('online')
+
+    // Leaving and coming back: what the channel says wins at once.
+    listener.removed(2)
+    listener.added({ id: 2, name: 'dana', avatar_url: null })
+    await presence.poll()
+    expect(presence.stateOf(2)).toBe('online')
+    presence.stop()
   })
 })
