@@ -1,6 +1,7 @@
 # The namespace Slax runs in, and the identity GitHub Actions deploys with
-# (.github/workflows/deploy-dev.yml). Applied once, by hand, with the cluster admin's
-# kubeconfig (deploy/dev/BOOTSTRAP.md):
+# (.github/workflows/deploy-dev.yml, and release-prod.yml on the production cluster). Applied
+# once per cluster, by hand, with the cluster admin's kubeconfig (deploy/dev/BOOTSTRAP.md,
+# docs/runbook.md):
 #   sudo k3s kubectl apply -f deploy/dev/deployer-rbac.yaml
 #
 # The deployer is limited to this namespace and to the kinds the chart manages: it cannot
@@ -39,7 +40,7 @@ rules:
     resources: [deployments, statefulsets]
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: [batch]
-    resources: [jobs]
+    resources: [jobs, cronjobs]
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: [networking.k8s.io]
     resources: [ingresses, networkpolicies]
@@ -69,7 +70,8 @@ subjects:
     name: slax-deployer
     namespace: slax
 ---
-# A long-lived token for the deployer (stored only in the GitHub secret DEV_KUBECONFIG).
+# A long-lived token for the deployer (stored only in the GitHub secret DEV_KUBECONFIG, or
+# PROD_KUBECONFIG for the production cluster).
 # Rotate it by deleting this Secret and applying the file again (BOOTSTRAP.md).
 apiVersion: v1
 kind: Secret

@@ -103,6 +103,10 @@ metadata:
     {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
 spec:
   type: ClusterIP
+  {{- with .Values.app.service.clusterIP }}
+  # Fixed: the front proxy on the host (production's Caddy) proxies to this address.
+  clusterIP: {{ . }}
+  {{- end }}
   selector:
     {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:

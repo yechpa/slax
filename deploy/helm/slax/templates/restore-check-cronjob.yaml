@@ -1,0 +1,111 @@
+{{- if .Values.backup.enabled }}
+{{- $component := "restore-check" -}}
+# Weekly restore check (deploy/backup/restore-check.sh in the slax-backup image): the latest
+# dump in the backups bucket is downloaded and restored into a throwaway PostgreSQL 16 that
+# lives only in this pod (a native sidecar on the pod's loopback, data in an emptyDir), then
+# checked (users > 0, the migrations table filled) and dropped. Production's database server
+# is never touched: this pod cannot even reach it (network policy). Success or failure, a
+# "[Prod] ..." Telegram message says so: the weekly proof that backups restore.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" $component) }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.restoreCheck.schedule | quote }}
+  timeZone: {{ .Values.backup.timeZone | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ .Values.backup.restoreCheck.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 12 }}
+        spec:
+          {{- include "slax.podCommon" . | nindent 10 }}
+          restartPolicy: Never
+          securityContext:
+            {{- include "slax.podSecurityContext" 70 | nindent 12 }}
+          initContainers:
+            # The throwaway server: a native sidecar (stopped when the check ends), on
+            # 127.0.0.1 only, trust authentication (nothing outside this pod can connect),
+            # durability off (its data is thrown away).
+            - name: postgres
+              image: {{ .Values.postgres.image }}
+              imagePullPolicy: IfNotPresent
+              restartPolicy: Always
+              args:
+                - -c
+                - listen_addresses=127.0.0.1
+                - -c
+                - fsync=off
+                - -c
+                - synchronous_commit=off
+                - -c
+                - full_page_writes=off
+                - -c
+                - shared_buffers=32MB
+              env:
+                - name: POSTGRES_HOST_AUTH_METHOD
+                  value: trust
+                - name: PGDATA
+                  value: /var/lib/postgresql/data/pgdata
+              securityContext:
+                {{- include "slax.containerSecurityContext" 70 | nindent 16 }}
+              resources:
+                {{- toYaml .Values.backup.restoreCheck.postgresResources | nindent 16 }}
+              startupProbe:
+                exec:
+                  command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+                periodSeconds: 2
+                failureThreshold: 90
+              volumeMounts:
+                - name: pgdata
+                  mountPath: /var/lib/postgresql/data
+                - name: pgrun
+                  mountPath: /var/run/postgresql
+                - name: pgtmp
+                  mountPath: /tmp
+          containers:
+            - name: restore-check
+              image: {{ include "slax.image" (dict "ctx" . "name" "backup") }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["restore-check.sh"]
+              env:
+                {{- include "slax.backupEnv" . | nindent 16 }}
+                - name: RESTORE_PGHOST
+                  value: 127.0.0.1
+                - name: RESTORE_PGUSER
+                  value: postgres
+                - name: MAX_AGE_HOURS
+                  value: {{ .Values.backup.restoreCheck.maxAgeHours | quote }}
+              securityContext:
+                {{- include "slax.containerSecurityContext" 70 | nindent 16 }}
+              resources:
+                {{- toYaml .Values.backup.restoreCheck.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: pgdata
+              emptyDir:
+                sizeLimit: 4Gi
+            - name: pgrun
+              emptyDir:
+                sizeLimit: 16Mi
+            - name: pgtmp
+              emptyDir:
+                sizeLimit: 64Mi
+{{- end }}

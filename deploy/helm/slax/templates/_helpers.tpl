@@ -72,13 +72,42 @@ slax.yechpa.com/backend: "true"
 {{- end -}}
 {{- end -}}
 
-{{/* Origin file previews load from (CSP img-src): s3.filesOrigin, else the public endpoint's origin. */}}
+{{/*
+Origin file previews load from (CSP img-src): s3.filesOrigin; else the public endpoint's
+origin; else, on AWS itself (no endpoint), the origin the SDK writes into presigned URLs:
+https://<bucket>.s3.<region>.amazonaws.com (virtual-hosted style: a cross-site origin of the
+bucket's own, never the app's), or https://s3.<region>.amazonaws.com with path-style URLs.
+*/}}
 {{- define "slax.filesOrigin" -}}
+{{- $public := include "slax.s3PublicEndpoint" . -}}
 {{- if .Values.s3.filesOrigin -}}
 {{- .Values.s3.filesOrigin -}}
+{{- else if $public -}}
+{{- regexFind "^https?://[^/]+" $public -}}
+{{- else if and (not .Values.minio.enabled) (not .Values.s3.endpoint) -}}
+{{- if .Values.s3.usePathStyle -}}
+{{- printf "https://s3.%s.amazonaws.com" .Values.s3.region -}}
 {{- else -}}
-{{- regexFind "^https?://[^/]+" (include "slax.s3PublicEndpoint" .) -}}
+{{- printf "https://%s.s3.%s.amazonaws.com" (include "slax.s3Bucket" .) .Values.s3.region -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The files bucket. Required: production's has a suffix of its own (deploy/aws/provision.sh). */}}
+{{- define "slax.s3Bucket" -}}
+{{- $bucket := required "s3.bucket is required (production: --set s3.bucket=<files bucket printed by deploy/aws/provision.sh>)" .Values.s3.bucket -}}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" $bucket) -}}
+{{- fail (printf "s3.bucket %q is not a DNS-compatible bucket name (lowercase letters, digits, hyphens)" $bucket) -}}
+{{- end -}}
+{{- $bucket -}}
+{{- end -}}
+
+{{/* Static S3 keys from the Secret, unless the instance role is used (never with MinIO). */}}
+{{- define "slax.s3StaticKeys" -}}
+{{- if and .Values.s3.useInstanceRole .Values.minio.enabled -}}
+{{- fail "s3.useInstanceRole cannot be used with minio.enabled (MinIO needs its keys)" -}}
+{{- end -}}
+{{- if not .Values.s3.useInstanceRole -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -120,7 +149,7 @@ REVERB_SERVER_PORT: "8080"
 REVERB_MAX_REQUEST_SIZE: "131072"
 REVERB_ALLOWED_ORIGINS: {{ $host | quote }}
 AWS_DEFAULT_REGION: {{ .Values.s3.region | quote }}
-AWS_BUCKET: {{ .Values.s3.bucket | quote }}
+AWS_BUCKET: {{ include "slax.s3Bucket" . | quote }}
 AWS_USE_PATH_STYLE_ENDPOINT: {{ ternary "true" "false" (or .Values.minio.enabled .Values.s3.usePathStyle) | quote }}
 {{- with $s3Endpoint }}
 AWS_ENDPOINT: {{ . | quote }}
@@ -138,22 +167,27 @@ SLAX_AUDIT_RETENTION_DAYS: {{ .Values.config.auditRetentionDays | quote }}
 {{- if has $key (list "APP_ENV" "APP_DEBUG" "APP_KEY") }}
 {{- fail (printf "config.extraEnv cannot set %s" $key) }}
 {{- end }}
-{{- if has $key (concat (include "slax.secretKeys" $ | fromYamlArray) (include "slax.optionalSecretKeys" $ | fromYamlArray)) }}
+{{- if has $key (concat (include "slax.secretKeys" $ | fromYamlArray) (include "slax.optionalSecretKeys" $ | fromYamlArray) (list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SESSION_TOKEN" "TURNSTILE_SITE_KEY")) }}
 {{- fail (printf "config.extraEnv cannot set %s: it is a secret (%s)" $key $.Values.secretName) }}
 {{- end }}
 {{ $key }}: {{ $value | quote }}
 {{- end }}
 {{- end -}}
 
-{{/* Keys of the hand-made Secret (secretName) the Laravel processes read. Required ones first. */}}
+{{/*
+Keys of the hand-made Secret (secretName) the Laravel processes read. Required ones first.
+The S3 keys only without the instance role (s3.useInstanceRole).
+*/}}
 {{- define "slax.secretKeys" -}}
 - APP_KEY
 - DB_PASSWORD
 - REDIS_PASSWORD
 - REVERB_APP_KEY
 - REVERB_APP_SECRET
+{{- if include "slax.s3StaticKeys" . }}
 - AWS_ACCESS_KEY_ID
 - AWS_SECRET_ACCESS_KEY
+{{- end }}
 - GOOGLE_CLIENT_ID
 - GOOGLE_CLIENT_SECRET
 - TURNSTILE_SECRET
@@ -269,4 +303,22 @@ volumes.
 
 {{- define "slax.configChecksum" -}}
 checksum/config: {{ include "slax.config" . | sha256sum }}
+{{- end -}}
+
+{{/* env: of the backup and restore-check containers (deploy/backup/*.sh). */}}
+{{- define "slax.backupEnv" -}}
+{{- $bucket := required "backup.bucket is required with backup.enabled (--set backup.bucket=<backups bucket printed by deploy/aws/provision.sh>)" .Values.backup.bucket -}}
+- name: BACKUP_BUCKET
+  value: {{ $bucket | quote }}
+- name: BACKUP_PREFIX
+  value: {{ .Values.backup.prefix | quote }}
+- name: AWS_REGION
+  value: {{ .Values.s3.region | quote }}
+- name: SLAX_ENV_LABEL
+  value: {{ required "envLabel is required (Dev or Prod)" .Values.envLabel | quote }}
+# The AWS CLI's cache and config, on the writable /tmp (read-only root filesystem).
+- name: HOME
+  value: /tmp
+{{ include "slax.secretRef" (dict "ctx" . "key" "TELEGRAM_BOT_TOKEN" "optional" true) }}
+{{ include "slax.secretRef" (dict "ctx" . "key" "TELEGRAM_CHAT_ID" "optional" true) }}
 {{- end -}}

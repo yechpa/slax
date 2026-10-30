@@ -1,0 +1,70 @@
+{{- if .Values.backup.enabled }}
+{{- $component := "backup" -}}
+# Daily PostgreSQL backup (deploy/backup/pg-backup.sh in the slax-backup image): pg_dump in
+# custom format, checked with pg_restore --list, uploaded to the backups bucket with
+# server-side encryption, size checked. Any failure exits non-zero and alerts Telegram
+# ("[Prod] ..."); a success is silent (the weekly restore check reports).
+# AWS credentials: none here. The AWS CLI takes the EC2 instance role's (IMDSv2).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" $component) }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  timeZone: {{ .Values.backup.timeZone | quote }}
+  concurrencyPolicy: Forbid
+  # A run missed by more than an hour (node down) is skipped, not run late during the day.
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 12 }}
+        spec:
+          {{- include "slax.podCommon" . | nindent 10 }}
+          restartPolicy: Never
+          securityContext:
+            {{- include "slax.podSecurityContext" 70 | nindent 12 }}
+          containers:
+            - name: backup
+              image: {{ include "slax.image" (dict "ctx" . "name" "backup") }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["pg-backup.sh"]
+              env:
+                {{- include "slax.backupEnv" . | nindent 16 }}
+                - name: PGHOST
+                  value: {{ include "slax.name" (dict "ctx" . "component" "postgres") | quote }}
+                - name: PGPORT
+                  value: "5432"
+                - name: PGDATABASE
+                  value: {{ .Values.postgres.database | quote }}
+                - name: PGUSER
+                  value: {{ .Values.postgres.username | quote }}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secretName }}
+                      key: DB_PASSWORD
+              securityContext:
+                {{- include "slax.containerSecurityContext" 70 | nindent 16 }}
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            # The dump is written here before the upload: room for a few times today's size.
+            - name: tmp
+              emptyDir:
+                sizeLimit: 2Gi
+{{- end }}

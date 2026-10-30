@@ -9,7 +9,8 @@
 #   sudo deploy/dev/create-secrets.sh set KEY     replace one key (hidden prompt)
 #
 # Environment: NAMESPACE (slax), SECRET_NAME (slax-secrets), KUBECTL ("k3s kubectl"),
-# S3_KEYS=generate (dev: keys for the in-cluster MinIO) or ask (real S3, production).
+# S3_KEYS=generate (dev: keys for the in-cluster MinIO), none (production: the EC2 instance
+# role, no key at all; values-prod.yaml s3.useInstanceRole) or ask (static keys for real S3).
 #
 # Generated: APP_KEY, DB_PASSWORD, REDIS_PASSWORD, REVERB_APP_KEY, REVERB_APP_SECRET and, with
 # S3_KEYS=generate, AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (hexadecimal: URL- and
@@ -80,7 +81,8 @@ case "$S3_KEYS" in
         ask AWS_ACCESS_KEY_ID
         ask AWS_SECRET_ACCESS_KEY
         ;;
-    *) echo "S3_KEYS must be generate or ask" >&2; exit 1 ;;
+    none) ;;
+    *) echo "S3_KEYS must be generate, none or ask" >&2; exit 1 ;;
 esac
 
 echo "Values are read without echo. Paste each one, then Enter." >&2

@@ -16,7 +16,13 @@ spec:
       app.kubernetes.io/instance: {{ .Release.Name }}
   policyTypes: ["Ingress"]
 ---
+{{- if .Values.ingress.enabled }}
 # The web pod: from the ingress controller only.
+{{- else }}
+# The web pod: from no pod at all. Only its own node reaches it: the front proxy on the host
+# (production's Caddy, through app.service.clusterIP) and the kubelet's probes. k3s's
+# network policy engine (kube-router) always admits traffic from the pod's local node.
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -28,6 +34,7 @@ spec:
     matchLabels:
       {{- include "slax.selectorLabels" (dict "ctx" . "component" "app") | nindent 6 }}
   policyTypes: ["Ingress"]
+  {{- if .Values.ingress.enabled }}
   ingress:
     - from:
         - namespaceSelector:
@@ -39,6 +46,9 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+  {{- else }}
+  ingress: []
+  {{- end }}
 ---
 # Reverb: the WebSocket through the web pod's nginx, and its HTTP API (/apps/) from the
 # Laravel processes. Nobody else.
@@ -63,6 +73,28 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+{{- if .Values.networkPolicy.denyInstanceMetadata }}
+---
+# Reverb needs no AWS credentials: everything but the EC2 instance metadata service, so it
+# can never borrow the instance role.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" "reverb-egress") }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" "reverb") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" "reverb") | nindent 6 }}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32
+{{- end }}
 ---
 # Upload scanner: only the app and queue pods may call it, and it calls nothing (no egress,
 # not even DNS).
@@ -90,7 +122,7 @@ spec:
   egress: []
 {{- range $component, $port := dict "postgres" 5432 "redis" 6379 }}
 ---
-# {{ $component }}: from the Laravel processes (app, queue, scheduler, migrations){{ if eq $component "redis" }} and Reverb{{ end }}.
+# {{ $component }}: from the Laravel processes (app, queue, scheduler, migrations){{ if eq $component "redis" }} and Reverb{{ end }}{{ if and (eq $component "postgres") $ctx.Values.backup.enabled }} and the backup{{ end }}.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -112,6 +144,12 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" "reverb") | nindent 14 }}
+        {{- end }}
+        {{- if and (eq $component "postgres") $ctx.Values.backup.enabled }}
+        # The daily backup (pg_dump).
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" "backup") | nindent 14 }}
         {{- end }}
       ports:
         - port: {{ $port }}

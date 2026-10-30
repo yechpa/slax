@@ -1,8 +1,17 @@
-# Production: k3s on one small AWS ARM64 instance (~2 vCPU / 4 GB, Task 13), slax.yechpa.com,
-# the public showcase. Deployed on a version tag after manual approval (Task 13).
+# Production: k3s on one AWS Graviton instance (t4g.small: 2 vCPU / 2 GiB, eu-central-1),
+# slax.yechpa.com, the public showcase. Provisioned by deploy/aws/provision.sh; deployed by
+# .github/workflows/release-prod.yml on a v* tag after manual approval (docs/runbook.md):
+#   helm upgrade --install slax deploy/helm/slax -n slax \
+#     -f deploy/helm/slax/values-prod.yaml --set image.tag=<sha> \
+#     --set s3.bucket=<files bucket> --set backup.bucket=<backups bucket>
 #
-# Real S3 (no MinIO), the nightly demo reset on. Requests are kept small for the budget
-# (15-20 $/month); Task 14's load test may adjust them.
+# The two bucket names carry a suffix of this AWS account (bucket names are global); they
+# come from provision.sh's output and live in the GitHub environment `production` as the
+# variables SLAX_FILES_BUCKET and SLAX_BACKUPS_BUCKET, not here.
+#
+# In front: Caddy on the host (deploy/aws/Caddyfile) terminates TLS (Let's Encrypt), sets
+# HSTS, keeps the visitor's address in X-Forwarded-For and proxies to the web pod's Service
+# on a fixed cluster address. No ingress controller (k3s runs without Traefik and ServiceLB).
 
 publicHost: slax.yechpa.com
 envLabel: Prod
@@ -13,31 +22,75 @@ demo:
   # reset nightly (SLAX_DEMO_RESET_ENABLED, docs/known-limitations.md).
   resetEnabled: true
 
-# Real S3. Task 13 provisions the bucket and settles how browsers reach it
-# (files.slax.yechpa.com): it must set s3.region, and s3.publicEndpoint / s3.filesOrigin so
-# presigned URLs and the CSP's img-src name the same host.
+# Administrators (ADMIN_EMAILS) are personal data: they are in the Secret (slax-secrets),
+# never in this file.
+
+# Real S3, reached with the EC2 instance role (no static key anywhere). Browsers download
+# files from presigned URLs on the bucket's own host,
+# https://<bucket>.s3.eu-central-1.amazonaws.com: a cross-site origin, isolated from the
+# app's; the presigned request forces the stored content type and the disposition
+# (attachment for anything but images and PDFs). The CSP's img-src names exactly that host
+# (derived from bucket and region). No files.slax.yechpa.com record and no CORS are needed.
 minio:
   enabled: false
 s3:
-  region: us-east-1
-  bucket: slax-files
-  filesOrigin: https://files.slax.yechpa.com
+  region: eu-central-1
+  bucket: ""
+  useInstanceRole: true
 
-ingress:
-  tls:
-    # Task 13 decides the TLS terminator (Caddy per Ruling E, or cert-manager here). HSTS
-    # comes from whichever terminates TLS: set config.hstsMaxAge only if nothing in front does.
-    clusterIssuer: letsencrypt-dns
-
+# Caddy on the host proxies to this address (deploy/aws/Caddyfile); no Ingress.
 app:
+  service:
+    clusterIP: 10.43.10.80
   php:
     resources:
       requests: { cpu: 50m, memory: 128Mi }
       limits: { cpu: "1", memory: 512Mi }
+  web:
+    resources:
+      requests: { cpu: 10m, memory: 16Mi }
+      limits: { cpu: 500m, memory: 96Mi }
+
+ingress:
+  enabled: false
+
+networkPolicy:
+  denyInstanceMetadata: true
+
+backup:
+  enabled: true
+  bucket: ""
+
+# Sized for 2 GiB with k3s beside it (docs/runbook.md, "Sizing"): the sum of the requests
+# stays under 800 MiB; limits allow short bursts. Task 14's load test may move to t4g.medium.
+reverb:
+  resources:
+    requests: { cpu: 20m, memory: 80Mi }
+    limits: { cpu: 500m, memory: 192Mi }
+queue:
+  resources:
+    requests: { cpu: 20m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+scheduler:
+  resources:
+    requests: { cpu: 10m, memory: 80Mi }
+    limits: { cpu: 500m, memory: 192Mi }
+scanner:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
 
 postgres:
+  maxConnections: 40
+  sharedBuffers: 96MB
   storage:
     size: 10Gi
   resources:
     requests: { cpu: 50m, memory: 160Mi }
-    limits: { cpu: "1", memory: 640Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+redis:
+  maxmemory: 96mb
+  resources:
+    requests: { cpu: 10m, memory: 24Mi }
+    limits: { cpu: 250m, memory: 160Mi }

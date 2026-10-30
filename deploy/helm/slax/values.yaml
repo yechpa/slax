@@ -33,13 +33,17 @@ config:
   # Days the audit log keeps its entries (audit:prune).
   auditRetentionDays: 180
   # Proxies whose X-Forwarded-For header nginx believes, so rate limits, Turnstile and the
-  # audit log see the visitor's address, not the proxy's. Default: k3s's pod network
-  # (10.42.0.0/16), where the ingress controller (Traefik) runs. The production front proxy
-  # (Task 13) may need its own address here.
+  # audit log see the visitor's address, not the proxy's (Laravel itself trusts no proxy and
+  # reads nginx's REMOTE_ADDR). Default: k3s's pod network (10.42.0.0/16): in dev the
+  # ingress controller (Traefik) runs there; in production Caddy on the host reaches the
+  # web pod from the node's own pod-network address. Nothing else can send to nginx with a
+  # forged header: the web pod's network policy admits only the ingress controller (dev) or
+  # the node itself (prod).
   trustedProxies:
     - 10.42.0.0/16
   # Strict-Transport-Security from nginx, in seconds. 0: none from here; the TLS terminator
-  # in front sets it (Caddy in production, Task 13). Set it only if nothing in front does.
+  # in front sets it (Caddy in production: deploy/aws/Caddyfile). Set it only if nothing in
+  # front does.
   hstsMaxAge: 0
   # More non-secret environment variables for the Laravel processes (never APP_ENV,
   # APP_DEBUG or a secret key: the chart refuses them).
@@ -63,14 +67,25 @@ s3:
   publicEndpoint: ""
   usePathStyle: false
   # Origin file previews are loaded from (Content-Security-Policy img-src). Empty: the
-  # origin of publicEndpoint.
+  # origin of publicEndpoint; on AWS without one, the bucket's own virtual-hosted origin
+  # https://<bucket>.s3.<region>.amazonaws.com (what the SDK writes into presigned URLs).
   filesOrigin: ""
+  # false: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY come from the Secret (dev's MinIO, or
+  # static keys). true (production): no key at all; the AWS SDK's default chain takes the
+  # EC2 instance role's short-lived credentials from the instance metadata service (IMDSv2,
+  # hop limit 2: deploy/aws/provision.sh). The two keys are then not even referenced, so a
+  # stale pair left in the Secret can never take precedence over the role.
+  useInstanceRole: false
 
 # The web pod: nginx (slax-web) and PHP-FPM (slax-app) side by side. One pod so FastCGI
 # stays on the pod's loopback (never on the network) and the SPA and the API it talks to
 # always ship together.
 app:
   replicas: 1
+  service:
+    # A fixed address in k3s's service network (10.43.0.0/16) for a proxy outside the
+    # cluster: production's Caddy, on the host, proxies to http://<clusterIP>:80. Empty: any.
+    clusterIP: ""
   php:
     resources:
       requests: { cpu: 50m, memory: 160Mi }
@@ -150,6 +165,8 @@ minio:
     host: ""
     tlsSecretName: slax-files-tls
 
+# The cluster's ingress (Traefik, bundled with k3s): dev. Production has no ingress
+# controller: Caddy on the host terminates TLS and proxies to app.service.clusterIP.
 ingress:
   enabled: true
   className: traefik
@@ -160,13 +177,50 @@ ingress:
     secretName: slax-tls
   annotations: {}
 
+# Daily PostgreSQL backup to S3 and a weekly restore check (deploy/backup/*.sh, image
+# slax-backup). For a cluster with real S3 and AWS credentials from the instance role: the
+# production values turn it on.
+backup:
+  enabled: false
+  # The backups bucket (deploy/aws/provision.sh prints its name). Required when enabled.
+  bucket: ""
+  # Dumps go to s3://<bucket>/<prefix>/YYYY/MM/DD/slax-<UTC time>.dump.
+  prefix: pg
+  timeZone: Asia/Jerusalem
+  # Every day at 02:30, before the 03:00 demo reset.
+  schedule: "30 2 * * *"
+  activeDeadlineSeconds: 1800
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  restoreCheck:
+    # Every Sunday at 03:30: the latest dump restored into a throwaway PostgreSQL inside the
+    # check's own pod (never the production server), checked, then thrown away.
+    schedule: "30 3 * * 0"
+    # The latest dump must be younger than this, or the check fails (a backup that silently
+    # stopped running).
+    maxAgeHours: 36
+    activeDeadlineSeconds: 1800
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { cpu: 500m, memory: 256Mi }
+    postgresResources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { cpu: "1", memory: 384Mi }
+
 networkPolicy:
   enabled: true
-  # Where the ingress controller runs (k3s: Traefik in kube-system).
+  # Where the ingress controller runs (k3s: Traefik in kube-system). Used with
+  # ingress.enabled; without it only the node itself (the front proxy on the host) reaches
+  # the web pod.
   ingressController:
     namespace: kube-system
     podLabels:
       app.kubernetes.io/name: traefik
+  # Pods that need no AWS credentials cannot reach the instance metadata service
+  # (169.254.169.254), so a compromised one cannot borrow the instance role: Reverb (the
+  # scanner has no egress at all). For clusters on EC2 (production).
+  denyInstanceMetadata: false
 
 migrations:
   # The migration Job (post-install, pre-upgrade hook) must finish within this.

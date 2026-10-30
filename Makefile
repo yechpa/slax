@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e chart-lint images web-check
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e chart-lint images web-check backup-test proxy-test aws-test
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
@@ -126,13 +126,24 @@ KUBECONFORM = $(CHART_RUN) $(KUBECONFORM_IMAGE) -strict -summary -kubernetes-ver
 	-schema-location default \
 	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/$(CRDS_CATALOG_COMMIT)/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
+# Production's bucket names carry the AWS account's suffix and are given at deploy time
+# (release-prod.yml): example names here.
+CHART_SET_dev :=
+CHART_SET_prod := --set s3.bucket=slax-files-example --set backup.bucket=slax-backups-example
+
 chart-lint: ## Lint, render and validate the Helm chart (dev and prod values)
 	set -e; mkdir -p $(CHART_OUT); \
 	for env in dev prod; do \
 		echo "==> helm lint ($$env)"; \
-		$(HELM) lint --strict --quiet $(CHART) -f $(CHART)/values-$$env.yaml --set image.tag=0123abc; \
-		$(HELM) template slax $(CHART) -n slax -f $(CHART)/values-$$env.yaml --set image.tag=0123abc > $(CHART_OUT)/$$env.yaml; \
+		if [ $$env = prod ]; then set_args='$(CHART_SET_prod)'; else set_args='$(CHART_SET_dev)'; fi; \
+		$(HELM) lint --strict --quiet $(CHART) -f $(CHART)/values-$$env.yaml --set image.tag=0123abc $$set_args; \
+		$(HELM) template slax $(CHART) -n slax -f $(CHART)/values-$$env.yaml --set image.tag=0123abc $$set_args > $(CHART_OUT)/$$env.yaml; \
 	done; \
+	echo '==> helm template refuses an incomplete production'; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-prod.yaml --set image.tag=x --set backup.bucket=b-example > /dev/null 2>&1 || { echo 'rendered prod without s3.bucket'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-prod.yaml --set image.tag=x --set s3.bucket=f-example > /dev/null 2>&1 || { echo 'rendered prod without backup.bucket'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set s3.useInstanceRole=true > /dev/null 2>&1 || { echo 'rendered the instance role with MinIO'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-prod.yaml --set image.tag=x $(CHART_SET_prod) --set config.extraEnv.AWS_ACCESS_KEY_ID=x > /dev/null 2>&1 || { echo 'rendered a static AWS key in the ConfigMap'; exit 1; }; \
 	echo '==> helm template refuses unsafe values'; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml > /dev/null 2>&1 || { echo 'rendered without image.tag'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.APP_ENV=local > /dev/null 2>&1 || { echo 'rendered APP_ENV=local'; exit 1; }; \
@@ -142,13 +153,25 @@ chart-lint: ## Lint, render and validate the Helm chart (dev and prod values)
 	echo '==> chart rules'; \
 	$(CHART_RUN) --entrypoint sh $(YQ_IMAGE) deploy/helm/check-chart.sh $(CHART_OUT)/dev.yaml $(CHART_OUT)/prod.yaml
 
-# The three production images, as CI builds them (native architecture only here).
-images: ## Build the production images slax-app, slax-web and slax-scanner (tag :local)
+# The production images, as CI builds them (native architecture only here).
+images: ## Build the production images slax-app, -web, -scanner and -backup (tag :local)
 	docker build -q -f docker/app/Dockerfile -t slax-app:local .
 	docker build -q -f docker/web/Dockerfile -t slax-web:local .
 	docker build -q --target runtime -t slax-scanner:local services/scanner
-	docker image ls --format '{{.Repository}}:{{.Tag}}  {{.Size}}' | grep -E '^slax-(app|web|scanner):local '
+	docker build -q -f docker/backup/Dockerfile -t slax-backup:local .
+	docker image ls --format '{{.Repository}}:{{.Tag}}  {{.Size}}' | grep -E '^slax-(app|web|scanner|backup):local '
 
 web-check: ## Build slax-web and check its routes and security headers (docker/web/check.sh)
 	docker build -q -f docker/web/Dockerfile -t slax-web:local . >/dev/null
 	docker/web/check.sh slax-web:local
+
+backup-test: ## Build slax-backup and test pg-backup.sh / restore-check.sh (PostgreSQL, MinIO, fake Telegram)
+	docker build -q -f docker/backup/Dockerfile -t slax-backup:local . >/dev/null
+	deploy/backup/test/backup-test.sh slax-backup:local
+
+proxy-test: ## Build slax-web and test the production front path (Caddy -> nginx): HSTS, no spoofed client IP
+	docker build -q -f docker/web/Dockerfile -t slax-web:local . >/dev/null
+	deploy/aws/test/proxy-test.sh slax-web:local
+
+aws-test: ## Run deploy/aws/provision.sh against a local AWS emulator (moto): idempotent, tagged, never touches others
+	deploy/aws/test/provision-test.sh
