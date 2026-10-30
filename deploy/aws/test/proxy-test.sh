@@ -79,6 +79,11 @@ check() { # description, command...
     if "$@"; then echo "ok:   $description"; else echo "FAIL: $description"; failures=$((failures + 1)); fi
 }
 has() { printf '%s\n' "$1" | grep -qiE -- "$2"; }
+hasall() { # text, patterns...: every pattern matches
+    text="$1"
+    shift
+    for pattern in "$@"; do has "$text" "$pattern" || return 1; done
+}
 hasnt() { ! printf '%s\n' "$1" | grep -qiE -- "$2"; }
 
 plain="$(client "$client_ip" "https://slax.test/api/v1/health")"
@@ -106,6 +111,15 @@ check "HSTS from Caddy: one year, subdomains, no preload" has "$headers" '^stric
 check "exactly one HSTS header" test "$(printf '%s\n' "$headers" | grep -ci '^strict-transport-security:')" = 1
 check "nginx's CSP passes through, with the bucket's host in img-src" has "$headers" "^content-security-policy: default-src 'self';.*img-src 'self' data: https://slax-files-example.s3.eu-central-1.amazonaws.com;"
 check "no Server header" hasnt "$headers" '^server:'
+
+# The PWA through Caddy: the service worker and manifest keep nginx's headers.
+sw="$(client "$client_ip" -o /dev/null -D - "https://slax.test/sw.js" | tr -d '\r')"
+check "the service worker reaches the browser (200, JavaScript)" hasall "$sw" '^HTTP/[0-9.]+ 200' '^content-type: (application|text)/javascript'
+check "... revalidated on every check (Cache-Control: no-cache)" has "$sw" '^cache-control: no-cache$'
+check "... with Service-Worker-Allowed: /" has "$sw" '^service-worker-allowed: /$'
+check "... and HSTS from Caddy" has "$sw" '^strict-transport-security: max-age=31536000; includeSubDomains$'
+manifest="$(client "$client_ip" -o /dev/null -D - "https://slax.test/manifest.webmanifest" | tr -d '\r')"
+check "the manifest reaches the browser as application/manifest+json" has "$manifest" '^content-type: application/manifest\+json'
 
 apps="$(client "$client_ip" -o /dev/null -w '%{http_code}' "https://slax.test/apps/1/events")"
 check "Reverb's HTTP API is refused at Caddy (/apps/ -> 404)" test "$apps" = 404

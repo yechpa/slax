@@ -47,6 +47,11 @@ check() { # description, command...
 }
 headers() { curl -s -o /dev/null -D - "$@" | tr -d '\r'; }
 has() { printf '%s\n' "$1" | grep -qiE "$2"; }
+hasall() { # text, patterns...: every pattern matches
+    text="$1"
+    shift
+    for pattern in "$@"; do has "$text" "$pattern" || return 1; done
+}
 count() { printf '%s\n' "$1" | grep -ciE "$2" || true; }
 
 page="$(headers "$base/channels/general")"
@@ -74,6 +79,22 @@ check "... and only that one" test "$(count "$download" '^referrer-policy:')" = 
 
 check "Reverb's HTTP API is not served (/apps/ -> 404)" has "$(headers "$base/apps/1/events")" '^HTTP/1.1 404'
 check "/app/ accepts WebSocket upgrades only (-> 426)" has "$(headers "$base/app/key")" '^HTTP/1.1 426'
+
+# The PWA: the service worker and the manifest are same-origin files with headers of their own.
+check "CSP: the manifest and workers from this origin only" has "$page" "worker-src 'self';.*manifest-src 'self'"
+sw="$(headers "$base/sw.js")"
+check "the service worker is served (200), as JavaScript" hasall "$sw" '^HTTP/1.1 200' '^content-type: (application|text)/javascript'
+check "... always revalidated, so a new version is seen at once" has "$sw" '^cache-control: no-cache$'
+check "... allowed to control the whole site (scope /)" has "$sw" '^service-worker-allowed: /$'
+check "... with the security headers" has "$sw" "^content-security-policy: default-src 'self'"
+check "the service worker carries its precache list (index.html among it)" has "$(curl -s "$base/sw.js")" '/index\.html'
+manifest="$(headers "$base/manifest.webmanifest")"
+check "the manifest is application/manifest+json, revalidated" hasall "$manifest" '^content-type: application/manifest\+json' '^cache-control: no-cache$'
+check "... with the security headers" has "$manifest" '^x-content-type-options: nosniff'
+check "the page links the manifest" has "$body" '<link rel="manifest" href="/manifest.webmanifest"'
+icon="$(headers "$base/icons/icon-192.png")"
+check "install icons are PNG, cached for a week" hasall "$icon" '^content-type: image/png' '^cache-control: public, max-age=604800$'
+check "a missing icon is a 404, not the SPA page" has "$(headers "$base/icons/missing.png")" '^HTTP/1.1 404'
 
 asset="$(printf '%s' "$body" | grep -oE '/assets/[^"]+\.js' | head -1)"
 check "bundle files are cached for good" has "$(headers "$base$asset")" '^cache-control: public, max-age=31536000, immutable'

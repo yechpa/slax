@@ -60,7 +60,8 @@ mkdir -p /tmp/nginx/conf.d /tmp/nginx/html
 
 # Content-Security-Policy: same origin for everything, except file previews (the files
 # host), Turnstile's script and frame, and the WebSocket (ws/wss of this same host). No
-# inline script or style anywhere.
+# inline script or style anywhere. Workers (the service worker) and the manifest: this
+# origin only (worker-src would otherwise fall back to script-src, Turnstile included).
 turnstile=""
 frames="'none'"
 if [ "$SLAX_TURNSTILE_ORIGIN" != none ]; then
@@ -78,7 +79,7 @@ else
     upgrade=""
     fastcgi_https=""
 fi
-csp="default-src 'self'; script-src 'self'${turnstile}; style-src 'self'; img-src 'self' data:${files}; font-src 'self'; connect-src 'self' ${websocket}; frame-src ${frames}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; manifest-src 'self'${upgrade}"
+csp="default-src 'self'; script-src 'self'${turnstile}; style-src 'self'; img-src 'self' data:${files}; font-src 'self'; connect-src 'self' ${websocket}; frame-src ${frames}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; worker-src 'self'; manifest-src 'self'${upgrade}"
 
 {
     echo "add_header Content-Security-Policy \"$csp\" always;"
