@@ -10,6 +10,9 @@
  * - Cross-cutting outcomes are announced to whoever listens (`onClientEvent`): 401 means
  *   signed out, 403 `account_banned` means banned, 429 needs a toast with a retry hint,
  *   a network failure means offline (and the next success, online again).
+ * - A sign-out holds every request (`holdRequests`): none starts any more but the sign-out's
+ *   own (`duringSignOut`), and the ones already on their way are waited for first, so none
+ *   can come back to the server after POST /auth/logout.
  */
 
 /**
@@ -78,7 +81,42 @@ export interface RequestOptions {
    * e.g. GET /me at start-up, where 401 simply means "not signed in yet".
    */
   quiet?: boolean
+  /** Goes out while requests are held: the sign-out's own (push DELETE, POST /auth/logout). */
+  duringSignOut?: boolean
 }
+
+/** How long a sign-out waits for the requests already on their way before cutting them. */
+export const HOLD_WAIT_MS = 3000
+
+let held = false
+/** Every request on its way: what it is waiting for, and how to cut it. */
+const inFlight = new Set<{ done: Promise<unknown>; controller: AbortController }>()
+
+/**
+ * Sign-out: from now on no request starts (an `aborted` ApiError, nothing sent) except the
+ * sign-out's own; resolves once every request already on its way has come back, or after
+ * `maxWaitMs`, when the ones still out are cut. (The server ends the session anyway, see
+ * UserSessions::end; waiting means none even reaches it after the logout.)
+ */
+export async function holdRequests(maxWaitMs = HOLD_WAIT_MS): Promise<void> {
+  held = true
+  const pending = [...inFlight]
+  if (pending.length === 0) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const outcome = await Promise.race([
+    Promise.allSettled(pending.map((p) => p.done)).then(() => 'back' as const),
+    new Promise<'late'>((resolve) => (timer = setTimeout(() => resolve('late'), maxWaitMs))),
+  ])
+  clearTimeout(timer)
+  if (outcome === 'late') for (const p of pending) p.controller.abort()
+}
+
+/** After a sign-out (done, or failed: still signed in), requests go out again. */
+export function releaseRequests(): void {
+  held = false
+}
+
+const refusedWhileHeld = (options: RequestOptions) => held && !options.duringSignOut
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -92,6 +130,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 /** Like `request`, with the HTTP status of the success (201 created vs 200 existing). */
 export async function requestWithStatus<T>(path: string, options: RequestOptions = {}): Promise<{ status: number; body: T }> {
   const method = options.method ?? 'GET'
+  if (refusedWhileHeld(options)) throw new ApiError(0, 'aborted')
   if (!SAFE.has(method)) await ensureCsrfCookie()
   let response = await send(path, method, options)
   if (response.status === 419 && !SAFE.has(method)) {
@@ -103,6 +142,25 @@ export async function requestWithStatus<T>(path: string, options: RequestOptions
 }
 
 async function send(path: string, method: string, options: RequestOptions): Promise<Response> {
+  // Held while this one waited for its CSRF cookie: it never leaves.
+  if (refusedWhileHeld(options)) throw new ApiError(0, 'aborted')
+  const controller = new AbortController()
+  const outer = options.signal
+  const cut = () => controller.abort()
+  if (outer?.aborted) controller.abort()
+  else outer?.addEventListener('abort', cut, { once: true })
+  const done = sendNow(path, method, options, controller.signal)
+  const entry = { done, controller }
+  inFlight.add(entry)
+  try {
+    return await done
+  } finally {
+    inFlight.delete(entry)
+    outer?.removeEventListener('abort', cut)
+  }
+}
+
+async function sendNow(path: string, method: string, options: RequestOptions, signal: AbortSignal): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   const token = xsrfToken()
@@ -113,10 +171,10 @@ async function send(path: string, method: string, options: RequestOptions): Prom
       headers,
       credentials: 'include',
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal: options.signal,
+      signal,
     })
   } catch (error) {
-    if (options.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+    if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
       throw new ApiError(0, 'aborted')
     }
     noteOffline()
@@ -258,4 +316,6 @@ export function ensureCsrfCookie(force = false): Promise<void> {
 export function resetClientState(): void {
   offline = false
   pendingCsrf = null
+  held = false
+  inFlight.clear()
 }

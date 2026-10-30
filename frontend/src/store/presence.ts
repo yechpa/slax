@@ -11,6 +11,7 @@
  * - The workspace presence channel tells joins and leaves at once, and the names of the
  *   people connected. A leave is trusted over the polls for a minute: the server keeps the
  *   last heartbeat that long and would otherwise bring a closed app back "online".
+ * - A sign-out pauses it first (no beat, no poll), and resumes it if the sign-out fails.
  * My own state is known locally: online while active, away when idle.
  */
 import { signal } from '@preact/signals'
@@ -45,6 +46,7 @@ export function createPresence({ api }: { api: Api }) {
   let pollTimer: ReturnType<typeof setTimeout> | undefined
   let soonTimer: ReturnType<typeof setTimeout> | undefined
   let running = false
+  let paused = false
   let unsubscribe: (() => void) | null = null
 
   const hidden = () => globalThis.document?.visibilityState === 'hidden'
@@ -177,8 +179,30 @@ export function createPresence({ api }: { api: Api }) {
     })
   }
 
+  /** Sign-out: no beat or poll from now on; what is known and the channel stay (it may fail). */
+  function pause(): void {
+    if (!running) return
+    running = false
+    paused = true
+    clearTimeout(beatTimer)
+    clearTimeout(pollTimer)
+    clearTimeout(soonTimer)
+  }
+
+  /** The sign-out failed (still signed in): beating and polling again at once. */
+  function resume(): void {
+    if (!paused) return
+    paused = false
+    running = true
+    lastActivity = Date.now()
+    void beat()
+    void poll()
+    schedulePoll()
+  }
+
   function stop(): void {
     running = false
+    paused = false
     clearTimeout(beatTimer)
     clearTimeout(pollTimer)
     clearTimeout(soonTimer)
@@ -194,5 +218,5 @@ export function createPresence({ api }: { api: Api }) {
 
   const stateOf = (id: number): PresenceState | undefined => states.value.get(id)
 
-  return { states, stateOf, start, attach, stop, track, untrack, poll }
+  return { states, stateOf, start, attach, pause, resume, stop, track, untrack, poll }
 }

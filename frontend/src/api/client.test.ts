@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fakeFetch } from '../test/fakes.ts'
-import { ApiError, onClientEvent, request, resetClientState, type ClientEvent } from './client.ts'
+import { deferred, fakeFetch, type FakeReply } from '../test/fakes.ts'
+import { ApiError, holdRequests, onClientEvent, releaseRequests, request, resetClientState, type ClientEvent } from './client.ts'
 
 let events: ClientEvent[]
 let off: () => void
@@ -94,5 +94,55 @@ describe('API client', () => {
     vi.stubGlobal('fetch', server.fetch)
     await request('/m', { query: { before: 12, after: undefined, limit: null } })
     expect(server.fetch.mock.calls[0][0]).toBe('/m?before=12')
+  })
+
+  describe('held for a sign-out', () => {
+    it('refuses every new request without sending it, the sign-out\'s own excepted, until released', async () => {
+      const server = fakeFetch({ 'GET /api/v1/x': () => ({ body: { ok: 1 } }), 'POST /api/v1/auth/logout': () => ({ status: 204 }) })
+      vi.stubGlobal('fetch', server.fetch)
+      await holdRequests()
+      await expect(request('/api/v1/x')).rejects.toMatchObject({ code: 'aborted' })
+      await expect(request('/api/v1/x', { method: 'POST' })).rejects.toMatchObject({ code: 'aborted' })
+      expect(server.calls).toEqual([])
+
+      await request('/api/v1/auth/logout', { method: 'POST', duringSignOut: true })
+      expect(server.calls.map((c) => `${c.method} ${c.path}`)).toEqual(['GET /sanctum/csrf-cookie', 'POST /api/v1/auth/logout'])
+      // Nobody is told about an offline network for a request that never left.
+      expect(events).toEqual([])
+
+      releaseRequests()
+      expect(await request('/api/v1/x')).toEqual({ ok: 1 })
+    })
+
+    it('waits for the requests already on their way before letting the sign-out go on', async () => {
+      const slow = deferred<FakeReply>()
+      const server = fakeFetch({ 'POST /api/v1/presence/heartbeat': () => slow.promise })
+      vi.stubGlobal('fetch', server.fetch)
+      document.cookie = 'XSRF-TOKEN=t; path=/'
+      const beat = request('/api/v1/presence/heartbeat', { method: 'POST' })
+      await Promise.resolve()
+
+      let held = false
+      const holding = holdRequests().then(() => (held = true))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(held).toBe(false)
+      slow.resolve({ status: 204 })
+      await holding
+      await beat
+      expect(held).toBe(true)
+    })
+
+    it('cuts what is still on its way after the wait, and goes on', async () => {
+      const fetch = vi.fn(
+        (_input: RequestInfo | URL, init: RequestInit = {}) =>
+          new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))),
+      )
+      vi.stubGlobal('fetch', fetch)
+      const hanging = request('/api/v1/presence').catch((error: unknown) => error)
+      await Promise.resolve()
+      await holdRequests(30)
+      expect(await hanging).toMatchObject({ code: 'aborted' })
+      expect(events).toEqual([])
+    })
   })
 })

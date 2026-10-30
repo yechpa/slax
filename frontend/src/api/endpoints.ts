@@ -24,7 +24,8 @@ export const api = {
   /** 401 (ApiError 'unauthenticated') when signed out; quiet: start-up decides what that means. */
   me: (signal?: AbortSignal) => request<Me>(apiPath('/me'), { signal, quiet: true }),
   updateMe: (changes: { locale?: Locale; theme?: Theme }) => request<Me>(apiPath('/me'), { method: 'PATCH', body: changes }),
-  logout: () => request<void>(apiPath('/auth/logout'), { method: 'POST' }),
+  /** Sent while every other request is held (see session.ts signOut). */
+  logout: () => request<void>(apiPath('/auth/logout'), { method: 'POST', duringSignOut: true }),
   /** Starts Google sign-in after Turnstile; the browser then goes to `redirect_url`. */
   startGoogle: (turnstileToken: string) =>
     request<{ redirect_url: string }>(apiPath('/auth/google/start'), {
@@ -75,7 +76,9 @@ export const api = {
     /** Upsert by endpoint: also refreshes the keys and the language of an existing device. */
     subscribe: (subscription: { endpoint: string; keys: { p256dh: string; auth: string }; locale: Locale }) =>
       request<void>(apiPath('/push/subscriptions'), { method: 'POST', body: subscription, quiet: true }),
-    unsubscribe: (endpoint: string) => request<void>(apiPath('/push/subscriptions'), { method: 'DELETE', body: { endpoint }, quiet: true }),
+    /** `duringSignOut`: the sign-out's own call, sent while every other request is held. */
+    unsubscribe: (endpoint: string, duringSignOut = false) =>
+      request<void>(apiPath('/push/subscriptions'), { method: 'DELETE', body: { endpoint }, quiet: true, duringSignOut }),
     /** 202 {devices}: a test notification to each of this account's devices. */
     test: () => request<{ devices: number }>(apiPath('/push/test'), { method: 'POST' }),
   },

@@ -150,4 +150,32 @@ describe('presence', () => {
     expect(presence.stateOf(2)).toBe('online')
     presence.stop()
   })
+
+  it('pauses for a sign-out: no beat, no poll, nothing on activity or visibility, until resumed', async () => {
+    const { presence, server } = setup()
+    presence.track('list', [2, 3])
+    presence.start(1)
+    await settle()
+    const before = server.calls.length
+    expect(before).toBeGreaterThan(0)
+
+    presence.pause()
+    presence.track('more', [4])
+    document.dispatchEvent(new Event('visibilitychange'))
+    document.dispatchEvent(new KeyboardEvent('keydown'))
+    await vi.advanceTimersByTimeAsync(IDLE_AFTER_MS + POLL_MS + HEARTBEAT_MS)
+    expect(server.calls.slice(before)).toEqual([])
+    // What is known stays on screen meanwhile (the sign-out may fail).
+    expect(presence.stateOf(2)).toBe('online')
+
+    // The sign-out failed: everything goes on as before.
+    presence.resume()
+    await settle()
+    expect(heartbeats(server).length).toBeGreaterThan(1)
+    const polls = server.calls.slice(before).filter((c) => c.path === '/api/v1/presence')
+    expect(polls.flatMap((c) => c.query.getAll('user_ids[]')).sort()).toEqual(['2', '3', '4'])
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS)
+    expect(server.calls.slice(before).filter((c) => c.path === '/api/v1/presence/heartbeat')).toHaveLength(2)
+    presence.stop()
+  })
 })

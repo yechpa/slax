@@ -3,13 +3,13 @@
  * about language and theme, and how a session ends (sign-out, expiry, ban).
  */
 import { batch } from '@preact/signals'
-import { isApiError, onClientEvent } from './api/client.ts'
+import { holdRequests, isApiError, onClientEvent, releaseRequests } from './api/client.ts'
 import { api } from './api/endpoints.ts'
 import type { Me } from './api/types.ts'
 import { isLocale, plural, setLocale, t } from './i18n/index.ts'
 import { LAST_CHANNEL_KEY, readPref, removePref } from './lib/prefs.ts'
 import { clearAppCaches } from './pwa/caches.ts'
-import { dropPushLocally } from './pwa/push.ts'
+import { dropPushLocally, forgetPushOnSignOut } from './pwa/push.ts'
 import { navigate, route } from './router.ts'
 import { resetChannels } from './store/channels.ts'
 import { resetTimelines } from './store/messages.ts'
@@ -74,6 +74,43 @@ export function endSession(error: AuthErrorCode | null): void {
   // Expiry keeps this device's notifications (the person did not sign out; see pwa/push.ts).
   if (error !== 'session_expired') dropPushLocally()
   if (route.peek().name !== 'home') navigate('/', { replace: true })
+}
+
+/** What a sign-out pauses first: the presence heartbeat and polls (store/presence.ts). */
+export interface Pausable {
+  pause(): void
+  resume(): void
+}
+
+/**
+ * Sign-out, in an order that leaves nothing to bring the session back on the server:
+ *  1. presence stops beating and polling;
+ *  2. no request starts any more, and those already on their way are waited for (cut after
+ *     3 s; see holdRequests);
+ *  3. this device's notifications are removed from the account (pwa/push.ts);
+ *  4. POST /auth/logout; then everything local is forgotten (endSession).
+ * The server ends the session even if a request still reached it late (UserSessions::end);
+ * this makes sure none does. A logout the server never got (offline) keeps the person signed
+ * in, says so, and lets everything run again: signing out only on this device would sign them
+ * back in at the next start online, since the session cookie is the server's to end. A 401
+ * (the session already gone) ends it here too. Returns whether the session ended.
+ */
+export async function signOut(presence?: Pausable | null): Promise<boolean> {
+  presence?.pause()
+  await holdRequests()
+  await forgetPushOnSignOut()
+  try {
+    await api.logout()
+  } catch (error) {
+    if (!isApiError(error, 'unauthenticated')) {
+      releaseRequests()
+      presence?.resume()
+      return false
+    }
+  }
+  endSession(null)
+  releaseRequests()
+  return true
 }
 
 /** App-wide reactions to what the API client reports. Returns the cleanup. */

@@ -211,7 +211,8 @@ export async function forgetPushOnSignOut(timeoutMs = 3000): Promise<void> {
   const work = (async () => {
     const subscription = await (await registration(false))?.pushManager.getSubscription().catch(() => null)
     if (!subscription) return
-    await api.push.unsubscribe(subscription.endpoint).catch(() => undefined)
+    // Part of the sign-out: it goes out while every other request is held.
+    await api.push.unsubscribe(subscription.endpoint, true).catch(() => undefined)
     await subscription.unsubscribe().catch(() => false)
   })()
   let timer: ReturnType<typeof setTimeout> | undefined
