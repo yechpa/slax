@@ -3,7 +3,7 @@
 # the default route, plays the public interface): make edge-guard-test.
 #
 # Checks: start is idempotent (one jump, the expected rules, nothing about 80/443); from
-# another container, 6443/10250/22 time out while 80 and 443 still answer; traffic on another
+# another container, 6443/9345/10250/22 time out while 80 and 443 still answer; traffic on another
 # interface (the loopback) is untouched; status reports; stop removes everything and is
 # harmless twice; tailscale0/cni0 named as public interfaces are refused.
 set -euo pipefail
@@ -30,7 +30,7 @@ docker network create "$name" >/dev/null
 docker run -d --name "$name-node" --network "$name" --cap-add NET_ADMIN \
     -v "$repo/deploy/aws/slax-edge-guard.sh:/usr/local/sbin/slax-edge-guard:ro" "$alpine_image" \
     sh -c 'apk add -q --no-cache iptables ip6tables iproute2 >/dev/null && touch /ready \
-        && for p in 22 80 443 6443 10250; do (while true; do echo ok | nc -l -p $p >/dev/null 2>&1; done) & done; sleep 3600' >/dev/null
+        && for p in 22 80 443 6443 9345 10250; do (while true; do echo ok | nc -l -p $p >/dev/null 2>&1; done) & done; sleep 3600' >/dev/null
 for _ in $(seq 1 60); do docker exec "$name-node" test -e /ready 2>/dev/null && break; sleep 1; done
 node_ip="$(docker inspect -f "{{(index .NetworkSettings.Networks \"$name\").IPAddress}}" "$name-node")"
 guard() { docker exec "$name-node" sh /usr/local/sbin/slax-edge-guard "$@"; }
@@ -46,11 +46,12 @@ rules="$(docker exec "$name-node" iptables -t mangle -S SLAX-EDGE-GUARD)"
 check "start twice: one jump from PREROUTING" test "$(docker exec "$name-node" iptables -t mangle -S PREROUTING | grep -c 'SLAX-EDGE-GUARD')" = 1
 check "... rules on the default route's interface (eth0) only" \
     test "$(printf '%s\n' "$rules" | grep -c -- '-A SLAX-EDGE-GUARD -i eth0 ')" = 2
-check "... TCP 22, 6443, 10250, 10256 and UDP 8472 dropped" \
-    sh -c "printf '%s\n' \"\$1\" | grep -q 'tcp.*--dports 22,6443,10250,10256 -j DROP' && printf '%s\n' \"\$1\" | grep -q 'udp.*--dports 8472 -j DROP'" _ "$rules"
+check "... TCP 22, 6443, 9345, 10250, 10256 and UDP 8472 dropped" \
+    sh -c "printf '%s\n' \"\$1\" | grep -q 'tcp.*--dports 22,6443,9345,10250,10256 -j DROP' && printf '%s\n' \"\$1\" | grep -q 'udp.*--dports 8472 -j DROP'" _ "$rules"
 check "... nothing about 80 or 443" sh -c "! printf '%s\n' \"\$1\" | grep -qE '(^|[ ,])(80|443)([ ,]|$)'" _ "$rules"
 
 check "guarded: 6443 times out from outside" unreachable 6443
+check "guarded: 9345 (k3s supervisor) times out from outside" unreachable 9345
 check "guarded: 10250 times out from outside" unreachable 10250
 check "guarded: 22 times out from outside" unreachable 22
 check "Caddy's 443 still answers" reach 443
