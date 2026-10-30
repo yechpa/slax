@@ -30,7 +30,7 @@ const BACKGROUNDS = ['--color-bg', '--color-band-a', '--color-band-b', '--color-
 const PAIRS: [string, string[], number][] = [
   ['--color-text', [...BACKGROUNDS, '--color-raised', '--color-hover'], 4.5],
   ['--color-text-dim', [...BACKGROUNDS, '--color-hover'], 4.5],
-  ['--color-muted', [...BACKGROUNDS, '--color-raised'], 4.5],
+  ['--color-muted', [...BACKGROUNDS, '--color-raised', '--color-hover'], 4.5],
   ['--color-accent', [...BACKGROUNDS, '--color-raised'], 4.5],
   ['--color-accent-ink', ['--color-accent'], 4.5],
   ['--color-selected-fg', ['--color-selected-bg'], 4.5],
