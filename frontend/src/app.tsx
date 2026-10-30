@@ -11,6 +11,7 @@ import { Workspace, type ConnectRealtime } from './components/Workspace.tsx'
 import { t } from './i18n/index.ts'
 import { useLocale } from './i18n/useLocale.ts'
 import { publicConfig } from './lib/publicConfig.ts'
+import { UpdateBanner } from './pwa/UpdateBanner.tsx'
 import { connectRealtime } from './realtime/echo.ts'
 import { interceptLinks } from './router.ts'
 import { boot } from './session.ts'
@@ -26,7 +27,17 @@ type Props = {
   turnstile?: TurnstileClient
 }
 
-export function App({ connect = defaultConnect, turnstile }: Props) {
+export function App(props: Props) {
+  // On every screen: an old app must not keep running unnoticed after a deploy (register.ts).
+  return (
+    <>
+      <UpdateBanner />
+      <Screen {...props} />
+    </>
+  )
+}
+
+function Screen({ connect = defaultConnect, turnstile }: Props) {
   // Every string and format follows the language; every colour the theme.
   useLocale()
   useTheme()

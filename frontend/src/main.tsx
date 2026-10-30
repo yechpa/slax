@@ -2,6 +2,7 @@ import { render } from 'preact'
 import './styles/index.css'
 import { App } from './app.tsx'
 import { initLocale } from './i18n/index.ts'
+import { registerServiceWorker } from './pwa/register.ts'
 import { listenToHistory } from './router.ts'
 import { boot, installClientEvents } from './session.ts'
 import { initTheme } from './theme.ts'
@@ -12,5 +13,7 @@ initLocale()
 installClientEvents()
 listenToHistory()
 void boot()
+// Production and e2e builds only: offline shell, installability, update banner.
+void registerServiceWorker()
 
 render(<App />, document.getElementById('app')!)

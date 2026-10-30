@@ -855,6 +855,39 @@
     font-weight: var(--weight-strong);
   }
 
+  /* A new version is ready (pwa/UpdateBanner.tsx): at the foot of the screen, above everything. */
+  .update-banner-region {
+    position: fixed;
+    inset-block-end: var(--space-4);
+    inset-inline: 0;
+    z-index: 110;
+    display: flex;
+    justify-content: center;
+    padding-inline: var(--space-4);
+    pointer-events: none;
+  }
+
+  .update-banner {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-accent);
+    border-radius: var(--radius-1);
+    box-shadow: 0 0.25rem 0 0 var(--color-shadow);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    pointer-events: auto;
+  }
+
+  .update-banner__tag {
+    color: var(--color-accent);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-strong);
+  }
+
   /* ── Small screens: drawer, touch targets ────────────── */
   @container shell (inline-size < 44rem) {
     .shell--nav-open > .shell__scrim {

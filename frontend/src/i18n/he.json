@@ -349,5 +349,8 @@
   "admin.reason.banned": "חשבון חסום",
   "admin.reason.turnstile": "בדיקת האנטי־בוט נכשלה",
   "admin.reason.other": "סיבה אחרת",
-  "admin.action.other": "פעולה אחרת"
+  "admin.action.other": "פעולה אחרת",
+
+  "pwa.update.ready": "גרסה חדשה של Slax מוכנה.",
+  "pwa.update.reload": "טעינה מחדש"
 }

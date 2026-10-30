@@ -349,5 +349,8 @@
   "admin.reason.banned": "banned account",
   "admin.reason.turnstile": "anti-bot check failed",
   "admin.reason.other": "other reason",
-  "admin.action.other": "Other action"
+  "admin.action.other": "Other action",
+
+  "pwa.update.ready": "A new version of Slax is ready.",
+  "pwa.update.reload": "Reload"
 }

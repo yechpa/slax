@@ -349,5 +349,8 @@
   "admin.reason.banned": "compte banni",
   "admin.reason.turnstile": "contrôle anti-robot échoué",
   "admin.reason.other": "autre raison",
-  "admin.action.other": "Autre action"
+  "admin.action.other": "Autre action",
+
+  "pwa.update.ready": "Une nouvelle version de Slax est prête.",
+  "pwa.update.reload": "Recharger"
 }
