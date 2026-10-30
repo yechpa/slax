@@ -59,8 +59,8 @@ function syncPreferences(me: Me): void {
 
 /**
  * Back to the sign-in screen, everything of the previous session forgotten: the stores, the
- * last open channel, Cache Storage and the browser's push subscription (the device's language
- * and theme stay).
+ * last open channel, Cache Storage and, unless the session merely expired, the browser's push
+ * subscription (the device's language and theme stay).
  */
 export function endSession(error: AuthErrorCode | null): void {
   removePref(LAST_CHANNEL_KEY)
@@ -71,7 +71,8 @@ export function endSession(error: AuthErrorCode | null): void {
     signedOut(error)
   })
   void clearAppCaches()
-  dropPushLocally()
+  // Expiry keeps this device's notifications (the person did not sign out; see pwa/push.ts).
+  if (error !== 'session_expired') dropPushLocally()
   if (route.peek().name !== 'home') navigate('/', { replace: true })
 }
 

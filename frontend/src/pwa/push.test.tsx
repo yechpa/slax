@@ -5,6 +5,7 @@ import type { Me } from '../api/types.ts'
 import { UserMenu } from '../components/UserMenu.tsx'
 import { setLocale, t } from '../i18n/index.ts'
 import { route } from '../router.ts'
+import { endSession } from '../session.ts'
 import { session } from '../store/session.ts'
 import { fakeFetch, flush, type FakeHandler } from '../test/fakes.ts'
 import { PushSettings } from './PushSettings.tsx'
@@ -15,6 +16,7 @@ import {
   forgetPushOnSignOut,
   initPush,
   listenForNotificationClicks,
+  PUSH_OWNER_KEY,
   pushStatus,
   pushSupport,
   resetPush,
@@ -108,6 +110,8 @@ let host: HTMLElement
 beforeEach(() => {
   setLocale('en')
   resetPush()
+  localStorage.clear()
+  session.value = { status: 'signed-in', me: ME }
   host = document.createElement('div')
   document.body.append(host)
 })
@@ -176,6 +180,7 @@ describe('initPush (when the account menu appears)', () => {
 
   it('already on: sends the subscription again (keys and language up to date)', async () => {
     setLocale('he')
+    localStorage.setItem(PUSH_OWNER_KEY, String(ME.id))
     fakeBrowser({ permission: 'granted', existing: subscription() })
     const { calls } = server()
     await initPush()
@@ -185,6 +190,7 @@ describe('initPush (when the account menu appears)', () => {
   })
 
   it('a subscription made with an older key (rotation) is dropped: off, to turn on again', async () => {
+    localStorage.setItem(PUSH_OWNER_KEY, String(ME.id))
     const old = subscription(OTHER_KEY)
     fakeBrowser({ permission: 'granted', existing: old })
     const { calls } = server()
@@ -192,6 +198,18 @@ describe('initPush (when the account menu appears)', () => {
     expect(old.unsubscribe).toHaveBeenCalled()
     expect(pushStatus.value).toBe('off')
     expect(pushCalls(calls)).toEqual(['GET /api/v1/push/public-key'])
+  })
+
+  it('someone else turned them on in this browser (a shared device): dropped, never taken over', async () => {
+    localStorage.setItem(PUSH_OWNER_KEY, '99')
+    const previous = subscription()
+    fakeBrowser({ permission: 'granted', existing: previous })
+    const { calls } = server()
+    await initPush()
+    expect(previous.unsubscribe).toHaveBeenCalled()
+    expect(pushStatus.value).toBe('off')
+    expect(pushCalls(calls)).toEqual(['GET /api/v1/push/public-key'])
+    expect(localStorage.getItem(PUSH_OWNER_KEY)).toBeNull()
   })
 
   it('no service worker (development server): hidden', async () => {
@@ -230,6 +248,7 @@ describe('enablePush (only from a tap or click)', () => {
       locale: 'en',
     })
     expect(pushStatus.value).toBe('on')
+    expect(localStorage.getItem(PUSH_OWNER_KEY)).toBe(String(ME.id))
   })
 
   it('refused: blocked, nothing subscribed', async () => {
@@ -294,11 +313,31 @@ describe('turning off, and signing out', () => {
     expect(pushCalls(calls)).toEqual([])
   })
 
+  it('a session that merely expired keeps the notifications (the person did not sign out)', async () => {
+    localStorage.setItem(PUSH_OWNER_KEY, String(ME.id))
+    const existing = subscription()
+    fakeBrowser({ permission: 'granted', existing })
+    server()
+    endSession('session_expired')
+    await flush()
+    expect(existing.unsubscribe).not.toHaveBeenCalled()
+    expect(localStorage.getItem(PUSH_OWNER_KEY)).toBe(String(ME.id))
+  })
+
+  it('a ban unsubscribes the browser', async () => {
+    const existing = subscription()
+    fakeBrowser({ permission: 'granted', existing })
+    server()
+    endSession('banned')
+    await flush()
+    expect(existing.unsubscribe).toHaveBeenCalled()
+  })
+
   it('signing out from the account menu removes this device before ending the session', async () => {
+    localStorage.setItem(PUSH_OWNER_KEY, String(ME.id))
     const existing = subscription()
     fakeBrowser({ permission: 'granted', existing })
     const { calls } = server()
-    session.value = { status: 'signed-in', me: ME }
     await act(async () => {
       render(<UserMenu />, host)
     })
@@ -313,6 +352,7 @@ describe('turning off, and signing out', () => {
     ])
     expect(existing.unsubscribe).toHaveBeenCalled()
     expect(session.value.status).toBe('signed-out')
+    expect(localStorage.getItem(PUSH_OWNER_KEY)).toBeNull()
   })
 })
 

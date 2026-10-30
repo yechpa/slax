@@ -14,14 +14,19 @@
  *   current language). One made with an older server key (a rotation) is dropped: the switch
  *   shows off, to turn on again.
  * - Sign-out removes this device from the account (DELETE) and unsubscribes the browser, so a
- *   shared family device stops showing the previous person's notifications. A session that
- *   ended otherwise (expired, banned) unsubscribes the browser only; the server deletes the
- *   device when the push service answers 410.
+ *   shared family device stops showing the previous person's notifications. A ban unsubscribes
+ *   the browser (the server already deleted the account's devices).
+ * - A session that merely expired (Laravel's idle timeout, an app left in the background) keeps
+ *   the subscription: the person did not sign out, and losing notifications each time would make
+ *   them useless. Who turned them on is remembered on the device (PUSH_OWNER_KEY): if someone
+ *   else signs in here, the previous person's subscription is dropped, never taken over.
  */
 import { signal } from '@preact/signals'
 import { api } from '../api/endpoints.ts'
 import { getLocale, t } from '../i18n/index.ts'
+import { readPref, removePref, writePref } from '../lib/prefs.ts'
 import { navigate, parseRoute } from '../router.ts'
+import { me } from '../store/session.ts'
 import { showToast } from '../store/ui.ts'
 import { isIos, isStandalone } from './install.ts'
 
@@ -37,6 +42,13 @@ let publicKey: string | null = null
 let generation = 0
 /** How long the app waits for a service worker still installing (first visit). */
 const READY_WAIT_MS = 10_000
+/** The id of the account that turned notifications on in this browser. */
+export const PUSH_OWNER_KEY = 'slax.pushOwner'
+
+const myId = () => {
+  const id = me.peek()?.id
+  return id === undefined ? null : String(id)
+}
 
 export function pushSupport(): 'unsupported' | 'install-first' | 'supported' {
   if (isIos() && !isStandalone()) return 'install-first'
@@ -110,9 +122,11 @@ export async function initPush(): Promise<void> {
     pushStatus.value = 'off'
     return
   }
-  if (!sameKey(existing, key)) {
+  // Someone else's (a shared device), or made with an older key (a rotation): dropped, never taken over.
+  if (readPref(PUSH_OWNER_KEY) !== myId() || !sameKey(existing, key)) {
     await existing.unsubscribe().catch(() => false)
-    pushStatus.value = 'off'
+    removePref(PUSH_OWNER_KEY)
+    if (run === generation) pushStatus.value = 'off'
     return
   }
   pushStatus.value = 'on'
@@ -145,6 +159,8 @@ async function finishEnabling(asked: Promise<NotificationPermission>, key: strin
       subscription = found ? await found.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) }) : null
       if (!subscription) throw new Error('no service worker')
       await save(subscription)
+      const owner = myId()
+      if (owner) writePref(PUSH_OWNER_KEY, owner)
     } catch {
       await subscription?.unsubscribe().catch(() => false)
       pushStatus.value = 'off'
@@ -167,6 +183,7 @@ export async function disablePush(): Promise<void> {
       await api.push.unsubscribe(subscription.endpoint).catch(() => undefined)
       await subscription.unsubscribe().catch(() => false)
     }
+    removePref(PUSH_OWNER_KEY)
     pushStatus.value = 'off'
   } finally {
     pushBusy.value = false
@@ -192,13 +209,15 @@ export async function forgetPushOnSignOut(timeoutMs = 3000): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
   await Promise.race([work.catch(() => undefined), new Promise((resolve) => (timer = setTimeout(resolve, timeoutMs)))])
   clearTimeout(timer)
+  removePref(PUSH_OWNER_KEY)
   publicKey = null
   pushStatus.value = 'hidden'
 }
 
-/** Any end of the session (expired, banned, signed out): the browser stops receiving. No server call. */
+/** A ban (or a sign-out that could not finish): the browser stops receiving. No server call. */
 export function dropPushLocally(): void {
   generation++
+  removePref(PUSH_OWNER_KEY)
   publicKey = null
   pushStatus.value = 'hidden'
   void (async () => {

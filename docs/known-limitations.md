@@ -157,8 +157,9 @@ receives the channel's events until it disconnects.
 - **Sign-out empties Cache Storage, not every trace.** All of the origin's caches are deleted at any session end
   (sign-out, expiry, ban), then the public shell is fetched again; API responses carry `Cache-Control: no-store`
   (nginx), so the HTTP cache keeps none either. The last open channel is forgotten at those and at a start-up that
-  finds no session; local storage keeps only the language and theme chosen on the device (not private), and the
-  browser's own history stays the browser's.
+  finds no session; local storage keeps only the language and theme chosen on the device (not private) and, with
+  notifications on, the id of the account that turned them on (see "Push notifications"); the browser's own
+  history stays the browser's.
 - **After a deploy, a sign-out can leave no offline shell for a while.** The refill after a sign-out is all or
   nothing: the old worker still in control refills its own list, whose hashed files the deploy removed, so it gets
   404s and stores nothing (never a mixed cache). A new version already waiting refills its own cache at once; one not
@@ -268,9 +269,13 @@ receives the channel's events until it disconnects.
   None of this alerts the administrators, and none of it can fail sending a message. There is no periodic cleanup:
   a device that silently stopped working stays until something is pushed to it; an account keeps ten devices at
   most, an eleventh replaces the one that went longest without a push.
-- **Sign-out removes this device** (DELETE, then the browser's unsubscribe, three seconds at most even offline). A
-  session that ends otherwise (expiry, ban) unsubscribes the browser only; the server deletes the device at its next
-  push (410), and a ban deletes all of the account's devices at once.
+- **Sign-out removes this device** (DELETE, then the browser's unsubscribe, three seconds at most even offline). A ban
+  deletes all of the account's devices on the server and unsubscribes the browser. A session that merely **expired**
+  (Laravel's two-hour idle timeout, typically a phone app left in the background) keeps its notifications: the person
+  did not sign out, and losing them at every expiry would make them useless. The cost, on a shared device: until
+  someone signs in there again, the previous person's notifications (sender and channel names) keep arriving. The
+  browser remembers which account turned them on (`slax.pushOwner`, an account id, in local storage): when another
+  person signs in, that subscription is dropped, never taken over.
 - **The browser renewing a subscription by itself** (`pushsubscriptionchange`) is not handled in the service worker,
   which cannot authenticate (no CSRF token there): the app sends the current subscription again each time it opens.
 - **One queue worker.** Push jobs share it with broadcasts (each push has a 5 s timeout): a burst of notifications to
