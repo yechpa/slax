@@ -36,6 +36,12 @@ class ChannelResource extends JsonResource
             'name' => $this->name,
             'topic' => $this->topic,
             'is_member' => $this->isMember ?? (bool) $this->members_exists,
+            // Direct conversations have no name: the client titles them after their members.
+            'members' => $this->when($this->isDirect(), fn () => $this->members->map(fn ($member) => [
+                'id' => $member->id,
+                'name' => $member->name,
+                'avatar_url' => $member->avatar_url,
+            ])->all()),
         ];
     }
 }

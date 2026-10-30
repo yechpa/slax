@@ -19,7 +19,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ChannelController extends Controller
 {
-    /** Public channels plus the private ones the caller belongs to. */
+    /** Public channels plus the private channels and conversations the caller belongs to. */
     public function index(Request $request): AnonymousResourceCollection
     {
         $user = $request->user();
@@ -28,11 +28,14 @@ class ChannelController extends Controller
             ->where(fn ($query) => $query
                 ->where('kind', Channel::KIND_PUBLIC)
                 ->orWhere(fn ($query) => $query
-                    ->where('kind', Channel::KIND_PRIVATE)
+                    ->whereIn('kind', [Channel::KIND_PRIVATE, Channel::KIND_DM, Channel::KIND_GROUP_DM])
                     ->whereHas('members', fn ($members) => $members->whereKey($user->id))))
             ->withExists(['members' => fn ($members) => $members->whereKey($user->id)])
             ->orderBy('name')
+            ->orderBy('id')
             ->get();
+
+        $channels->filter->isDirect()->load(['members' => fn ($members) => $members->orderBy('users.id')]);
 
         return ChannelResource::collection($channels);
     }
@@ -40,6 +43,10 @@ class ChannelController extends Controller
     public function show(Request $request, Channel $channel): ChannelResource
     {
         Gate::authorize('view', $channel);
+
+        if ($channel->isDirect()) {
+            $channel->load(['members' => fn ($members) => $members->orderBy('users.id')]);
+        }
 
         return ChannelResource::withMembership($channel, $channel->hasMember($request->user()));
     }
