@@ -3,9 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Contracts\AdminNotifier;
+use App\Support\AwsErrors;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Sleep;
 use Throwable;
 
 /**
@@ -23,6 +25,8 @@ class CheckBackupFreshness extends Command
 
     public const DISK = 'backups';
 
+    public const RETRY_SECONDS = 10;
+
     public function handle(AdminNotifier $notifier): int
     {
         $bucket = config('slax.backups.bucket');
@@ -34,16 +38,27 @@ class CheckBackupFreshness extends Command
         $prefix = trim((string) config('slax.backups.prefix'), '/');
         $maxAge = (int) config('slax.backups.max_age_hours');
 
-        try {
-            $keys = Storage::disk(self::DISK)->allFiles($prefix);
-        } catch (Throwable $e) {
-            $notifier->notify('critical', 'Database backups cannot be listed', [
-                'status' => 'list_failed',
-                'exception' => $e::class,
-            ]);
-            $this->error('Listing the backups failed: '.$e::class);
+        // One retry after a short pause: a single network blip must not page anyone.
+        $keys = null;
+        for ($attempt = 1; $attempt <= 2 && $keys === null; $attempt++) {
+            try {
+                $keys = Storage::disk(self::DISK)->allFiles($prefix);
+            } catch (Throwable $e) {
+                if ($attempt === 1) {
+                    Sleep::for(self::RETRY_SECONDS)->seconds();
 
-            return self::FAILURE;
+                    continue;
+                }
+                $root = get_class(AwsErrors::root($e));
+                $notifier->notify('critical', 'Database backups cannot be listed', [
+                    'status' => 'list_failed',
+                    'exception' => $root,
+                    'aws_error' => AwsErrors::code($e),
+                ]);
+                $this->error('Listing the backups failed: '.(AwsErrors::code($e) ?? $root));
+
+                return self::FAILURE;
+            }
         }
 
         $newest = $this->newest($keys, $prefix);

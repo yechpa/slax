@@ -1,10 +1,13 @@
 <?php
 
 use App\Contracts\AdminNotifier;
+use Aws\Command as AwsCommand;
+use Aws\S3\Exception\S3Exception;
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Sleep;
 use League\Flysystem\UnableToListContents;
 use Tests\Support\RecordingNotifier;
 
@@ -66,21 +69,50 @@ test('no backup at all raises a critical alert', function () {
         ->and($this->notifier->alerts[0]['context']['status'])->toBe('missing');
 });
 
-test('a listing error raises a critical alert naming the error class, never its message', function () {
+function deniedListing(): UnableToListContents
+{
+    return UnableToListContents::atLocation('pg', true, new S3Exception(
+        'Access Denied for arn:aws:iam::123456789012:role/x',
+        new AwsCommand('ListObjectsV2'),
+        ['code' => 'AccessDenied'],
+    ));
+}
+
+test('a persistent listing error raises a critical alert with the root class and AWS code, never the message', function () {
+    Sleep::fake();
     $disk = Mockery::mock(Filesystem::class);
-    $disk->shouldReceive('allFiles')->with('pg')->andThrow(
-        UnableToListContents::atLocation('pg', true, new RuntimeException('AccessDenied for arn:aws:iam::123456789012:role/x')),
-    );
+    $disk->shouldReceive('allFiles')->with('pg')->twice()->andThrow(deniedListing());
     Storage::set('backups', $disk);
 
     $this->artisan('backups:check-freshness')->assertFailed();
 
+    Sleep::assertSleptTimes(1);
     expect($this->notifier->alerts)->toHaveCount(1);
     $alert = $this->notifier->alerts[0];
     expect($alert['level'])->toBe('critical')
         ->and($alert['title'])->toBe('Database backups cannot be listed')
-        ->and($alert['context'])->toEqual(['status' => 'list_failed', 'exception' => UnableToListContents::class])
+        ->and($alert['context'])->toEqual(['status' => 'list_failed', 'exception' => S3Exception::class, 'aws_error' => 'AccessDenied'])
         ->and(json_encode($alert))->not->toContain('123456789012');
+});
+
+test('a single listing blip is retried once and raises nothing', function () {
+    Sleep::fake();
+    $at = now('UTC')->subHours(6);
+    $disk = Mockery::mock(Filesystem::class);
+    $calls = 0;
+    $disk->shouldReceive('allFiles')->with('pg')->twice()->andReturnUsing(function () use (&$calls, $at) {
+        if (++$calls === 1) {
+            throw deniedListing();
+        }
+
+        return ['pg/'.$at->format('Y/m/d').'/slax-'.$at->format('Ymd\\THis\\Z').'.dump'];
+    });
+    Storage::set('backups', $disk);
+
+    $this->artisan('backups:check-freshness')->assertSuccessful();
+
+    Sleep::assertSleptTimes(1);
+    expect($this->notifier->alerts)->toBe([]);
 });
 
 test('without a backups bucket nothing is checked (dev, e2e, tests)', function () {

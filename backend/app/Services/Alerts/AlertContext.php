@@ -21,7 +21,7 @@ final class AlertContext
         'route', 'method', 'exception', 'location', 'digest', 'log_channel',
         'job', 'queue', 'attempts', 'duration_ms',
         'deleted_users', 'deleted_messages', 'deleted_channels', 'deleted_files', 'failed_files', 'kept_users',
-        'age_hours', 'newest',
+        'age_hours', 'newest', 'aws_error',
     ];
 
     public const MAX_VALUE_LENGTH = 120;
