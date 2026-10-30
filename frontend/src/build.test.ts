@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,6 +35,16 @@ describe('production build', () => {
     } finally {
       delete process.env.VITE_E2E
     }
+  }, 60_000)
+
+  it('refuses VITE_E2E from the .env files Vite reads, wherever the build runs from', async () => {
+    // The env files are read from envDir (the root by default), not from the working directory.
+    const envDir = mkdtempSync(join(tmpdir(), 'slax-env-'))
+    outDirs.push(envDir)
+    writeFileSync(join(envDir, '.env.production.local'), 'VITE_E2E=true\n')
+    const outDir = mkdtempSync(join(tmpdir(), 'slax-build-'))
+    outDirs.push(outDir)
+    await expect(build({ root, envDir, logLevel: 'silent', build: { outDir, emptyOutDir: true } })).rejects.toThrow(/VITE_E2E is reserved/)
   }, 60_000)
 
   it('builds the end-to-end app (make e2e) into its own directory, never dist', async () => {
