@@ -6,7 +6,7 @@
 # chat id come from the environment only (the Secret's TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)
 # and never reach a command line: curl reads the URL and the chat id from a config on stdin.
 # Without them, alerts are printed only. TELEGRAM_API_URL exists for the local test (a fake
-# Telegram); production uses the default.
+# Telegram); production uses the default. TELEGRAM_TIMEOUT caps a call (15 s by default).
 
 : "${SLAX_ENV_LABEL:=Prod}"
 : "${TELEGRAM_API_URL:=https://api.telegram.org}"
@@ -28,7 +28,7 @@ telegram_send() {
     if printf '%s\n' \
         "url = \"${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/sendMessage\"" \
         "data-urlencode = \"chat_id=${TELEGRAM_CHAT_ID}\"" |
-        curl --silent --fail --max-time 15 --output /dev/null --config - \
+        curl --silent --fail --max-time "${TELEGRAM_TIMEOUT:-15}" --output /dev/null --config - \
             --data-urlencode "text=${text}" \
             --data-urlencode "disable_web_page_preview=true"; then
         log "alert sent."

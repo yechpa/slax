@@ -32,7 +32,7 @@ dir="$(mktemp -d)"
 mkdir -m 777 "$dir/out" "$dir/ctl" "$dir/state"
 
 cleanup() {
-    docker rm -f "$target" "$name-telegram" "$name-pg" "$name-redis" "$name-disk" > /dev/null 2>&1 || true
+    docker rm -f "$target" "$name-telegram" "$name-pg" "$name-redis" "$name-disk" "$name-killed" > /dev/null 2>&1 || true
     docker volume rm "$disk_volume" > /dev/null 2>&1 || true
     docker network rm "$name" > /dev/null 2>&1 || true
     rm -rf "$dir"
@@ -84,6 +84,14 @@ monitor() {
     printf '%s\n' "$out" >> "$dir/all-output"
 }
 set_target() { echo "$1" > "$dir/ctl/status"; }
+# preload FILE KEY=VALUE...: a state file the test writes itself (as a previous run would).
+preload() {
+    local file="$dir/state/$1"
+    shift
+    rm -f "$file"
+    printf '%s\n' "$@" > "$file"
+    chmod 666 "$file"
+}
 # fill KIB: the watched disk holds exactly one file of that size.
 fill() {
     docker exec "$name-disk" sh -c "rm -f /disk/fill; dd if=/dev/zero of=/disk/fill bs=1024 count=$1 2>/dev/null"
@@ -114,12 +122,12 @@ app=(-e "MONITOR_CHECKS=app=http://$target:8080/api/v1/health")
 echo "== health: 3 failures in a row before one alert, one recovery"
 monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/a
 check "a healthy run exits 0, silently" test "$status $(alerts)" = "0 0"
-check "... and logs a one-line summary" has "$out" 'uptime: app=ok$'
+check "... and logs a one-line summary" has "$out" 'uptime: app=ok \([0-9]+ s\)$'
 set_target 503
 monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/a
 monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/a
 check "2 failures: no alert, exit 0" test "$status $(alerts)" = "0 0"
-check "... the summary names the failure" has "$out" 'uptime: app=FAIL\(HTTP 503\)$'
+check "... the summary names the failure" has "$out" 'uptime: app=FAIL\(HTTP 503\) \([0-9]+ s\)$'
 monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/a
 check "the 3rd failure in a row: one alert" test "$(alerts)" = 1
 check "... [Prod], the check, the count, the status code and a UTC time" \
@@ -189,11 +197,11 @@ deps=(-e "MONITOR_CHECKS=postgres=pg://$name-pg:5432 redis=redis://$name-redis:6
 before="$(alerts)"
 monitor -e MONITOR_STATE_FILE=/state/d "${deps[@]}"
 check "both up: no alert (pg_isready; PING answered -NOAUTH)" test "$(alerts) $status" = "$before 0"
-check "... the summary says ok for both" has "$out" 'uptime: postgres=ok redis=ok$'
+check "... the summary says ok for both" has "$out" 'uptime: postgres=ok redis=ok \([0-9]+ s\)$'
 docker stop "$name-pg" "$name-redis" > /dev/null
 for _ in 1 2 3; do monitor -e MONITOR_STATE_FILE=/state/d "${deps[@]}"; done
 check "both down 3 times: one alert each" test "$(alerts)" = $((before + 2))
-check "... naming PostgreSQL" has "$(tail -n 2 "$dir/out/texts")" '^\[Prod\] DOWN: postgres failed 3 checks in a row \(no answer\)'
+check "... naming PostgreSQL" has "$(tail -n 2 "$dir/out/texts")" '^\[Prod\] DOWN: postgres failed 3 checks in a row \((no answer|timeout)\)'
 check "... and Redis" has "$(tail -n 2 "$dir/out/texts")" '^\[Prod\] DOWN: redis failed 3 checks in a row \((no answer|timeout)\)'
 docker start "$name-pg" "$name-redis" > /dev/null
 for _ in $(seq 1 60); do docker exec "$name-pg" pg_isready -q -h 127.0.0.1 -U slax 2> /dev/null && break; sleep 1; done
@@ -208,7 +216,7 @@ before="$(alerts)"
 fill 1024
 monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/e "${disks[@]}"
 check "10 % used: no alert" test "$(alerts)" = "$before"
-check "... two paths on one filesystem count once" has "$out" 'disk:volumes=1[01]% disk:again=same-as-volumes$'
+check "... two paths on one filesystem count once" has "$out" 'disk:volumes=1[01]% disk:again=same-as-volumes \([0-9]+ s\)$'
 fill 8800
 monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/e "${disks[@]}"
 check "86 % used: one alert" test "$(alerts)" = $((before + 1))
@@ -260,6 +268,72 @@ state_mount="$dir/state:/state:ro" monitor "${app[@]}" -e MONITOR_STATE_FILE=/st
 check "a state that cannot be saved: a warning, exit 0" test "$status" = 0
 check "... saying so" has "$out" 'WARNING: the state could not be saved'
 
+echo "== a disk that cannot be read keeps its alert flag"
+before="$(alerts)"
+preload k disk.volumes.alerted=1 "disk.volumes.last=$clock"
+monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/k -e MONITOR_DISKS=volumes=/no-such-path
+check "an unreadable disk: a warning, nothing sent" test "$(alerts)" = "$before"
+check "... saying so" has "$out" 'WARNING: cannot read the usage of disk "volumes"'
+fill 1024
+monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/k -e MONITOR_DISKS=volumes=/disk
+check "readable again, below 75 %: the all-clear still comes (the flag was kept)" \
+    matches "$(last_alert)" '\[Prod\] DISK OK: volumes disk back to 1[01]% \(below 75%\)\.'
+
+echo "== the real timeouts: everything hangs, Telegram too; the run still ends in time"
+# Five checks that never answer, at the chart's timeouts (10 s per check, 5 s per Telegram
+# call, a 35 s budget, the Job's deadline 50 s), each at its 3rd failure, two disks over
+# the threshold: 7 alerts to send to a Telegram that holds every call.
+set_target hang
+hang_checks=(-e "MONITOR_CHECKS=app=http://$target:8080/api/v1/health reverb=http://$target:8080/up public=https://10.255.255.1/api/v1/health postgres=pg://10.255.255.1:5432 redis=redis://10.255.255.1:6379"
+    -e "MONITOR_DISKS=node=/state volumes=/disk" -e MONITOR_DISK_ALERT_PERCENT=1 -e MONITOR_DISK_RECOVER_PERCENT=0
+    -e MONITOR_TIMEOUT=10 -e MONITOR_TELEGRAM_TIMEOUT=5 -e MONITOR_BUDGET_SECONDS=35 -e MONITOR_STATE_FILE=/state/t)
+preload t check.{app,reverb,public,postgres,redis}.fails=2 check.{app,reverb,public,postgres,redis}.since="$clock"
+before="$(alerts)"
+alerts > "$dir/out/hang"
+started="$(date +%s)"
+monitor "${hang_checks[@]}"
+elapsed=$(($(date +%s) - started))
+rm -f "$dir/out/hang"
+echo "      (the run took ${elapsed} s, container start included)"
+check "the run ends well inside the Job's 50 s deadline, exit 0" \
+    test "$((elapsed < 48)) $status" = "1 0"
+check "... the probes ran in parallel (one timeout for all five)" has "$out" 'uptime: app=FAIL\(timeout\) reverb=FAIL\(timeout\) public=FAIL\(timeout\) postgres=FAIL\((no answer|timeout)\) redis=FAIL\((timeout|no answer)\)'
+check "... alerts that would end past the budget are deferred, not attempted" has "$out" 'deferred to the next run \(no time left in this one\)'
+check "... nothing reached Telegram" test "$(alerts)" = "$before"
+monitor "${hang_checks[@]}"
+check "Telegram back, the next run: all 7 alerts, once each" test "$(alerts)" = $((before + 7))
+check "... the 5 checks as DOWN at their 4th failure" test "$(tail -n 7 "$dir/out/texts" | grep -c 'failed 4 checks in a row')" = 5
+check "... and the 2 disks" test "$(tail -n 7 "$dir/out/texts" | grep -c '^\[Prod\] DISK: ')" = 2
+monitor "${hang_checks[@]}"
+check "... and the run after: nothing more" test "$(alerts)" = $((before + 7))
+set_target 200
+
+echo "== killed right after an alert went out: that alert is never sent again"
+set_target 503
+two=(-e "MONITOR_CHECKS=first=http://$target:8080/a second=http://$target:8080/b" -e MONITOR_STATE_FILE=/state/u)
+preload u check.{first,second}.fails=2 check.{first,second}.since="$clock"
+before="$(alerts)"
+# Telegram takes the first alert, then holds the second one; the run is SIGKILLed meanwhile.
+echo $((before + 1)) > "$dir/out/hang"
+clock=$((clock + 60))
+docker run -d --name "$name-killed" --network "$name" --env-file "$dir/env" -e MONITOR_NOW="$clock" \
+    -u 70:70 --read-only --tmpfs /tmp:mode=1777 --cap-drop ALL --security-opt no-new-privileges \
+    -v "$dir/state:/state" "${two[@]}" "$image" uptime.sh > /dev/null
+for _ in $(seq 1 100); do [ "$(alerts)" -gt "$before" ] && break; sleep 0.1; done
+sleep 1
+docker kill "$name-killed" > /dev/null
+docker logs "$name-killed" >> "$dir/all-output" 2>&1
+docker rm "$name-killed" > /dev/null
+rm -f "$dir/out/hang"
+check "the first alert went out before the kill" test "$(alerts)" = $((before + 1))
+check "... DOWN: first" starts "$(last_alert)" '[Prod] DOWN: first failed 3 checks in a row'
+monitor "${two[@]}"
+check "the next run sends only the one that never went out" test "$(alerts)" = $((before + 2))
+check "... DOWN: second, at its 3rd failure (the killed run's look at it was never saved)" \
+    starts "$(last_alert)" '[Prod] DOWN: second failed 3 checks in a row'
+check "... DOWN: first exactly once in all" test "$(grep -c '^\[Prod\] DOWN: first ' "$dir/out/texts")" = 1
+set_target 200
+
 echo "== configuration errors fail the Job (exit 2), nothing is sent"
 before="$(alerts)"
 monitor -e MONITOR_STATE_FILE=/state/h -e MONITOR_CHECKS=app=ftp://example.invalid/
@@ -270,6 +344,8 @@ monitor -e MONITOR_STATE_FILE=/state/h -e MONITOR_CHECKS=
 check "no check at all" test "$status" = 2
 monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/h -e MONITOR_DISK_RECOVER_PERCENT=90
 check "an all-clear threshold above the alert threshold" test "$status" = 2
+monitor "${app[@]}" -e MONITOR_STATE_FILE=/state/h -e MONITOR_TIMEOUT=30 -e MONITOR_BUDGET_SECONDS=30
+check "a budget with no room for the checks and one alert" test "$status" = 2
 check "... no message sent" test "$(alerts)" = "$before"
 
 echo "== every alert, every output"

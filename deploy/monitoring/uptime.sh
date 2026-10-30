@@ -28,7 +28,15 @@
 # State (consecutive failures, what was alerted, when) lives in MONITOR_STATE_FILE, on a
 # small volume of its own: it survives pods without any access to the Kubernetes API. The
 # file is parsed, never sourced (key=integer lines only), and rewritten in place at a fixed
-# size, so saving it needs no new disk block even when the disk is full.
+# size, so saving it needs no new disk block even when the disk is full. It is saved right
+# after every alert Telegram took (a run killed later never sends that alert again), at the
+# end, and on exit (SIGTERM included).
+#
+# Time: a run must end before the Job's deadline. The checks run in parallel (the probe
+# phase costs one MONITOR_TIMEOUT); each Telegram call is capped at MONITOR_TELEGRAM_TIMEOUT;
+# an alert is attempted only if it can finish within MONITOR_BUDGET_SECONDS of the start,
+# otherwise it is left for the next run (logged as deferred, not lost). The chart keeps
+# MONITOR_BUDGET_SECONDS under the Job's activeDeadlineSeconds.
 #
 # Environment:
 #   MONITOR_CHECKS                 required: "name=URL ..." (name: [a-z][a-z0-9-]*)
@@ -38,7 +46,9 @@
 #   MONITOR_DISK_ALERT_PERCENT     80
 #   MONITOR_DISK_RECOVER_PERCENT   75
 #   MONITOR_DISK_REALERT_SECONDS   21600
-#   MONITOR_TIMEOUT                10 (seconds per check)
+#   MONITOR_TIMEOUT                10 (seconds per check; the checks run in parallel)
+#   MONITOR_TELEGRAM_TIMEOUT       5 (seconds per Telegram call)
+#   MONITOR_BUDGET_SECONDS         35 (no alert is started that could end later than this)
 #   PGUSER, PGDATABASE             names pg_isready presents (right names: no log noise)
 #   SLAX_ENV_LABEL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID   alerts (lib.sh)
 #   MONITOR_NOW                    tests only: the current time (epoch seconds)
@@ -57,6 +67,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MONITOR_DISK_RECOVER_PERCENT:=75}"
 : "${MONITOR_DISK_REALERT_SECONDS:=21600}"
 : "${MONITOR_TIMEOUT:=10}"
+: "${MONITOR_TELEGRAM_TIMEOUT:=5}"
+: "${MONITOR_BUDGET_SECONDS:=35}"
 
 # The state file's fixed size: room for ~40 entries; a bigger state is written whole.
 STATE_SIZE=2048
@@ -68,9 +80,15 @@ config_error() {
 
 is_count() { [[ "$1" =~ ^[0-9]{1,12}$ ]]; }
 
-for setting in MONITOR_FAIL_THRESHOLD MONITOR_DISK_ALERT_PERCENT MONITOR_DISK_RECOVER_PERCENT MONITOR_DISK_REALERT_SECONDS MONITOR_TIMEOUT; do
+for setting in MONITOR_FAIL_THRESHOLD MONITOR_DISK_ALERT_PERCENT MONITOR_DISK_RECOVER_PERCENT MONITOR_DISK_REALERT_SECONDS \
+    MONITOR_TIMEOUT MONITOR_TELEGRAM_TIMEOUT MONITOR_BUDGET_SECONDS; do
     is_count "${!setting}" || config_error "$setting must be a whole number"
 done
+# Room for the probes (plus a few seconds for the disks and the state) and one alert.
+[ $((MONITOR_TIMEOUT + MONITOR_TELEGRAM_TIMEOUT + 5)) -le "$MONITOR_BUDGET_SECONDS" ] ||
+    config_error "MONITOR_BUDGET_SECONDS must be at least MONITOR_TIMEOUT + MONITOR_TELEGRAM_TIMEOUT + 5"
+# lib.sh's cap on a Telegram call.
+TELEGRAM_TIMEOUT="$MONITOR_TELEGRAM_TIMEOUT"
 [ "$MONITOR_FAIL_THRESHOLD" -ge 1 ] || config_error "MONITOR_FAIL_THRESHOLD must be at least 1"
 [ "$MONITOR_DISK_RECOVER_PERCENT" -lt "$MONITOR_DISK_ALERT_PERCENT" ] ||
     config_error "MONITOR_DISK_RECOVER_PERCENT must be below MONITOR_DISK_ALERT_PERCENT"
@@ -194,21 +212,61 @@ probe() {
 
 summary=()
 
-# check NAME SPEC
+# probe_all: every check at once, each in the background writing "<ok> <detail>" to a file
+# of its own; a watchdog stops any that outlives MONITOR_TIMEOUT + 2 s (then: "timeout").
+probe_all() {
+    local entry pids=() watchdog
+    results="$(mktemp -d)"
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        (
+            probe "${entry#*=}"
+            printf '%s %s\n' "$ok" "$detail" > "$results/${entry%%=*}"
+        ) &
+        pids+=("$!")
+    done <<< "$checks"
+    [ "${#pids[@]}" -gt 0 ] || return 0
+    (
+        sleep $((MONITOR_TIMEOUT + 2))
+        kill "${pids[@]}" 2> /dev/null
+    ) &
+    watchdog=$!
+    wait "${pids[@]}" 2> /dev/null
+    kill "$watchdog" 2> /dev/null
+}
+
+# notify TEXT: telegram_send, if it can end within the run's budget. Returns 0 only when
+# Telegram took it (or is not configured: printed only).
+notify() {
+    if [ $((SECONDS + MONITOR_TELEGRAM_TIMEOUT)) -gt "$MONITOR_BUDGET_SECONDS" ]; then
+        log "deferred to the next run (no time left in this one): [${SLAX_ENV_LABEL}] $1"
+        return 1
+    fi
+    telegram_send "$1"
+}
+
+# persist: save the state now (after an alert Telegram took: never sent twice).
+persist() {
+    state_save "$MONITOR_STATE_FILE" ||
+        log "WARNING: the state could not be saved to $MONITOR_STATE_FILE: the next run starts from the previous state."
+}
+
+# check NAME: the result of its probe, the counters, the alerts.
 check() {
-    local name="$1" spec="$2" fails down since minutes k
+    local name="$1" fails down since minutes k ok=0 detail="timeout" sent=0
     k="check.$name"
     fails="$(get "$k.fails")"
     down="$(get "$k.down")"
     since="$(get "$k.since")"
-    probe "$spec"
+    if [ -s "$results/$name" ]; then read -r ok detail < "$results/$name"; fi
+    [ "$ok" = 1 ] || ok=0
     if [ "$ok" -eq 1 ]; then
         summary+=("$name=ok")
         if [ "$down" -eq 1 ]; then
             minutes="?"
             [ "$since" -eq 0 ] || minutes=$(((now - since + 59) / 60))
-            if telegram_send "RECOVERED: ${name} is answering again (${detail}) after about ${minutes} min down (${fails} failed checks)."; then
-                down=0
+            if notify "RECOVERED: ${name} is answering again (${detail}) after about ${minutes} min down (${fails} failed checks)."; then
+                down=0 sent=1
             fi
         fi
         if [ "$down" -eq 0 ]; then fails=0 since=0; fi
@@ -217,22 +275,24 @@ check() {
         fails=$((fails + 1))
         [ "$fails" -gt 1 ] && [ "$since" -ne 0 ] || since="$now"
         if [ "$fails" -ge "$MONITOR_FAIL_THRESHOLD" ] && [ "$down" -eq 0 ]; then
-            if telegram_send "DOWN: ${name} failed ${fails} checks in a row (${detail}), since $(utc_time "$since") UTC."; then
-                down=1
+            if notify "DOWN: ${name} failed ${fails} checks in a row (${detail}), since $(utc_time "$since") UTC."; then
+                down=1 sent=1
             fi
         fi
     fi
     next["$k.fails"]="$fails"
     next["$k.down"]="$down"
     next["$k.since"]="$since"
+    [ "$sent" -eq 0 ] || persist
 }
 
 # disk NAME PATH
 declare -A filesystems=()
 disk() {
-    local name="$1" path="$2" fs total used avail percent alerted last k
+    local name="$1" path="$2" fs total used avail percent alerted last k sent=0
     k="disk.$name"
-    if ! read -r fs total used avail < <(df -Pk "$path" 2> /dev/null | awk 'NR == 2 { print $1, $2, $3, $4 }') ||
+    # (Unreadable: its previous state stays as it is, copied into `next` at the start.)
+    if ! read -r fs total used avail < <(timeout 5 df -Pk "$path" 2> /dev/null | awk 'NR == 2 { print $1, $2, $3, $4 }') ||
         ! is_count "$total" || ! is_count "$used" || ! is_count "$avail" || [ $((used + avail)) -eq 0 ]; then
         summary+=("disk:$name=unknown")
         log "WARNING: cannot read the usage of disk \"$name\"."
@@ -250,17 +310,18 @@ disk() {
     last="$(get "$k.last")"
     if [ "$percent" -gt "$MONITOR_DISK_ALERT_PERCENT" ]; then
         if [ "$alerted" -eq 0 ] || [ $((now - last)) -ge "$MONITOR_DISK_REALERT_SECONDS" ]; then
-            if telegram_send "DISK: ${name} disk ${percent}% full (alert above ${MONITOR_DISK_ALERT_PERCENT}%). Reminder every $((MONITOR_DISK_REALERT_SECONDS / 3600)) h while above; all clear below ${MONITOR_DISK_RECOVER_PERCENT}%."; then
-                alerted=1 last="$now"
+            if notify "DISK: ${name} disk ${percent}% full (alert above ${MONITOR_DISK_ALERT_PERCENT}%). Reminder every $((MONITOR_DISK_REALERT_SECONDS / 3600)) h while above; all clear below ${MONITOR_DISK_RECOVER_PERCENT}%."; then
+                alerted=1 last="$now" sent=1
             fi
         fi
     elif [ "$percent" -lt "$MONITOR_DISK_RECOVER_PERCENT" ] && [ "$alerted" -eq 1 ]; then
-        if telegram_send "DISK OK: ${name} disk back to ${percent}% (below ${MONITOR_DISK_RECOVER_PERCENT}%)."; then
-            alerted=0 last=0
+        if notify "DISK OK: ${name} disk back to ${percent}% (below ${MONITOR_DISK_RECOVER_PERCENT}%)."; then
+            alerted=0 last=0 sent=1
         fi
     fi
     next["$k.alerted"]="$alerted"
     next["$k.last"]="$last"
+    [ "$sent" -eq 0 ] || persist
 }
 
 # --- Run ------------------------------------------------------------------------------------
@@ -281,9 +342,35 @@ disks="$(entries "$MONITOR_DISKS" MONITOR_DISKS '^/[^[:space:]]*$')" || exit 2
 
 state_load "$MONITOR_STATE_FILE"
 
+# `next` starts as the previous state of every configured check and disk: a save at any
+# point (after an alert, on SIGTERM) keeps what has not been looked at yet, and a disk that
+# cannot be read keeps its alert flag.
 while IFS= read -r entry; do
     [ -n "$entry" ] || continue
-    check "${entry%%=*}" "${entry#*=}"
+    for key in "check.${entry%%=*}."{fails,down,since}; do
+        [ -z "${state[$key]:-}" ] || next["$key"]="${state[$key]}"
+    done
+done <<< "$checks"
+while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    for key in "disk.${entry%%=*}."{alerted,last}; do
+        [ -z "${state[$key]:-}" ] || next["$key"]="${state[$key]}"
+    done
+done <<< "$disks"
+
+finished=""
+# shellcheck disable=SC2329 # run by the EXIT trap
+on_exit() {
+    [ -n "$finished" ] || persist
+    [ -z "${results:-}" ] || rm -rf "$results"
+}
+trap on_exit EXIT
+
+probe_all
+
+while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    check "${entry%%=*}"
 done <<< "$checks"
 
 while IFS= read -r entry; do
@@ -291,8 +378,7 @@ while IFS= read -r entry; do
     disk "${entry%%=*}" "${entry#*=}"
 done <<< "$disks"
 
-if ! state_save "$MONITOR_STATE_FILE"; then
-    log "WARNING: the state could not be saved to $MONITOR_STATE_FILE: the next run starts from the previous state."
-fi
-log "uptime: ${summary[*]}"
+persist
+finished=1
+log "uptime: ${summary[*]} (${SECONDS} s)"
 exit 0
