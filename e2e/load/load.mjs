@@ -35,6 +35,8 @@ const KEY = env('LOAD_REVERB_KEY', 'slax-e2e-key')
 const OUT = env('LOAD_OUT', '/out/results.json')
 const TURNSTILE_TEST_TOKEN = 'XXXX.DUMMY.TOKEN.XXXX'
 const HEARTBEAT_MS = 25_000
+/** Every HTTP request is abandoned after this (a stuck one would otherwise stall the run). */
+const REQUEST_TIMEOUT_MS = 10_000
 
 if (SENDERS > CLIENTS || RATE / SENDERS > 0.5) {
   console.error(`LOAD_RATE/LOAD_SENDERS must be <= 0.5 (the app allows 30 messages a minute per user) and LOAD_SENDERS <= LOAD_CLIENTS`)
@@ -97,15 +99,22 @@ class Client {
     const started = now()
     let response
     try {
-      response = await fetch(`${BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect })
+      response = await fetch(`${BASE}${path}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        redirect,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
     } catch (error) {
       record(kind, now() - started, false)
-      throw new Error(`${method} ${path}: ${error.cause?.code ?? error.message}`)
+      const reason = error.name === 'TimeoutError' ? `no answer within ${REQUEST_TIMEOUT_MS / 1000} s` : (error.cause?.code ?? error.message)
+      throw new Error(`[${phase}] ${method} ${path}: ${reason}`)
     }
     this.jar.store(response)
     const ok = response.status < 400
     record(kind, now() - started, ok)
-    if (!ok) throw new Error(`${method} ${path}: HTTP ${response.status}`)
+    if (!ok) throw new Error(`[${phase}] ${method} ${path}: HTTP ${response.status}`)
     return response
   }
 
