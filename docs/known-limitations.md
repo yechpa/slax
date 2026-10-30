@@ -71,8 +71,10 @@ receives the channel's events until it disconnects.
 `backend/app/Services/Alerts/TelegramNotifier.php`, `backend/app/Console/Commands/DemoReset.php`,
 `backend/app/Services/AuditLogger.php`.
 
-- **Audit IP behind a proxy.** `audit_logs.ip` is the request IP as Laravel resolves it. Until trusted proxies are
-  configured for the production proxy (deployment task), every row there would carry the proxy's address.
+- **Audit IP behind a proxy.** `audit_logs.ip` is the request IP as Laravel resolves it. In the clusters, nginx
+  (slax-web) takes the client address from `X-Forwarded-For` sent by the trusted proxies of `config.trustedProxies`
+  (the k3s pod network, where Traefik runs), so Laravel sees the visitor. With k3s's ServiceLB in front of Traefik,
+  the address Traefik itself sees may already be rewritten; production's front proxy is settled in Task 13.
 - **Sessions from before the session index.** A ban destroys the sessions indexed per user at sign-in. A session
   opened before that index existed is not destroyed, but it is useless: `EnsureNotBanned` refuses every request of a
   banned user and logs that session out on its next request.
@@ -80,15 +82,17 @@ receives the channel's events until it disconnects.
   most) or when they open the channel; until then their composer still shows, and a post is refused with
   `channel_locked`, explained in words.
 - **The demo reset is off by default.** `slax:demo-reset` deletes visitors' accounts and content, so it runs (on
-  schedule or by hand) only where `SLAX_DEMO_RESET_ENABLED=true`: the public showcase only, set in its Helm values
-  (Tasks 12/13). Elsewhere the command refuses unless `--force`; `make up` still seeds the demo content.
+  schedule or by hand) only where `SLAX_DEMO_RESET_ENABLED=true`: the public showcase only (`demo.resetEnabled`,
+  true in `values-prod.yaml`, false in `values-dev.yaml`). Elsewhere the command refuses unless `--force`;
+  `make up` still seeds the demo content.
 - **Banned demo accounts are kept** by the reset (their content goes): deleting one would let the person sign up
   again with the same Google account.
 - **Alert grouping without Redis** is per host (file cache) and capped at about 5 alerts a minute, critical ones
   excepted: during a Redis outage, an alert over the cap waits for the next minute, and later ones keep being
-  grouped. This fallback writes to `storage/framework/cache/data`, which must be writable by the PHP user; the
-  production images run as non-root, so the deployment (Tasks 12/13) must provide a writable path there. Without
-  it, alerts are silently dropped during a Redis outage (only the local log has them).
+  grouped. This fallback writes to `storage/framework/cache/data`, which must be writable by the PHP user: the
+  production image runs as non-root on a read-only root filesystem, and the Helm chart mounts an `emptyDir` on
+  `storage/` (the image's entry point creates `framework/cache/data` in it). The cache is per pod and lost on
+  restart, which only resets the grouping.
 - **Audit retention.** Entries are kept 180 days (`SLAX_AUDIT_RETENTION_DAYS`), then pruned daily; refused sends
   are recorded once per sender and channel per 10 minutes.
 - **The nightly demo reset is not pushed either.** Clients open at 03:00 keep showing the deleted messages until
@@ -99,3 +103,29 @@ receives the channel's events until it disconnects.
   error (memory, timeout) before that point loses it, the local log keeps the error.
 - **Locked channels and administrators.** Administrators still post in a locked channel they are a member of, so
   that they can explain the lock; a moderator who is not a member reads a public channel but posts nowhere.
+
+
+## Deployment (Helm chart, images)
+
+**Where:** `deploy/helm/slax/`, `docker/app/`, `docker/web/`, `.github/workflows/images.yml`,
+`.github/workflows/deploy-dev.yml`, `deploy/dev/BOOTSTRAP.md`.
+
+- **Single node, single replicas.** Reverb (no Redis scaling), the queue worker (ordering) and the scheduler run
+  once, replaced with `Recreate`: a deployment drops WebSocket connections for a few seconds (clients reconnect).
+  PostgreSQL and Redis restart only when their own settings change, not on an app deployment.
+- **A deployment does not wait for the CI tests.** Deploy dev follows the Images workflow on `main`; the tests ran
+  on the pull request before the merge (require them with branch protection).
+- **Dev is reachable from the LAN** as well as the tailnet unless the optional firewall rule of BOOTSTRAP.md
+  step 4 is applied (k3s's ServiceLB listens on every node address); nothing is forwarded from the Internet.
+- **Turnstile is allowed by the CSP on every page.** The SPA is one document, so `challenges.cloudflare.com` is in
+  `script-src` and `frame-src` everywhere, not only on the sign-in screen.
+- **Dev file downloads** come from MinIO on `files.dev.slax.yechpa.com`, with `nosniff` and a sandboxing CSP added
+  by a Traefik middleware. Production's file host (S3 directly or behind a CDN) and the matching `s3.publicEndpoint`
+  / `s3.filesOrigin` are Task 13's.
+- **MinIO images are Chainguard's `latest`, pinned by digest** (upstream MinIO images are gone): the digest may be
+  garbage-collected one day; dev only.
+- **The first start of a pod can fail once** to reach Redis or PostgreSQL: k3s applies a network policy to a new pod
+  a moment after it starts. The pod restarts and connects.
+- **The images take Alpine's security updates at build time** (`apk upgrade` in slax-app), so two builds of the
+  same commit can differ in OS packages. The Trivy gate fails on fixable critical vulnerabilities only.
+

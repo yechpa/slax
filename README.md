@@ -41,10 +41,27 @@ failure traces are left in `e2e/playwright-report/` and `e2e/test-results/`.
 `E2E_SCREENSHOTS=1 make e2e` also rewrites the RTL reference screenshots in
 `docs/design/e2e/`.
 
+## Deployment
+
+Development and production run the same production images
+(`ghcr.io/yechpa/slax-{app,web,scanner}`, built for amd64 and arm64 by
+`.github/workflows/images.yml`) on single-node k3s, through one Helm chart with a values
+file per environment:
+
+- `docker/app`, `docker/web`, `services/scanner`: the production Dockerfiles (`make images`
+  builds them locally).
+- `deploy/helm/slax`: the chart (`values-dev.yaml`, `values-prod.yaml`); `make chart-lint`
+  lints it, validates both renders against the Kubernetes schemas and checks its rules.
+- Development (`dev.slax.yechpa.com`, tailnet only) deploys itself on every push to `main`
+  (`.github/workflows/deploy-dev.yml`). Setting the server up, the secrets and the checklist:
+  [deploy/dev/BOOTSTRAP.md](deploy/dev/BOOTSTRAP.md).
+- Production (`slax.yechpa.com`, AWS ARM64): Task 13.
+
 ## Secrets
 
 This repository is public. `.env` is git-ignored and `.env.example` holds
-placeholders for the local stack only. Secrets are checked by gitleaks in CI and,
+placeholders for the local stack only. Deployed environments read theirs from a
+Kubernetes Secret created by hand (never in the repository). Secrets are checked by gitleaks in CI and,
 optionally, locally: `pre-commit install` (see `.pre-commit-config.yaml`).
 
 ## License
