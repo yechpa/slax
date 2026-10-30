@@ -7,7 +7,7 @@ use App\Contracts\IdentityProvider;
 use App\Http\Controllers\GoogleAuthController;
 use App\Services\FakeScannerClient;
 use App\Services\FakeTurnstile;
-use App\Services\Identity\FakeIdentityProvider;
+use App\Services\Identity\E2eIdentityProvider;
 use App\Services\Identity\GoogleIdentityProvider;
 use App\Services\ScannerClient;
 use App\Services\Turnstile;
@@ -24,11 +24,13 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        // Google and Cloudflare are never called from automated tests or E2E runs.
-        $faked = $this->app->environment(['testing', 'e2e']);
-
-        $this->app->singleton(IdentityProvider::class, $faked ? FakeIdentityProvider::class : GoogleIdentityProvider::class);
-        $this->app->singleton(Turnstile::class, $faked ? FakeTurnstile::class : Turnstile::class);
+        // Bound by environment, never by a setting: the stand-in for Google exists only in the
+        // end-to-end stack (APP_ENV=e2e). Every other environment, tests included, gets the real
+        // provider (feature tests swap in their own fake explicitly). See IdentityBindingTest.
+        $this->app->singleton(IdentityProvider::class, $this->app->environment('e2e') ? E2eIdentityProvider::class : GoogleIdentityProvider::class);
+        // Cloudflare is never called from automated tests or E2E runs (the E2E browser gets a stub
+        // widget configured with Cloudflare's always-pass test site key).
+        $this->app->singleton(Turnstile::class, $this->app->environment(['testing', 'e2e']) ? FakeTurnstile::class : Turnstile::class);
         // The scanner runs in the compose stack, E2E runs included: only unit and feature tests fake it.
         $this->app->singleton(ScannerClient::class, $this->app->environment('testing') ? FakeScannerClient::class : ScannerClient::class);
     }
@@ -38,9 +40,11 @@ class AppServiceProvider extends ServiceProvider
         // The API returns bare resources and arrays, not {"data": ...} envelopes.
         JsonResource::withoutWrapping();
 
-        RateLimiter::for('auth-start', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
+        // Per IP. The end-to-end suite signs in dozens of users from one browser container.
+        $signIns = $this->app->environment('e2e') ? 50 : 1;
+        RateLimiter::for('auth-start', fn (Request $request) => Limit::perMinute(10 * $signIns)->by($request->ip()));
         // The callback is a browser navigation: a refusal goes back to the SPA, which explains it.
-        RateLimiter::for('auth-callback', fn (Request $request) => Limit::perMinute(20)->by($request->ip())
+        RateLimiter::for('auth-callback', fn (Request $request) => Limit::perMinute(20 * $signIns)->by($request->ip())
             ->response(fn () => GoogleAuthController::failed('rate_limited')));
         RateLimiter::for('dms', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
         // One tab pings 2.4 times a minute; this leaves room for about eight.

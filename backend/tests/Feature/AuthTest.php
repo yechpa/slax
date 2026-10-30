@@ -3,12 +3,12 @@
 use App\Contracts\IdentityProvider;
 use App\Events\UserRegistered;
 use App\Models\User;
-use App\Services\Identity\FakeIdentityProvider;
 use App\Services\Identity\GoogleProfile;
 use App\Services\Identity\IdentityProviderException;
 use App\Services\Turnstile;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Testing\TestResponse;
+use Tests\Support\FakeIdentityProvider;
 use Tests\TestCase;
 
 /**
@@ -19,6 +19,9 @@ function spa(): TestCase
 {
     return test()->withHeaders(['Referer' => 'http://localhost/']);
 }
+
+// The application binds the real Google provider in tests too (see IdentityBindingTest): fake it here.
+beforeEach(fn () => app()->instance(IdentityProvider::class, new FakeIdentityProvider));
 
 function identity(): FakeIdentityProvider
 {

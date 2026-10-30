@@ -1,15 +1,18 @@
 <?php
 
-namespace App\Services\Identity;
+namespace Tests\Support;
 
 use App\Contracts\IdentityProvider;
+use App\Services\Identity\GoogleProfile;
+use App\Services\Identity\IdentityProviderException;
 use Throwable;
 
 /**
- * Stand-in for Google, bound only when APP_ENV is `testing` or `e2e`.
+ * Stand-in for Google in feature tests, bound by the tests themselves (the application binds
+ * the real provider under APP_ENV=testing; see AppServiceProvider).
  *
- * Without configuration it derives a verified profile from the code: a code
- * holding an "@" is used as the e-mail address (E2E: .../callback?code=a@b.test).
+ * Without configuration it derives a verified profile from the code: a code holding an "@"
+ * is used as the e-mail address.
  */
 class FakeIdentityProvider implements IdentityProvider
 {
@@ -48,8 +51,7 @@ class FakeIdentityProvider implements IdentityProvider
 
     public function authorizationUrl(string $state, string $nonce): string
     {
-        return rtrim((string) config('app.url'), '/').'/auth/google/callback?'.http_build_query([
-            'code' => 'e2e-user@example.test',
+        return 'https://accounts.google.com/o/oauth2/v2/auth?'.http_build_query([
             'state' => $state,
             'nonce' => $nonce,
         ]);
