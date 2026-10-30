@@ -51,7 +51,7 @@ check "... TCP 22, 6443, 9345, 10250, 10256 and UDP 8472 dropped" \
 check "... nothing about 80 or 443" sh -c "! printf '%s\n' \"\$1\" | grep -qE '(^|[ ,])(80|443)([ ,]|$)'" _ "$rules"
 
 check "guarded: 6443 times out from outside" unreachable 6443
-check "guarded: 9345 (k3s supervisor) times out from outside" unreachable 9345
+check "guarded: 9345 (extra supervisor/RKE2 port, defence in depth) times out from outside" unreachable 9345
 check "guarded: 10250 times out from outside" unreachable 10250
 check "guarded: 22 times out from outside" unreachable 22
 check "Caddy's 443 still answers" reach 443

@@ -70,8 +70,9 @@ write_files:
     encoding: b64
     content: "__SLAX_CADDYFILE_B64__"
 
-  # Drops 22/6443/9345/10250/10256 (TCP) and 8472 (UDP) arriving on the public interface, should
-  # the security group ever be opened by mistake. k3s requires it (drop-in below).
+  # Drops TCP 22/6443/10250/10256 (and 9345, the extra supervisor/RKE2 port, as defence in
+  # depth) and UDP 8472 arriving on the public interface, should the security group ever be
+  # opened by mistake. k3s requires it (drop-in below).
   - path: /usr/local/sbin/slax-edge-guard
     permissions: "0755"
     owner: root:root

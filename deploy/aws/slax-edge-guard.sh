@@ -1,9 +1,10 @@
 #!/bin/sh
 # Second line of defence behind the security group on the production node: drops what k3s
 # (and SSH) would answer on the public interface even if the security group were opened by
-# mistake. TCP 22 (SSH; sshd is off anyway), 6443 (Kubernetes API), 9345 (k3s supervisor),
-# 10250 (kubelet), 10256 (kube-proxy health) and UDP 8472 (flannel VXLAN) arriving on the
-# public interface are dropped. Nothing else is touched: Caddy's 80/443, tailscale0 (kubectl and CI come that way),
+# mistake. TCP 22 (SSH; sshd is off anyway), 6443 (Kubernetes API, also k3s's supervisor),
+# 9345 (an extra supervisor port: RKE2's, unused by k3s, closed as defence in depth), 10250
+# (kubelet), 10256 (kube-proxy health) and UDP 8472 (flannel VXLAN) arriving on the public
+# interface are dropped. Nothing else is touched: Caddy's 80/443, tailscale0 (kubectl and CI come that way),
 # the loopback, the pod network (cni0, flannel.1) and everything the node sends.
 #
 # The rules live in a chain of their own, SLAX-EDGE-GUARD, in the mangle table (jumped to from
