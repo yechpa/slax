@@ -167,6 +167,7 @@ SANCTUM_STATEFUL_DOMAINS: {{ $host | quote }}
 SLAX_ENV_LABEL: {{ required "envLabel is required (Dev or Prod)" .Values.envLabel | quote }}
 SLAX_DEMO_RESET_ENABLED: {{ ternary "true" "false" .Values.demo.resetEnabled | quote }}
 SLAX_AUDIT_RETENTION_DAYS: {{ .Values.config.auditRetentionDays | quote }}
+VAPID_SUBJECT: {{ include "slax.vapidSubject" . | quote }}
 {{- if .Values.backup.enabled }}
 SLAX_BACKUP_BUCKET: {{ .Values.backup.bucket | quote }}
 SLAX_BACKUP_PREFIX: {{ .Values.backup.prefix | quote }}
@@ -201,11 +202,26 @@ The S3 keys only without the instance role (s3.useInstanceRole).
 - TURNSTILE_SECRET
 {{- end -}}
 
-{{/* Optional: alerts are off without the Telegram pair; no administrator without ADMIN_EMAILS. */}}
+{{/*
+Optional: alerts are off without the Telegram pair; no administrator without ADMIN_EMAILS;
+Web Push is off without the VAPID pair (the public key is not secret, but the pair is kept
+together, and rotated together).
+*/}}
 {{- define "slax.optionalSecretKeys" -}}
 - ADMIN_EMAILS
 - TELEGRAM_BOT_TOKEN
 - TELEGRAM_CHAT_ID
+- VAPID_PUBLIC_KEY
+- VAPID_PRIVATE_KEY
+{{- end -}}
+
+{{/* VAPID_SUBJECT: push.subject (mailto: or https:), else the public URL. */}}
+{{- define "slax.vapidSubject" -}}
+{{- $subject := .Values.push.subject | default (include "slax.publicUrl" .) -}}
+{{- if not (regexMatch "^(mailto:[^\\s@]+@[^\\s@]+|https://[^\\s]+)$" $subject) -}}
+{{- fail (printf "push.subject %q must be a mailto: address or an https:// URL" $subject) -}}
+{{- end -}}
+{{- $subject -}}
 {{- end -}}
 
 {{- define "slax.secretRef" -}}

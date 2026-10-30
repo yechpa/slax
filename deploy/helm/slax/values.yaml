@@ -56,6 +56,14 @@ demo:
   # Only on the public showcase.
   resetEnabled: false
 
+# Web Push (VAPID). The key pair lives in the Secret only (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY:
+# both optional; without them push is off and the app hides its switch). Generate it with
+# deploy/dev/create-secrets.sh (or `php artisan slax:push-keys`); see docs/runbook.md.
+push:
+  # VAPID_SUBJECT, how the push services can reach the operator: a mailto: or https: URL.
+  # Empty: the public URL (https://<publicHost>).
+  subject: ""
+
 s3:
   region: us-east-1
   bucket: slax-files

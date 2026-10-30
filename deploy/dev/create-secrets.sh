@@ -7,12 +7,15 @@
 #
 #   sudo deploy/dev/create-secrets.sh             create it (refuses if it already exists)
 #   sudo deploy/dev/create-secrets.sh set KEY     replace one key (hidden prompt)
+#   sudo deploy/dev/create-secrets.sh vapid       new Web Push key pair (rotation: every device
+#                                                 has to turn notifications on again)
 #
 # Environment: NAMESPACE (slax), SECRET_NAME (slax-secrets), KUBECTL ("k3s kubectl"),
 # S3_KEYS=generate (dev: keys for the in-cluster MinIO), none (production: the EC2 instance
 # role, no key at all; values-prod.yaml s3.useInstanceRole) or ask (static keys for real S3).
 #
-# Generated: APP_KEY, DB_PASSWORD, REDIS_PASSWORD, REVERB_APP_KEY, REVERB_APP_SECRET and, with
+# Generated: APP_KEY, DB_PASSWORD, REDIS_PASSWORD, REVERB_APP_KEY, REVERB_APP_SECRET, the Web Push
+# pair VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY (PUSH_KEYS=none to leave push off) and, with
 # S3_KEYS=generate, AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (hexadecimal: URL- and
 # config-file-safe). Asked: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, TURNSTILE_SITE_KEY,
 # TURNSTILE_SECRET; optional (Enter to skip): ADMIN_EMAILS, TELEGRAM_BOT_TOKEN,
@@ -26,6 +29,7 @@ NAMESPACE="${NAMESPACE:-slax}"
 SECRET_NAME="${SECRET_NAME:-slax-secrets}"
 KUBECTL="${KUBECTL:-k3s kubectl}"
 S3_KEYS="${S3_KEYS:-generate}"
+PUSH_KEYS="${PUSH_KEYS:-generate}"
 
 dir="$(mktemp -d)"
 chmod 700 "$dir"
@@ -51,6 +55,26 @@ generate() {
     openssl rand -hex "$2" | tr -d '\n' > "$dir/$1"
 }
 
+b64url() {
+    base64 | tr -d '\n=' | tr '+/' '-_'
+}
+
+# vapid: a P-256 key pair for Web Push into $dir/VAPID_PUBLIC_KEY and $dir/VAPID_PRIVATE_KEY,
+# base64url, the format of `php artisan slax:push-keys` (minishlink/web-push): the public key is
+# the uncompressed point (65 bytes), the private key the scalar (32 bytes). Made here with
+# openssl because the Secret exists before any Slax pod does. Read from the key's SEC1 DER
+# encoding, a fixed 121-byte layout for P-256, and checked against openssl's own public key.
+vapid() {
+    local der="$dir/vapid.der"
+    openssl ecparam -name prime256v1 -genkey -noout -outform DER -out "$der"
+    [ "$(wc -c < "$der")" -eq 121 ] || { echo "Unexpected P-256 key encoding" >&2; exit 1; }
+    head -c 39 "$der" | tail -c 32 | b64url > "$dir/VAPID_PRIVATE_KEY"
+    tail -c 65 "$der" | b64url > "$dir/VAPID_PUBLIC_KEY"
+    [ "$(openssl ec -inform DER -in "$der" -pubout -outform DER 2>/dev/null | tail -c 65 | b64url)" = "$(cat "$dir/VAPID_PUBLIC_KEY")" ] \
+        || { echo "VAPID public key mismatch" >&2; exit 1; }
+    rm -f "$der"
+}
+
 if [ "${1:-}" = set ]; then
     key="${2:?usage: $0 set KEY}"
     [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || { echo "Not a key name: $key" >&2; exit 1; }
@@ -58,6 +82,16 @@ if [ "${1:-}" = set ]; then
     printf '{"data":{"%s":"%s"}}' "$key" "$(base64 -w0 < "$dir/$key")" > "$dir/patch.json"
     kubectl -n "$NAMESPACE" patch secret "$SECRET_NAME" --type merge --patch-file "$dir/patch.json" >/dev/null
     echo "Updated $key in $NAMESPACE/$SECRET_NAME. Restart the pods to use it:"
+    echo "  $KUBECTL -n $NAMESPACE rollout restart deployment"
+    exit 0
+fi
+
+if [ "${1:-}" = vapid ]; then
+    vapid
+    printf '{"data":{"VAPID_PUBLIC_KEY":"%s","VAPID_PRIVATE_KEY":"%s"}}' \
+        "$(base64 -w0 < "$dir/VAPID_PUBLIC_KEY")" "$(base64 -w0 < "$dir/VAPID_PRIVATE_KEY")" > "$dir/patch.json"
+    kubectl -n "$NAMESPACE" patch secret "$SECRET_NAME" --type merge --patch-file "$dir/patch.json" >/dev/null
+    echo "New VAPID pair in $NAMESPACE/$SECRET_NAME. Every device must turn notifications on again. Restart the pods:"
     echo "  $KUBECTL -n $NAMESPACE rollout restart deployment"
     exit 0
 fi
@@ -83,6 +117,11 @@ case "$S3_KEYS" in
         ;;
     none) ;;
     *) echo "S3_KEYS must be generate, none or ask" >&2; exit 1 ;;
+esac
+case "$PUSH_KEYS" in
+    generate) vapid ;;
+    none) ;;
+    *) echo "PUSH_KEYS must be generate or none" >&2; exit 1 ;;
 esac
 
 echo "Values are read without echo. Paste each one, then Enter." >&2

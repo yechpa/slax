@@ -80,6 +80,13 @@
         <server name="SLAX_ENV_LABEL" value="Dev" force="true"/>
         <env name="SLAX_DEMO_RESET_ENABLED" value="false" force="true"/>
         <server name="SLAX_DEMO_RESET_ENABLED" value="false" force="true"/>
+        <!-- Push off unless a test turns it on with a pair generated for the run (enablePush()). -->
+        <env name="VAPID_PUBLIC_KEY" value="" force="true"/>
+        <server name="VAPID_PUBLIC_KEY" value="" force="true"/>
+        <env name="VAPID_PRIVATE_KEY" value="" force="true"/>
+        <server name="VAPID_PRIVATE_KEY" value="" force="true"/>
+        <env name="VAPID_SUBJECT" value="" force="true"/>
+        <server name="VAPID_SUBJECT" value="" force="true"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
