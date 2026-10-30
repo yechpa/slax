@@ -13,13 +13,27 @@ type Props = {
 const MARGIN = 8
 const GAP = 4
 
+const CLIPPING = new Set(['auto', 'scroll', 'hidden', 'clip'])
+
+/** Is `box` (the anchor's rectangle) inside every box that clips `el` (scrolling or hidden overflow)? */
+function shownInClippers(el: HTMLElement, box: DOMRect): boolean {
+  for (let parent = el.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+    const style = getComputedStyle(parent)
+    if (!CLIPPING.has(style.overflowX) && !CLIPPING.has(style.overflowY)) continue
+    const clip = parent.getBoundingClientRect()
+    if (box.bottom <= clip.top || box.top >= clip.bottom || box.right <= clip.left || box.left >= clip.right) return false
+  }
+  return true
+}
+
 /**
  * A small panel over everything (a menu, the emoji picker), placed under its anchor and
  * aligned with its inline end, or above it when there is no room below; kept inside the
  * window. It closes on Escape (focus back to the anchor), a click elsewhere, or a resize.
  * When what is under it scrolls (the reader, or a message list keeping to its newest
- * message as one arrives), it follows its anchor, and closes once the anchor has left the
- * window: it never floats away from its anchor.
+ * message as one arrives), it follows its anchor, and closes once the anchor is out of
+ * sight (out of the window, or out of a scrolling box around it, such as under the channel
+ * header): it never floats away from its anchor. A new anchor is followed from then on.
  *
  * The position goes through two custom properties set from script (CSSOM), not a style
  * attribute: the CSP needs no 'unsafe-inline'.
@@ -29,18 +43,21 @@ export function Popover({ anchor, onClose, children, class: extra }: Props) {
   const [placed, setPlaced] = useState(false)
   const close = useRef(onClose)
   close.current = onClose
+  // The latest anchor (it may change while open), read by `place` below.
+  const anchorRef = useRef(anchor)
+  anchorRef.current = anchor
 
-  /** Placed against the anchor; false when the anchor is gone or out of the window. */
+  /** Placed against the anchor; false when the anchor is gone or out of sight. */
   const place = useRef(() => {
     const el = panel.current
-    const target = anchor.current
+    const target = anchorRef.current.current
     const at = target?.isConnected ? target.getBoundingClientRect() : null
-    if (!el || !at) return false
+    if (!el || !target || !at) return false
     const width = el.offsetWidth
     const height = el.offsetHeight
     const viewWidth = document.documentElement.clientWidth || innerWidth
     const viewHeight = document.documentElement.clientHeight || innerHeight
-    if (at.bottom < 0 || at.top > viewHeight) return false
+    if (at.bottom < 0 || at.top > viewHeight || !shownInClippers(target, at)) return false
     const rtl = getComputedStyle(el).direction === 'rtl'
     // Distance from the inline-start edge of the window, aligning the inline ends.
     const fromStart = rtl ? viewWidth - at.left - width : at.right - width
