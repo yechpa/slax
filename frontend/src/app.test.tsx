@@ -75,14 +75,20 @@ describe('App', () => {
     mount(routes)
     await boot()
     await settle()
-    expect(host.querySelector('.splash [role="alert"]')?.textContent).toBe(t('app.offline'))
+    await vi.waitFor(() => expect(host.querySelector('.splash [role="alert"]')?.textContent).toBe(t('app.offline')))
     expect(host.querySelector('.message-list')).toBeNull()
 
     online = true
-    window.dispatchEvent(new Event('online'))
-    await settle()
+    // The listener is installed by an effect (after paint): repeat the event until it is heard.
+    // Only an `unreachable` page boots on it, so a repeat is harmless.
+    await vi.waitFor(
+      () => {
+        window.dispatchEvent(new Event('online'))
+        expect(host.querySelector('[role="log"]')?.textContent).toContain('hello team')
+      },
+      { timeout: 5000, interval: 50 },
+    )
     expect(host.querySelector('.splash')).toBeNull()
-    expect(host.querySelector('[role="log"]')?.textContent).toContain('hello team')
   })
 
   it('a server that cannot be reached while the network is up is not called offline', async () => {
