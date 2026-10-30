@@ -12,7 +12,8 @@
     gap: var(--space-4);
     min-block-size: 100vh;
     min-block-size: 100dvh;
-    padding: var(--space-6) var(--space-4);
+    padding-block: calc(var(--space-6) + var(--safe-top)) calc(var(--space-6) + var(--safe-bottom));
+    padding-inline: calc(var(--space-4) + var(--safe-inline-start)) calc(var(--space-4) + var(--safe-inline-end));
     font-size: var(--text-xl);
     text-align: center;
   }
@@ -48,13 +49,15 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: var(--space-2) var(--space-6);
-    padding: var(--space-3) var(--space-4);
+    padding-block: calc(var(--space-3) + var(--safe-top)) var(--space-3);
+    padding-inline: calc(var(--space-4) + var(--safe-inline-start)) calc(var(--space-4) + var(--safe-inline-end));
   }
 
   .signin__main {
     display: grid;
     place-items: center;
-    padding: var(--space-6) var(--space-4) var(--space-16);
+    padding-block: var(--space-6) calc(var(--space-16) + var(--safe-bottom));
+    padding-inline: calc(var(--space-4) + var(--safe-inline-start)) calc(var(--space-4) + var(--safe-inline-end));
   }
 
   .signin__card {
@@ -133,15 +136,21 @@
   }
 
   /* ── Application shell ───────────────────────────────── */
+  /*
+   * The notch: the shell keeps its content clear of the side insets (landscape); the header, the
+   * footers and the sidebar take the top and bottom ones themselves, so their backgrounds still
+   * reach the screen's edges. The drawer and the thread, positioned, pad themselves.
+   */
   .shell--app {
     block-size: 100vh;
     block-size: 100dvh;
+    padding-inline: var(--safe-inline-start) var(--safe-inline-end);
     border: 0;
   }
 
   .shell--app > .sidebar {
     overflow: hidden;
-    padding-block-end: var(--space-2);
+    padding-block: calc(var(--space-4) + var(--header-safe-top)) calc(var(--space-2) + var(--footer-safe-bottom));
   }
 
   .sidebar:focus-visible {
@@ -646,7 +655,7 @@
     min-block-size: 0;
     overflow: auto;
     overscroll-behavior-y: contain;
-    padding: var(--space-4);
+    padding: var(--space-4) var(--space-4) calc(var(--space-4) + var(--footer-safe-bottom));
   }
 
   .admin__tabs {
@@ -839,7 +848,7 @@
 
   @container shell (width < 44rem) {
     .admin {
-      padding: var(--space-3);
+      padding: var(--space-3) var(--space-3) calc(var(--space-3) + var(--footer-safe-bottom));
     }
 
     .admin-status__row {
@@ -884,7 +893,8 @@
   .top-bands:has(.update-banner, .conn-banner) {
     display: flex;
     flex-direction: column;
-    padding: var(--space-2) var(--space-4);
+    padding-block: calc(var(--space-2) + var(--safe-top)) var(--space-2);
+    padding-inline: calc(var(--space-4) + var(--safe-inline-start)) calc(var(--space-4) + var(--safe-inline-end));
     background: var(--color-surface);
     border-block-end: var(--border-width) var(--rule-style) var(--color-border);
   }
@@ -905,11 +915,14 @@
    */
   .top-bands > .toast-region--app {
     position: absolute;
-    inset-block: calc(100% + 3.5rem) auto;
-    inset-inline-end: var(--space-4);
+    inset-block: calc(100% + 3.5rem + var(--header-safe-top)) auto;
+    inset-inline-end: calc(var(--space-4) + var(--safe-inline-end));
   }
 
+  /* The band has taken the top inset: the screen under it (its header, the drawer) does not again. */
   #app:has(> .top-bands :is(.update-banner, .conn-banner)) {
+    --header-safe-top: 0px;
+
     display: flex;
     flex-direction: column;
     block-size: 100vh;

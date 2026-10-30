@@ -151,6 +151,23 @@ describe('styles', () => {
     }
   })
 
+  it('reads the safe areas from env() once, the inline pair swapped for right to left', () => {
+    const tokens = stripComments(readFileSync(join(STYLES, 'tokens.css'), 'utf8'))
+    const block = (selector: string) => new RegExp(String.raw`${selector.replace(/[[\]]/g, '\\$&')}\s*\{([^}]*)\}`).exec(tokens)?.[1] ?? ''
+    const root = block(':root')
+    expect(root).toMatch(/--safe-top:\s*env\(safe-area-inset-top, 0px\)/)
+    expect(root).toMatch(/--safe-bottom:\s*env\(safe-area-inset-bottom, 0px\)/)
+    expect(root).toMatch(/--safe-inline-start:\s*env\(safe-area-inset-left, 0px\)/)
+    expect(root).toMatch(/--safe-inline-end:\s*env\(safe-area-inset-right, 0px\)/)
+    const rtl = block(":root[dir='rtl']")
+    expect(rtl).toMatch(/--safe-inline-start:\s*env\(safe-area-inset-right, 0px\)/)
+    expect(rtl).toMatch(/--safe-inline-end:\s*env\(safe-area-inset-left, 0px\)/)
+    // Everything else pads with the variables (the e2e suite emulates a notch through them).
+    for (const file of files.filter((f) => !f.endsWith('tokens.css'))) {
+      expect(stripComments(readFileSync(file, 'utf8')), relative(SRC, file)).not.toMatch(/safe-area-inset/)
+    }
+  })
+
   it('declares the cascade layer order first', () => {
     const index = stripComments(readFileSync(join(STYLES, 'index.css'), 'utf8')).trim()
     expect(index.startsWith('@layer reset, tokens, base, components, utilities;')).toBe(true)
