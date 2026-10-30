@@ -7,7 +7,7 @@ import { isApiError, onClientEvent } from './api/client.ts'
 import { api } from './api/endpoints.ts'
 import type { Me } from './api/types.ts'
 import { isLocale, plural, setLocale, t } from './i18n/index.ts'
-import { readPref } from './lib/prefs.ts'
+import { LAST_CHANNEL_KEY, readPref, removePref } from './lib/prefs.ts'
 import { clearAppCaches } from './pwa/caches.ts'
 import { navigate, route } from './router.ts'
 import { resetChannels } from './store/channels.ts'
@@ -51,8 +51,12 @@ function syncPreferences(me: Me): void {
   if (changes.locale || changes.theme) api.updateMe(changes).catch(() => undefined)
 }
 
-/** Back to the sign-in screen, everything of the previous session forgotten (Cache Storage too). */
+/**
+ * Back to the sign-in screen, everything of the previous session forgotten: the stores, the
+ * last open channel and Cache Storage (the device's language and theme stay).
+ */
 export function endSession(error: AuthErrorCode | null): void {
+  removePref(LAST_CHANNEL_KEY)
   batch(() => {
     resetChannels()
     resetTimelines()

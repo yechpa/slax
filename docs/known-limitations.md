@@ -152,8 +152,8 @@ receives the channel's events until it disconnects.
   and every hour.
 - **Sign-out empties Cache Storage, not every trace.** All of the origin's caches are deleted at any session end
   (sign-out, expiry, ban), then the public shell is fetched again; API responses carry `Cache-Control: no-store`
-  (nginx), so the HTTP cache keeps none either. Local storage keeps the language and theme chosen on the device (not
-  private), and the browser's own history stays the browser's.
+  (nginx), so the HTTP cache keeps none either. The last open channel is forgotten too; local storage keeps only the
+  language and theme chosen on the device (not private), and the browser's own history stays the browser's.
 - **The icons are rendered from `favicon.svg`**, which is still Vite's default lightning logo. Replacing the favicon
   and running `make icons` regenerates every icon (a test fails while they are out of date).
 - **The manifest is in English** (`lang: en`, name "Slax", the same in every language); the app itself follows the
