@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setLocale, t, type Locale } from '../i18n/index.ts'
 import { flush } from '../test/fakes.ts'
 import { InstallPrompt } from './InstallPrompt.tsx'
-import { installPrompt, installVariant, isIos, isStandalone, listenForInstall, type BeforeInstallPromptEvent } from './install.ts'
+import { install, installPrompt, installVariant, isIos, isStandalone, listenForInstall, type BeforeInstallPromptEvent } from './install.ts'
 
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1'
 const IPAD_DESKTOP_MODE = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15'
@@ -105,6 +105,14 @@ describe('InstallPrompt', () => {
     await flush()
     // The event can be used once: the button goes until the browser offers it again.
     expect(host.querySelector('button')).toBeNull()
+  })
+
+  it("a refused prompt (the browser's own rules, a second call) is not an error, and the event stays spent", async () => {
+    const event = promptEvent()
+    vi.mocked(event.prompt).mockRejectedValueOnce(new DOMException('already shown', 'InvalidStateError'))
+    window.dispatchEvent(event)
+    await expect(install()).resolves.toBeUndefined()
+    expect(installPrompt.value).toBeNull()
   })
 
   it('Chromium: the offer goes once the app is installed', async () => {

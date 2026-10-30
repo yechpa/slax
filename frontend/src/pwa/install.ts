@@ -53,11 +53,15 @@ export function isIos(): boolean {
   return /iPhone|iPad|iPod/.test(nav.userAgent) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1)
 }
 
-/** Shows the browser's install dialog (the event is spent, whatever the answer). */
+/** Shows the browser's install dialog (the event is spent, whatever the answer). Never rejects. */
 export async function install(): Promise<void> {
   const event = installPrompt.value
   if (!event) return
   installPrompt.value = null
-  await event.prompt()
-  await event.userChoice.catch(() => undefined)
+  try {
+    await event.prompt()
+    await event.userChoice
+  } catch {
+    // Refused by the browser (shown already, no user gesture…): the browser offers it again later.
+  }
 }
