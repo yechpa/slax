@@ -206,15 +206,19 @@ k3s runs Traefik behind its built-in ServiceLB, which listens on ports 80 and 44
 **every** address of the node, and the Kubernetes API listens on 6443 everywhere too: the
 Tailscale address, but also the LAN address. The DNS records alone do not stop a machine on
 your LAN from connecting. The LAN guard does: it drops TCP 80, 443 and 6443 arriving on the
-physical interfaces (rules in the `mangle` table, before Kubernetes' port mappings, IPv4 and
-IPv6). Traffic on `tailscale0`, on the loopback and between pods is untouched, **and so is
+physical interfaces (a chain of its own, `SLAX-LAN-GUARD`, in the `mangle` table, before
+Kubernetes' port mappings; IPv4, and IPv6 when the host has it). Traffic on `tailscale0`, on the loopback and between pods is untouched, **and so is
 every other port: SSH (22) keeps working from the LAN and from the tailnet**, so the guard
 cannot lock you out. k3s is made to require it, so the cluster never starts unguarded.
 
+Until this step is done, the Kubernetes API (6443, authenticated) and Traefik listen on the
+LAN as well: do 4.1 right after step 2 (Tailscale, step 3, is not needed for it).
+
 **YOU DO THIS**
 
-1. Your physical interfaces (every one that is not `lo`, `tailscale0`, `cni0`, `flannel.*` or
-   `veth*`; e.g. `enp0s31f6`, and `wlp2s0` if Wi-Fi is up):
+1. Your physical interfaces: every one that is not `lo`, `tailscale0`, `cni0`, `flannel.*`,
+   `veth*`, nor a bridge of Docker or libvirt (`docker0`, `br-*`, `virbr*`), which must stay
+   out of the list; e.g. `enp0s31f6`, and `wlp2s0` if Wi-Fi is up:
 
    ```sh
    ip -br link
@@ -233,7 +237,7 @@ cannot lock you out. k3s is made to require it, so the cluster never starts ungu
    EOF
    sudo systemctl daemon-reload
    sudo systemctl enable --now slax-lan-guard
-   sudo slax-lan-guard status          # every interface "guarded", for iptables and ip6tables
+   sudo slax-lan-guard status          # every interface "guarded" (iptables, and ip6tables with IPv6)
    ```
 
 3. Prove it, from **another machine on the LAN** (Tailscale off on it, or another device),
@@ -245,14 +249,33 @@ cannot lock you out. k3s is made to require it, so the cluster never starts ungu
    ssh you@LAN_IP true                              # still works
    ```
 
+   If the server has a global IPv6 address (`ip -6 -br addr show scope global`), prove IPv6
+   too, from a LAN machine with IPv6, `LAN_IP6` being that address:
+
+   ```sh
+   curl -6 -k --max-time 5 "https://[LAN_IP6]/"            # must time out
+   curl -6 -k --max-time 5 "https://[LAN_IP6]:6443/version" # must time out
+   ```
+
    and from a device on the tailnet: `curl https://dev.slax.yechpa.com/api/v1/health`
    answers (after step 10).
 
+Changing the interface list (a USB adapter, Wi-Fi turned on, an interface gone): edit
+`LAN_INTERFACES` in `/etc/default/slax-lan-guard`, then
+
+```sh
+sudo systemctl reload slax-lan-guard   # rebuilds the rules from the list; k3s keeps running
+sudo slax-lan-guard status
+```
+
+Because k3s *requires* the guard, `systemctl stop`, `restart` or `disable --now
+slax-lan-guard` **stop k3s as well** (k3s goes down first, then the rules are removed;
+`restart` brings both back). Use `reload` for list changes, never `restart`.
+
 If something goes wrong, from the machine's own console (keyboard and screen), or over SSH
-(never blocked): `sudo systemctl disable --now slax-lan-guard` removes the rules (k3s then
-refuses to start until the guard is back, or until you delete `lan-guard.conf`). A new
-network interface (a USB adapter, Wi-Fi turned on) must be added to `LAN_INTERFACES`, then
-`sudo systemctl restart slax-lan-guard`.
+(never blocked): `sudo systemctl disable --now slax-lan-guard` stops k3s and removes the
+rules; k3s then refuses to start until the guard is back, or until you delete
+`/etc/systemd/system/k3s.service.d/lan-guard.conf` (and `systemctl daemon-reload`).
 
 Also **YOU DO THIS**: check that your router forwards no port to `slax-dev`. Nothing is
 then reachable from the Internet, and the ingress serves HTTPS only (port 80 answers 404
@@ -453,6 +476,11 @@ web UI).
 
    The image workflow needs no secret: it pushes with the run's own `GITHUB_TOKEN`.
 
+   Branch protection: the image checks are named `build app (amd64)`, `build web (arm64)`,
+   ... (pull requests run only the `build` jobs; `push`, `manifest` and `tag` jobs run on
+   `main` and tags). Require the `build …` checks (and CI's `lint`, `test`, `e2e`,
+   `chart`, `secrets`) by these exact names; older names will never report.
+
 3. After the first `Images` run on `main`, make the three packages public (the cluster pulls
    them without credentials): github.com/yechpa?tab=packages → `slax-app` → Package
    settings → Change visibility → Public. Same for `slax-web` and `slax-scanner`. Check:
@@ -566,6 +594,7 @@ keeps them (StatefulSet volume claims are never deleted by Helm); delete the cla
 
 | Symptom | Look at | Usual cause |
 |---|---|---|
+| k3s stopped right after a guard command | `systemctl status k3s slax-lan-guard` | `stop`/`restart`/`disable` of `slax-lan-guard` stops k3s (it requires the guard); use `reload` for list changes, `sudo systemctl start k3s` |
 | k3s does not start after a reboot | `systemctl status k3s`, `findmnt /mnt/ssd`, `systemctl status slax-lan-guard` | the disk is not mounted, or the LAN guard failed: by design (k3s requires both); fix the cause |
 | Pods `ImagePullBackOff` | `kubectl -n slax describe pod <pod>` | packages still private on GHCR (step 9.3), or the SHA has no image (Images failed) |
 | Pod `CreateContainerConfigError` | `kubectl -n slax describe pod <pod>` | a required key missing from `slax-secrets` (step 8) |

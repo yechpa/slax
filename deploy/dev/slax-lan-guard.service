@@ -1,6 +1,9 @@
 # Keeps the dev cluster tailnet-only (deploy/dev/slax-lan-guard.sh). Started before k3s, which
 # requires it (drop-in /etc/systemd/system/k3s.service.d/lan-guard.conf): k3s never listens
-# on the LAN unguarded. Console fallback: sudo systemctl disable --now slax-lan-guard
+# on the LAN unguarded. Consequently `systemctl stop|restart|disable --now slax-lan-guard`
+# stops k3s too (k3s first, then the rules go). To apply a changed interface list without
+# touching k3s: systemctl reload slax-lan-guard (rebuilds the rules; a reload is not
+# propagated to k3s).
 [Unit]
 Description=Drop 80/443/6443 arriving on the LAN interfaces (dev is tailnet-only)
 Wants=network-pre.target
@@ -11,6 +14,7 @@ Before=network.target k3s.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/sbin/slax-lan-guard start
+ExecReload=/usr/local/sbin/slax-lan-guard start
 ExecStop=/usr/local/sbin/slax-lan-guard stop
 
 [Install]
