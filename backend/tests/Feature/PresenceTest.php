@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Channel;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\PresenceService;
@@ -427,4 +428,62 @@ test('reverb_e2e_presence_channel_announces_joins_and_leaves_without_emails', fu
         ->and((int) json_decode($left['data'], true)['user_id'])->toBe($eli->id);
 
     $danaSocket->close();
+})->group('reverb-e2e')->skip(! getenv('REVERB_E2E'), 'Opt-in: set REVERB_E2E=1 with the dev Reverb server running.');
+
+test('reverb_e2e_a_reconnect_subscribing_to_31_channels_stays_well_inside_the_rate_limit', function () {
+    // The largest realistic set: a member of 30 channels plus the workspace presence channel,
+    // re-subscribing everything at once as pusher-js does after a reconnection, twice (each
+    // socket has its own budget), then typing for a minute at the client's pace.
+    $user = User::factory()->create();
+    $channels = collect(range(1, 30))->map(fn (int $i) => privateChannel($user, "room-{$i}"));
+    $names = [...$channels->map(fn (Channel $c) => "private-channel.{$c->id}")->all(), workspaceChannel()];
+
+    foreach ([1, 2] as $reconnection) {
+        [$socket, $socketId] = openSocket();
+        foreach ($names as $name) {
+            $auth = authorizeChannelName($user, $name, $socketId)->assertOk()->json();
+            $socket->send(['event' => 'pusher:subscribe', 'data' => ['channel' => $name] + $auth]);
+        }
+        // 20 whispers: one every 3 s for a minute (TYPING_THROTTLE_MS), and a ping.
+        foreach (range(1, 20) as $_) {
+            whisperTyping($socket, $names[0]);
+        }
+        $socket->send(['event' => 'pusher:ping', 'data' => []]);
+
+        [$subscribed, $others] = $socket->countUntilQuiet('pusher_internal:subscription_succeeded');
+        expect($subscribed, "reconnection {$reconnection}")->toBe(count($names))
+            ->and(collect($others)->pluck('event')->all())->toBe(['pusher:pong']);
+        $socket->close();
+    }
+})->group('reverb-e2e')->skip(! getenv('REVERB_E2E'), 'Opt-in: set REVERB_E2E=1 with the dev Reverb server running.');
+
+test('reverb_e2e_a_flood_of_whispers_is_cut_off_at_the_rate_limit', function () {
+    $budget = (int) config('reverb.apps.apps.0.rate_limiting.max_attempts');
+    expect(config('reverb.apps.apps.0.rate_limiting.enabled'))->toBeTrue()->and($budget)->toBeGreaterThan(0);
+    $owner = User::factory()->create();
+    $member = User::factory()->create();
+    $channel = privateChannel($owner);
+    $channel->members()->attach($member->id);
+    $name = "private-channel.{$channel->id}";
+
+    $flooder = subscribeSocket($owner, $name);
+    $listener = subscribeSocket($member, $name);
+    // A modified client sends whispers in a loop: more than its whole budget.
+    foreach (range(1, $budget + 50) as $_) {
+        whisperTyping($flooder, $name);
+    }
+
+    // Its subscription and $budget + 50 whispers: the first $budget frames are taken (the
+    // whispers among them relayed), each of the other 51 refused with an error, and dropped.
+    [$relayed] = $listener->countUntilQuiet('client-typing');
+    expect($relayed)->toBe($budget - 1);
+    [$refused, $others] = $flooder->countUntilQuiet('pusher:error');
+    expect($refused)->toBe(51)->and($others)->toBe([]);
+    // Refused, not cut: the socket stays (terminate_on_limit false), and others are unaffected.
+    expect($flooder->isClosed())->toBeFalse();
+    $listener->send(['event' => 'client-typing', 'channel' => $name, 'data' => ['typing' => true]]);
+    expect($flooder->waitFor('client-typing'))->not->toBeNull();
+
+    $flooder->close();
+    $listener->close();
 })->group('reverb-e2e')->skip(! getenv('REVERB_E2E'), 'Opt-in: set REVERB_E2E=1 with the dev Reverb server running.');

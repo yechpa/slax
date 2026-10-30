@@ -86,6 +86,27 @@ final class WebSocketClient
         return null;
     }
 
+    /**
+     * Every message received until none comes for $quietSeconds: how many of them were named
+     * $event, and the others (by event name).
+     *
+     * @return array{int, list<array<string, mixed>>}
+     */
+    public function countUntilQuiet(string $event, float $quietSeconds = 1.5): array
+    {
+        $count = 0;
+        $others = [];
+        while (($message = $this->receive($quietSeconds)) !== null) {
+            if (($message['event'] ?? null) === $event) {
+                $count++;
+            } else {
+                $others[] = $message;
+            }
+        }
+
+        return [$count, $others];
+    }
+
     public function isClosed(): bool
     {
         return $this->closed;

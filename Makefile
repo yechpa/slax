@@ -66,8 +66,10 @@ test: env deps ## Run Pest, Vitest and pytest
 
 test-reverb: env deps ## Run the end-to-end WebSocket tests against the dev Reverb server
 	$(DC) up -d --wait postgres redis
-	$(DC) up -d reverb
+	# Restarted: the server runs the current code and configuration (it reads them once, at start).
+	$(DC) up -d --force-recreate reverb
 	$(DC) exec -T postgres sh -c 'psql -U "$$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '"'"'slax_test'"'"'" | grep -q 1 || createdb -U "$$POSTGRES_USER" slax_test'
+	$(RUN) app php -r 'for ($$i = 0; $$i < 60 && ! @fsockopen("reverb", 8080); $$i++) usleep(500000);'
 	$(RUN) -e REVERB_E2E=1 app vendor/bin/pest --group=reverb-e2e
 
 lint: env deps ## Run Pint, ESLint and Ruff (checks only)

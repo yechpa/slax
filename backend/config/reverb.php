@@ -87,17 +87,24 @@ return [
                 'allowed_origins' => array_values(array_filter(array_map('trim', explode(',', (string) env('REVERB_ALLOWED_ORIGINS', '*'))))),
                 'ping_interval' => env('REVERB_APP_PING_INTERVAL', 60),
                 'activity_timeout' => env('REVERB_APP_ACTIVITY_TIMEOUT', 30),
-                'max_connections' => env('REVERB_APP_MAX_CONNECTIONS'),
+                // Sockets at once, all users together (none: no cap). Beyond, a new socket is refused
+                // (pusher error 4004) and pusher-js does not retry it: see docs/known-limitations.md.
+                'max_connections' => env('REVERB_APP_MAX_CONNECTIONS') === null ? null : (int) env('REVERB_APP_MAX_CONNECTIONS'),
                 'max_message_size' => env('REVERB_APP_MAX_MESSAGE_SIZE', 10_000),
                 // Typing "whispers" (client-typing on private channels): only from sockets subscribed
                 // to the channel, relayed to the others and tagged with the sender's signed user id.
                 // The strictest setting that allows client events; deliberately not an env variable.
                 'accept_client_events_from' => 'members',
+                // Per socket: every frame it sends counts (subscriptions, pings, whispers), at most
+                // max_attempts per decay_seconds; beyond, each frame is refused (pusher error 4301)
+                // and dropped, the socket stays. On by default, everywhere: a modified client cannot
+                // make Reverb relay whispers without limit. 300 a minute leaves a reconnection that
+                // re-subscribes 30 channels and the presence channel far inside it (reverb-e2e tests).
                 'rate_limiting' => [
-                    'enabled' => env('REVERB_APP_RATE_LIMITING_ENABLED', false),
-                    'max_attempts' => env('REVERB_APP_RATE_LIMIT_MAX_ATTEMPTS', 60),
-                    'decay_seconds' => env('REVERB_APP_RATE_LIMIT_DECAY_SECONDS', 60),
-                    'terminate_on_limit' => env('REVERB_APP_RATE_LIMIT_TERMINATE', false),
+                    'enabled' => (bool) env('REVERB_APP_RATE_LIMITING_ENABLED', true),
+                    'max_attempts' => (int) env('REVERB_APP_RATE_LIMIT_MAX_ATTEMPTS', 300),
+                    'decay_seconds' => (int) env('REVERB_APP_RATE_LIMIT_DECAY_SECONDS', 60),
+                    'terminate_on_limit' => (bool) env('REVERB_APP_RATE_LIMIT_TERMINATE', false),
                 ],
             ],
         ],
