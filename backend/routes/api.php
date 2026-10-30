@@ -42,5 +42,6 @@ Route::prefix('v1')->group(function () {
         Route::delete('/messages/{message}/reactions/{emoji}', [ReactionController::class, 'destroy']);
 
         Route::post('/files', [FileController::class, 'store'])->middleware('throttle:uploads');
+        Route::get('/files/{file}/download', [FileController::class, 'download']);
     });
 });

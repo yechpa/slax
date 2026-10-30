@@ -2,7 +2,9 @@
 
 use App\Exceptions\ScannerUnavailable;
 use App\Exceptions\StorageUnavailable;
+use App\Models\Channel;
 use App\Models\File;
+use App\Models\Message;
 use App\Models\User;
 use Database\Seeders\DefaultWorkspaceSeeder;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -16,7 +18,32 @@ const MB = 1024 * 1024;
 beforeEach(function () {
     $this->seed(DefaultWorkspaceSeeder::class);
     Storage::fake('s3');
+    // Presigning is computed locally (no request is sent): a real S3 disk with dummy credentials.
+    config(['filesystems.disks.s3-public' => [
+        'driver' => 's3',
+        'key' => 'test-key',
+        'secret' => 'test-secret',
+        'region' => 'us-east-1',
+        'bucket' => 'slax-files',
+        'endpoint' => 'http://files.test',
+        'use_path_style_endpoint' => true,
+        'throw' => false,
+    ]]);
+    Storage::forgetDisk('s3-public');
 });
+
+function postedMessage(User $user, Channel $channel): Message
+{
+    return Message::factory()->create(['channel_id' => $channel->id, 'user_id' => $user->id]);
+}
+
+/** Query string of the presigned URL a download redirects to. */
+function presignedQuery(string $location): array
+{
+    parse_str((string) parse_url($location, PHP_URL_QUERY), $query);
+
+    return $query;
+}
 
 // --- Upload ---------------------------------------------------------------------------
 
@@ -269,3 +296,94 @@ test('a database failure after the object write removes the object', function ()
 
     expect(Storage::disk('s3')->allFiles())->toBe([])->and(File::count())->toBe(0);
 });
+
+// --- Download -------------------------------------------------------------------------
+
+test('only_channel_members_can_download', function () {
+    $owner = User::factory()->create();
+    $member = User::factory()->create();
+    $outsider = User::factory()->create();
+
+    $private = privateChannel($owner);
+    $private->members()->attach($member->id);
+    $inPrivate = storedFile($owner, $private, ['message_id' => postedMessage($owner, $private)->id]);
+
+    asUser($owner)->get("/api/v1/files/{$inPrivate->id}/download")->assertRedirect();
+    asUser($member)->get("/api/v1/files/{$inPrivate->id}/download")->assertRedirect();
+    asUser($outsider)->get("/api/v1/files/{$inPrivate->id}/download")->assertNotFound();
+
+    // A public channel can be read by anyone signed in, so can its files.
+    $public = publicChannel($owner);
+    $inPublic = storedFile($owner, $public, ['message_id' => postedMessage($owner, $public)->id]);
+    asUser($outsider)->get("/api/v1/files/{$inPublic->id}/download")->assertRedirect();
+
+    $dm = Channel::factory()->dm()->create();
+    $dm->members()->attach([$owner->id, $member->id]);
+    $inDm = storedFile($owner, $dm, ['message_id' => postedMessage($owner, $dm)->id]);
+    asUser($member)->get("/api/v1/files/{$inDm->id}/download")->assertRedirect();
+    asUser($outsider)->get("/api/v1/files/{$inDm->id}/download")->assertNotFound();
+
+    // Leaving the private channel ends access, even to one's own upload.
+    $private->members()->detach($member->id);
+    asUser($member)->get("/api/v1/files/{$inPrivate->id}/download")->assertNotFound();
+    asUser($owner)->get('/api/v1/files/999999/download')->assertNotFound();
+});
+
+test('guests can neither upload nor download', function () {
+    $owner = User::factory()->create();
+    $channel = publicChannel($owner);
+    $file = storedFile($owner, $channel, ['message_id' => postedMessage($owner, $channel)->id]);
+
+    $this->postJson('/api/v1/files', ['file' => uploadedFile('pixel.png', pngBytes()), 'channel_id' => $channel->id])->assertUnauthorized();
+    $this->getJson("/api/v1/files/{$file->id}/download")->assertUnauthorized();
+    // Downloads are opened as links: a plain navigation without a session gets a 401 too.
+    $this->get("/api/v1/files/{$file->id}/download", ['Accept' => 'text/html'])
+        ->assertUnauthorized()->assertJson(['message' => 'Unauthenticated.']);
+    expect(scanner()->calls)->toBe(0);
+});
+
+test('an unattached file is downloadable by its uploader only', function () {
+    $owner = User::factory()->create();
+    $member = User::factory()->create();
+    $channel = publicChannel($owner);
+    $channel->members()->attach($member->id);
+    $file = storedFile($owner, $channel);
+
+    asUser($owner)->get("/api/v1/files/{$file->id}/download")->assertRedirect();
+    asUser($member)->get("/api/v1/files/{$file->id}/download")->assertNotFound();
+});
+
+test('files of deleted messages and unfinished uploads are not served', function () {
+    $owner = User::factory()->create();
+    $channel = publicChannel($owner);
+    $message = postedMessage($owner, $channel);
+    $file = storedFile($owner, $channel, ['message_id' => $message->id]);
+    $message->forceFill(['deleted_at' => now()])->save();
+    $pending = storedFile($owner, $channel, ['scan_status' => File::STATUS_PENDING]);
+
+    asUser($owner)->get("/api/v1/files/{$file->id}/download")->assertNotFound();
+    asUser($owner)->get("/api/v1/files/{$pending->id}/download")->assertNotFound();
+});
+
+test('the download redirects to a 60 second presigned URL with the disposition and detected type', function (string $mime, string $name, string $disposition) {
+    $owner = User::factory()->create();
+    $channel = publicChannel($owner);
+    $file = storedFile($owner, $channel, ['mime' => $mime, 'display_name' => $name, 'message_id' => postedMessage($owner, $channel)->id]);
+
+    $response = asUser($owner)->get("/api/v1/files/{$file->id}/download")->assertStatus(302);
+
+    $location = $response->headers->get('Location');
+    $query = presignedQuery($location);
+    expect($location)->toStartWith("http://files.test/slax-files/{$file->storage_key}?")
+        ->and($query['X-Amz-Expires'])->toBe('60')
+        ->and($query['X-Amz-Signature'])->toMatch('/^[0-9a-f]{64}$/')
+        ->and($query['response-content-type'])->toBe($mime)
+        ->and($query['response-content-disposition'])->toBe($disposition);
+    expect($response->headers->get('Cache-Control'))->toContain('no-store')
+        ->and($response->headers->get('Referrer-Policy'))->toBe('no-referrer');
+})->with([
+    'text: attachment' => ['text/plain', 'notes.txt', "attachment; filename*=UTF-8''notes.txt"],
+    'zip: attachment, encoded' => ['application/zip', 'דוח "x"; y.zip', "attachment; filename*=UTF-8''%D7%93%D7%95%D7%97%20%22x%22%3B%20y.zip"],
+    'image: inline' => ['image/png', 'pixel.png', "inline; filename*=UTF-8''pixel.png"],
+    'pdf: inline' => ['application/pdf', 'רפורט.pdf', "inline; filename*=UTF-8''%D7%A8%D7%A4%D7%95%D7%A8%D7%98.pdf"],
+]);
