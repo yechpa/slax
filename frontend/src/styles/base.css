@@ -97,6 +97,19 @@
     color: var(--color-text-dim);
   }
 
+  /* A quick second tap on a control is a tap, never a double-tap zoom (and no click delay). */
+  a[href],
+  button,
+  input,
+  textarea,
+  select,
+  label,
+  summary,
+  [role='button'],
+  [role='menuitem'] {
+    touch-action: manipulation;
+  }
+
   ::selection {
     background: var(--color-accent);
     color: var(--color-accent-ink);

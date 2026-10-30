@@ -77,6 +77,11 @@ test('the page is set up for a phone: viewport, dynamic height, scrolling kept i
     await openDrawer(person)
     await expect(page.locator('.sidebar__scroll')).toHaveCSS('overscroll-behavior-y', 'contain')
 
+    // A double tap on a control is two taps, never a zoom (and no click delay).
+    for (const control of [page.locator('.shell__footer').getByRole('button', { name: t('en', 'action.send') }), ui(person).composer, drawerToggle(page)]) {
+      await expect(control).toHaveCSS('touch-action', 'manipulation')
+    }
+
     // A tap gets the theme's own feedback, not the browser's grey flash.
     const tapColour = await page.locator('.sidebar .nav-item').first().evaluate((element) => getComputedStyle(element).getPropertyValue('-webkit-tap-highlight-color'))
     expect(tapColour).not.toBe('')
