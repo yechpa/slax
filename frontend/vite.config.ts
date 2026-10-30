@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import preact from '@preact/preset-vite'
 import { defineConfig, type Plugin } from 'vite'
+import { serviceWorker } from './plugins/service-worker.ts'
 
 /**
  * `vite build --mode e2e` (make e2e) is the only build that lets the sign-in follow the
@@ -24,7 +25,7 @@ export default defineConfig(({ mode }) => {
   const e2e = mode === 'e2e'
 
   return {
-    plugins: [preact(), e2eOnly()],
+    plugins: [preact(), e2eOnly(), serviceWorker()],
     define: e2e ? { 'import.meta.env.VITE_E2E': JSON.stringify('true') } : undefined,
     // The design-system kitchen sink (design-system.html) and the app preview
     // (app-preview.html) are served by the dev server like any page, but a

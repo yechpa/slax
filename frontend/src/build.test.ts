@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, resolveConfig } from 'vite'
 import { afterAll, describe, expect, it } from 'vitest'
+import { precacheManifest } from '../plugins/service-worker.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const outDirs: string[] = []
@@ -25,6 +26,24 @@ describe('production build', () => {
     expect(existsSync(join(out, 'design-system.html'))).toBe(false)
     expect(existsSync(join(out, 'app-preview.html'))).toBe(false)
     expect(existsSync(join(out, 'fonts', 'OFL.txt'))).toBe(true)
+  }, 60_000)
+
+  it('ships the service worker at /sw.js: a classic script carrying its versioned precache list', async () => {
+    const out = await buildInto()
+    const sw = readFileSync(join(out, 'sw.js'), 'utf8')
+    // A classic script (registered without type: 'module', for every browser): no import/export.
+    expect(sw).not.toMatch(/^\s*(import|export)\b/m)
+    const { files, version } = precacheManifest(out)
+    expect(files).toContain('/index.html')
+    expect(files).toContain('/favicon.svg')
+    expect(files.filter((file) => file.startsWith('/assets/') && file.endsWith('.js')).length).toBeGreaterThan(0)
+    expect(files.filter((file) => file.startsWith('/fonts/') && file.endsWith('.woff2')).length).toBe(6)
+    // Not the worker itself, nor what the page never loads.
+    expect(files).not.toContain('/sw.js')
+    expect(files.filter((file) => /\.(map|txt|png)$/.test(file))).toEqual([])
+    const quoted = (text: string) => new RegExp(`[\`"']${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\`"']`)
+    for (const file of files) expect(sw).toMatch(quoted(file))
+    expect(sw).toMatch(quoted(version))
   }, 60_000)
 
   it('refuses VITE_E2E in any build but the end-to-end one, so production can never carry it', async () => {
@@ -59,5 +78,12 @@ describe('production build', () => {
     const out = await buildInto('design-system')
     expect(existsSync(join(out, 'design-system.html'))).toBe(true)
     expect(existsSync(join(out, 'app-preview.html'))).toBe(true)
+    // No service worker for the screenshots' build.
+    expect(existsSync(join(out, 'sw.js'))).toBe(false)
+  }, 60_000)
+
+  it('ships the service worker in the end-to-end build too (pwa.spec.ts)', async () => {
+    const out = await buildInto('e2e')
+    expect(existsSync(join(out, 'sw.js'))).toBe(true)
   }, 60_000)
 })
