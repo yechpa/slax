@@ -14,6 +14,12 @@
  *   catches up with `after=<newest id>` (missed messages) and refetches its latest page
  *   (edits, deletions and reactions of what is on screen); other timelines are marked
  *   stale and refetched when opened; the channel list is refetched for unread counts.
+ *   A refresh that fails keeps live events flowing and is retried with backoff
+ *   (1 s, 2 s, 4 s… at most 30 s) while the channel stays open; after 3 failures the
+ *   view offers a Retry.
+ * - While a latest page is on its way, events for that channel are held and applied
+ *   after it, through the same merge, so none is lost and none is undone by the page.
+ * - Nothing that finishes after `stop()` (sign-out) touches the stores.
  */
 import { batch } from '@preact/signals'
 import { isApiError } from '../api/client.ts'
@@ -39,6 +45,11 @@ export const PAGE_SIZE = 50
 /** Catch-up after a reconnection: up to this many pages of 100 before giving up on continuity. */
 const CATCH_UP_PAGES = 4
 export const READ_DEBOUNCE_MS = 1000
+/** Retry delays after a failed refresh: doubling from the first, capped. */
+export const RETRY_FIRST_MS = 1000
+export const RETRY_MAX_MS = 30_000
+/** Failures after which the view says so and offers a Retry. */
+export const FAILURES_BEFORE_NOTICE = 3
 const MESSAGE_EVENTS = ['message.created', 'message.updated', 'message.deleted', 'reaction.changed'] as const
 
 export interface ChatDeps {
@@ -57,6 +68,14 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   const refusals = new Map<number, number>()
   const loads = new Map<number, AbortController>()
   const readTimers = new Map<number, ReturnType<typeof setTimeout>>()
+  /** Still readable when the debounce ends? (visible, focused, at the bottom), per channel. */
+  const readChecks = new Map<number, () => boolean>()
+  /** Events received while a latest page is on its way, applied after it. */
+  const held = new Map<number, Message[]>()
+  /** Failed refreshes of the open channel: consecutive failures and the pending retry. */
+  const retries = new Map<number, { failures: number; timer?: ReturnType<typeof setTimeout> }>()
+  /** Bumped by stop(): anything that finishes under an older generation is ignored. */
+  let generation = 0
   /** Message ids already counted as unread, so a repeated event never counts twice. */
   const counted = new Set<number>()
   let current: number | null = null
@@ -65,7 +84,10 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   const meId = () => me.peek()?.id ?? null
 
   async function refreshChannels(): Promise<void> {
-    setChannels(await api.channels())
+    const started = generation
+    const list = await api.channels()
+    if (started !== generation) return
+    setChannels(list)
     syncSubscriptions()
   }
 
@@ -105,7 +127,10 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     const loaded = peekTimeline(key)
     const known = loaded?.entries.some((e) => e.kind === 'server' && e.message.id === message.id) ?? false
     batch(() => {
-      if (loaded && loaded.status !== 'idle' && !loaded.stale) {
+      if (loads.has(channelId)) {
+        // A latest page is on its way: applied after it (see loadLatest).
+        held.get(channelId)?.push(message)
+      } else if (loaded && loaded.status !== 'idle' && !loaded.stale) {
         updateTimeline(key, (t) => withEntries(t, mergeMessages(t.entries, [message], meId())))
       }
       const mine = !message.deleted && message.user.id === meId()
@@ -151,13 +176,23 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
    */
   function closeChannel(channelId: number): void {
     if (current === channelId) current = null
+    // A refresh still being retried: give up for now, the next opening refetches.
+    if (retries.has(channelId)) {
+      clearTimeout(retries.get(channelId)!.timer)
+      retries.delete(channelId)
+      updateTimeline(channelKey(channelId), (t) => ({ ...t, stale: true, refreshFailed: false }))
+    }
     // The reader was at the bottom a moment ago: that read counts now, not a second later.
     const pendingRead = readTimers.get(channelId)
     if (pendingRead !== undefined) {
       clearTimeout(pendingRead)
       readTimers.delete(channelId)
-      void markRead(channelId)
-      return
+      const stillReadable = readChecks.get(channelId)
+      readChecks.delete(channelId)
+      if (!stillReadable || stillReadable()) {
+        void markRead(channelId)
+        return
+      }
     }
     const channel = channelById.peek().get(channelId)
     const t = peekTimeline(channelKey(channelId))
@@ -168,38 +203,104 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     if (unseen > channel.unread_count) setUnread(channelId, unseen)
   }
 
+  /**
+   * The latest page, replacing the window (first load, stale timeline, gap too large).
+   * Events arriving meanwhile are held and merged after the page, so an event the
+   * page's query did not see yet is kept, and one it did see is not undone.
+   */
   async function loadLatest(channelId: number): Promise<void> {
     const key = channelKey(channelId)
+    const started = generation
     loads.get(channelId)?.abort()
     const controller = new AbortController()
     loads.set(channelId, controller)
+    if (!held.has(channelId)) held.set(channelId, [])
     updateTimeline(key, (t) => (t.status === 'ready' ? t : { ...t, status: 'loading' }))
     try {
       const page = await api.messages(channelId, { limit: PAGE_SIZE }, controller.signal)
+      if (started !== generation) return
+      const events = takeHeld(channelId)
       updateTimeline(key, (t) => ({
         ...t,
-        entries: resetTo(t.entries, page.data.filter(isTopLevel), meId()),
+        entries: mergeMessages(resetTo(t.entries, page.data.filter(isTopLevel), meId()), events, meId()),
         hasMoreBefore: page.has_more,
         status: 'ready',
         stale: false,
+        refreshFailed: false,
       }))
+      refreshed(channelId)
     } catch (error) {
-      if (isApiError(error, 'aborted')) return
-      updateTimeline(key, (t) => (t.status === 'ready' ? t : { ...t, status: 'error' }))
+      // Aborted by a newer load, which keeps the held events.
+      if (isApiError(error, 'aborted') || started !== generation) return
+      const events = takeHeld(channelId)
+      const before = peekTimeline(key)
+      updateTimeline(key, (t) => {
+        if (t.status !== 'ready') return { ...t, status: 'error', entries: mergeMessages(t.entries, events, meId()) }
+        // A stale window would show a gap with events after it: they come with the retry.
+        return t.stale ? t : withEntries(t, mergeMessages(t.entries, events, meId()))
+      })
+      if (before?.status === 'ready') refreshFailed(channelId)
     } finally {
       if (loads.get(channelId) === controller) loads.delete(channelId)
     }
   }
 
-  /** Infinite scroll upwards: the page just older than what is loaded. */
-  async function loadOlder(channelId: number): Promise<void> {
+  function takeHeld(channelId: number): Message[] {
+    const events = held.get(channelId) ?? []
+    held.delete(channelId)
+    return events
+  }
+
+  /** Brings the open channel up to date: catch-up when its window is sound, else a fresh page. */
+  function refresh(channelId: number): Promise<void> {
+    const t = peekTimeline(channelKey(channelId))
+    return t && t.status === 'ready' && !t.stale ? catchUp(channelId) : loadLatest(channelId)
+  }
+
+  function refreshed(channelId: number): void {
+    const retry = retries.get(channelId)
+    if (!retry) return
+    clearTimeout(retry.timer)
+    retries.delete(channelId)
+  }
+
+  /** A refresh of the open channel failed: try again later (backoff), say so after a few. */
+  function refreshFailed(channelId: number): void {
+    if (channelId !== current) {
+      updateTimeline(channelKey(channelId), (t) => (t.status === 'idle' ? t : { ...t, stale: true }))
+      return
+    }
+    const retry = retries.get(channelId) ?? { failures: 0 }
+    retry.failures += 1
+    clearTimeout(retry.timer)
+    const delay = Math.min(RETRY_FIRST_MS * 2 ** (retry.failures - 1), RETRY_MAX_MS)
+    retry.timer = setTimeout(() => void refresh(channelId), delay)
+    retries.set(channelId, retry)
+    if (retry.failures >= FAILURES_BEFORE_NOTICE) updateTimeline(channelKey(channelId), (t) => ({ ...t, refreshFailed: true }))
+  }
+
+  /** The view's Retry: now, without waiting for the next backoff step. */
+  function retryRefresh(channelId: number): void {
+    clearTimeout(retries.get(channelId)?.timer)
+    void refresh(channelId)
+  }
+
+  /**
+   * Infinite scroll upwards: the page just older than what is loaded. After a failure,
+   * scrolling no longer retries by itself (it would hammer the server on every scroll
+   * event): the view shows a Retry, which passes `force`.
+   */
+  async function loadOlder(channelId: number, { force = false } = {}): Promise<void> {
     const key = channelKey(channelId)
     const t = peekTimeline(key)
     const before = t ? oldestId(t.entries) : null
     if (!t || t.status !== 'ready' || t.loadingOlder || !t.hasMoreBefore || before === null) return
-    updateTimeline(key, (x) => ({ ...x, loadingOlder: true }))
+    if (t.olderFailed && !force) return
+    const started = generation
+    updateTimeline(key, (x) => ({ ...x, loadingOlder: true, olderFailed: false }))
     try {
       const page = await api.messages(channelId, { before, limit: PAGE_SIZE })
+      if (started !== generation) return
       updateTimeline(key, (x) => ({
         ...x,
         entries: mergeMessages(x.entries, page.data.filter(isTopLevel), meId()),
@@ -207,7 +308,8 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
         loadingOlder: false,
       }))
     } catch {
-      updateTimeline(key, (x) => ({ ...x, loadingOlder: false }))
+      if (started !== generation) return
+      updateTimeline(key, (x) => ({ ...x, loadingOlder: false, olderFailed: true }))
     }
   }
 
@@ -237,11 +339,14 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     const key = channelKey(channelId)
     const pending = findPending(peekTimeline(key)?.entries ?? [], clientId)
     if (!pending) return
+    const started = generation
     try {
       const message = await api.postMessage(channelId, { body: pending.body, client_id: clientId, parent_id: pending.parentId })
+      if (started !== generation) return
       updateTimeline(key, (t) => withEntries(t, mergeMessages(t.entries, [message], meId())))
     } catch (error) {
-      // Still pending unless the realtime copy confirmed it meanwhile.
+      if (started !== generation) return
+      // Still pending unless the realtime copy confirmed it meanwhile (then this is a no-op).
       updateTimeline(key, (t) =>
         withEntries(t, updatePending(t.entries, clientId, { status: 'failed', error: isApiError(error) ? error.code : 'network' })),
       )
@@ -250,15 +355,21 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
 
   /**
    * The view calls this while the channel is visible, focused and scrolled to the bottom.
-   * After a quiet second, the newest message becomes the read pointer (locally at once,
-   * then on the server).
+   * After a quiet second, and if `stillReadable()` still says so then (the tab may have
+   * been hidden, the window left, the list scrolled up meanwhile), the newest message
+   * becomes the read pointer: locally at once, then on the server.
    */
-  function noteReadable(channelId: number): void {
+  function noteReadable(channelId: number, stillReadable?: () => boolean): void {
     clearTimeout(readTimers.get(channelId))
+    if (stillReadable) readChecks.set(channelId, stillReadable)
+    else readChecks.delete(channelId)
     readTimers.set(
       channelId,
       setTimeout(() => {
         readTimers.delete(channelId)
+        const check = readChecks.get(channelId)
+        readChecks.delete(channelId)
+        if (check && !check()) return
         void markRead(channelId)
       }, READ_DEBOUNCE_MS),
     )
@@ -303,18 +414,29 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
       return
     }
     const after = newestId(t.entries)
+    const started = generation
     try {
       const [latest, missed] = await Promise.all([api.messages(channelId, { limit: PAGE_SIZE }), fetchAfter(channelId, after)])
+      if (started !== generation) return
       updateTimeline(key, (x) => {
         if (!missed.complete) {
           // Too much happened meanwhile: start again from the latest page.
-          return { ...x, entries: resetTo(x.entries, latest.data.filter(isTopLevel), meId()), hasMoreBefore: latest.has_more, stale: false }
+          return {
+            ...x,
+            entries: resetTo(x.entries, latest.data.filter(isTopLevel), meId()),
+            hasMoreBefore: latest.has_more,
+            stale: false,
+            refreshFailed: false,
+          }
         }
         const repaired = mergeMessages(x.entries, [...missed.messages, ...latest.data].filter(isTopLevel), meId())
-        return { ...withEntries(x, repaired), stale: false }
+        return { ...withEntries(x, repaired), stale: false, refreshFailed: false }
       })
+      refreshed(channelId)
     } catch {
-      updateTimeline(key, (x) => ({ ...x, stale: true }))
+      if (started !== generation) return
+      // The window stays sound and live events keep merging; the catch-up is retried.
+      refreshFailed(channelId)
     }
   }
 
@@ -345,6 +467,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   }
 
   function stop(): void {
+    generation += 1
     stopReconnect?.()
     stopReconnect = null
     for (const unsubscribe of subscriptions.values()) unsubscribe()
@@ -354,6 +477,10 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     loads.clear()
     for (const timer of readTimers.values()) clearTimeout(timer)
     readTimers.clear()
+    readChecks.clear()
+    held.clear()
+    for (const retry of retries.values()) clearTimeout(retry.timer)
+    retries.clear()
     current = null
   }
 
@@ -366,6 +493,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     closeChannel,
     loadLatest,
     loadOlder,
+    retryRefresh,
     send,
     retry,
     discard,

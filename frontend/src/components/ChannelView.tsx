@@ -14,7 +14,8 @@ import { me } from '../store/session.ts'
 import { drafts, showToast } from '../store/ui.ts'
 import { Button } from './ui/Button.tsx'
 import { ChannelName } from './ui/ChannelName.tsx'
-import { charCount, Composer } from './ui/Composer.tsx'
+import { Composer } from './ui/Composer.tsx'
+import { charCount, trimBody } from '../lib/text.ts'
 import { TypingIndicator } from './ui/TypingIndicator.tsx'
 import { channelLabel } from './channelNames.ts'
 import { useChat } from './chatContext.ts'
@@ -23,9 +24,6 @@ import { NavToggle } from './NavToggle.tsx'
 
 export const MAX_BODY = 4000
 export const LAST_CHANNEL_KEY = 'slax.lastChannel'
-
-/** Trimmed like the server does: plain whitespace only (bidi marks at the edges are kept). */
-const trimBody = (text: string) => text.replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g, '')
 
 type Props = {
   channel: Channel
@@ -80,10 +78,12 @@ export function ChannelView({ channel, navOpen, onToggleNav, toggleRef }: Props)
         meId={meId}
         unreadAfter={unreadAfter}
         onLoadOlder={() => void chat.loadOlder(channel.id)}
+        onRetryOlder={() => void chat.loadOlder(channel.id, { force: true })}
         onRetryLoad={() => void chat.loadLatest(channel.id)}
+        onRetryRefresh={() => chat.retryRefresh(channel.id)}
         onRetry={(clientId) => chat.retry(channel.id, clientId)}
         onDiscard={(clientId) => chat.discard(channel.id, clientId)}
-        onAtBottom={() => chat.noteReadable(channel.id)}
+        onAtBottom={(stillReadable) => chat.noteReadable(channel.id, stillReadable)}
       />
 
       <footer class="shell__footer">

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { setLocale } from '../i18n/index.ts'
 import { mergeMessages, pendingEntry, addPending } from '../store/merge.ts'
 import { ME, DANA, live, tombstone } from '../test/fixtures.ts'
@@ -36,5 +36,33 @@ describe('buildRows', () => {
     const entries = mergeMessages([], [live(1), live(2)], ME.id)
     expect(buildRows(entries, ME.id, null).some((r) => r.kind === 'unread')).toBe(false)
     expect(buildRows(entries, ME.id, 2).some((r) => r.kind === 'unread')).toBe(false)
+  })
+})
+
+describe('MessageList retries', () => {
+  it('offers a Retry for a failed older page and for a refresh that keeps failing', async () => {
+    const { render } = await import('preact')
+    const { MessageList } = await import('./MessageList.tsx')
+    const { emptyTimeline } = await import('../store/messages.ts')
+    setLocale('en')
+    const host = document.createElement('div')
+    document.body.append(host)
+    const onRetryOlder = vi.fn()
+    const onRetryRefresh = vi.fn()
+    const timeline = { ...emptyTimeline(), status: 'ready' as const, entries: mergeMessages([], [live(1)], ME.id), hasMoreBefore: true, olderFailed: true, refreshFailed: true }
+    const noop = () => undefined
+    render(
+      <MessageList label="#general" timeline={timeline} meId={ME.id} unreadAfter={null} onLoadOlder={noop} onRetryOlder={onRetryOlder}
+        onRetryLoad={noop} onRetryRefresh={onRetryRefresh} onRetry={noop} onDiscard={noop} onAtBottom={noop} />,
+      host,
+    )
+    expect(host.querySelector('.message-list__edge--failed')?.textContent).toContain('Earlier messages could not be loaded.')
+    host.querySelector<HTMLButtonElement>('.message-list__edge--failed button')!.click()
+    expect(onRetryOlder).toHaveBeenCalledOnce()
+    expect(host.querySelector('[role="status"] .refresh-notice')?.textContent).toContain('This channel could not be brought up to date.')
+    host.querySelector<HTMLButtonElement>('.refresh-notice button')!.click()
+    expect(onRetryRefresh).toHaveBeenCalledOnce()
+    render(null, host)
+    host.remove()
   })
 })

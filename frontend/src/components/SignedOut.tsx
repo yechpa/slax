@@ -26,6 +26,7 @@ const KNOWN_ERRORS = new Set([
   'banned',
   'rate_limited',
   'turnstile_failed',
+  'turnstile_unavailable',
   'session_expired',
   'network',
 ])
@@ -42,15 +43,24 @@ function takeAuthErrorFromUrl(): string | null {
   return code.slice(0, 40)
 }
 
-/** Only web addresses: never let a response steer the browser to javascript: or data:. */
-function isWebUrl(value: string): boolean {
+/**
+ * Where the sign-in may send the browser: Google's consent page over HTTPS, nothing else.
+ * In development and end-to-end runs the fake identity provider sends it back to this
+ * app's own origin instead, which is allowed only there (`allowSameOrigin`).
+ */
+export function isAllowedSignInRedirect(value: string, { allowSameOrigin }: { allowSameOrigin: boolean }): boolean {
+  let url: URL
   try {
-    const url = new URL(value, location.href)
-    return url.protocol === 'https:' || url.protocol === 'http:'
+    url = new URL(value, location.href)
   } catch {
     return false
   }
+  if (url.protocol === 'https:' && url.hostname === 'accounts.google.com' && url.username === '' && url.password === '') return true
+  return allowSameOrigin && url.origin === location.origin
 }
+
+/** The Vite dev server, or a build made for end-to-end tests (VITE_E2E=true). */
+const fakeProviderAllowed = () => import.meta.env.DEV || import.meta.env.VITE_E2E === 'true'
 
 type Props = {
   /** Why the previous session ended, if it did (session_expired, banned). */
@@ -77,7 +87,7 @@ export function SignedOut({ error = null, turnstile = cloudflareTurnstile, goTo 
     try {
       const token = await turnstile.token(widget.current, { locale: getLocale(), theme: getTheme() })
       const { redirect_url: target } = await api.startGoogle(token)
-      if (!isWebUrl(target)) throw new Error('unexpected redirect')
+      if (!isAllowedSignInRedirect(target, { allowSameOrigin: fakeProviderAllowed() })) throw new Error('unexpected redirect')
       // Stays "pending" while the browser leaves for Google.
       goTo(target)
     } catch (caught) {
@@ -125,7 +135,7 @@ export function SignedOut({ error = null, turnstile = cloudflareTurnstile, goTo 
 }
 
 function failureCode(error: unknown): string {
-  if (error instanceof TurnstileError) return 'turnstile_failed'
+  if (error instanceof TurnstileError) return error.reason === 'unavailable' ? 'turnstile_unavailable' : 'turnstile_failed'
   if (isApiError(error)) {
     if (error.code === 'network') return 'network'
     if (error.status === 429) return 'rate_limited'

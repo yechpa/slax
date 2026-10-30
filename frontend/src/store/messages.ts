@@ -15,9 +15,21 @@ export interface Timeline {
   loadingOlder: boolean
   /** Possibly out of date (events were missed while disconnected): refetched when opened. */
   stale: boolean
+  /** Refreshing after a reconnection keeps failing (it is retried; the view offers a Retry). */
+  refreshFailed: boolean
+  /** The last older page failed: no more automatic tries until the reader asks. */
+  olderFailed: boolean
 }
 
-export const emptyTimeline = (): Timeline => ({ entries: [], hasMoreBefore: false, status: 'idle', loadingOlder: false, stale: false })
+export const emptyTimeline = (): Timeline => ({
+  entries: [],
+  hasMoreBefore: false,
+  status: 'idle',
+  loadingOlder: false,
+  stale: false,
+  refreshFailed: false,
+  olderFailed: false,
+})
 
 export const channelKey = (channelId: number) => `c:${channelId}`
 

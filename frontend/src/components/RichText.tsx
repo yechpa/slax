@@ -12,8 +12,11 @@ import { Mention } from './ui/Mention.tsx'
 
 export type Token = { type: 'text'; text: string } | { type: 'link'; text: string; href: string } | { type: 'mention'; text: string; name: string }
 
-// A scheme not glued to a preceding letter ("nohttps://"), then anything up to whitespace or <>".
-const URL_PATTERN = /(?<![\p{L}\p{N}_])https?:\/\/[^\s<>"]+/giu
+// A scheme not glued to a preceding letter ("nohttps://"), then anything up to whitespace,
+// <>", or an invisible formatting character: zero-width spaces and joiners, bidi marks,
+// embeddings, overrides and isolates (an RLO inside a link would reorder what it shows),
+// and the BOM. One character class, so matching stays linear however long the text.
+const URL_PATTERN = /(?<![\p{L}\p{N}_])https?:\/\/[^\s<>"\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]+/giu
 // "@name" at the start, or after whitespace or an opening bracket/quote (not in "mail@example.test").
 const MENTION_PATTERN = /(?<=^|[\s([{"'«])@([\p{L}\p{N}][\p{L}\p{N}_.-]{0,39})/gu
 const TRAILING = /[.,:;!?'"»…]$/u
@@ -36,29 +39,36 @@ export function tokenize(text: string): Token[] {
 }
 
 function trimUrl(candidate: string): string {
-  let url = candidate
-  for (;;) {
-    const end = url.at(-1) ?? ''
-    if (TRAILING.test(end)) {
-      url = url.slice(0, -1)
-      continue
-    }
-    const open = PAIRS[end]
-    if (open && count(url, open) < count(url, end)) {
-      url = url.slice(0, -1)
-      continue
-    }
-    return url
+  // Bracket balance counted once, then kept up to date: linear, even for a long run of ")".
+  const balance: Record<string, number> = { ')': 0, ']': 0, '}': 0 }
+  for (const char of candidate) {
+    if (char in balance) balance[char] += 1
+    else if (char === '(') balance[')'] -= 1
+    else if (char === '[') balance[']'] -= 1
+    else if (char === '{') balance['}'] -= 1
   }
+  let end = candidate.length
+  while (end > 0) {
+    const last = candidate[end - 1]
+    if (TRAILING.test(last)) {
+      end -= 1
+    } else if (last in PAIRS && balance[last] > 0) {
+      balance[last] -= 1
+      end -= 1
+    } else break
+  }
+  return candidate.slice(0, end)
 }
 
-const count = (text: string, char: string) => text.split(char).length - 1
-
-/** The normalised URL when it is a plain web address with a host, otherwise null. */
+/**
+ * The normalised URL when it is a plain web address with a host, otherwise null. A URL
+ * with user info is not linked: https://google.com@evil.test goes to evil.test.
+ */
 function safeHref(raw: string): string | null {
   try {
     const url = new URL(raw)
-    return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname !== '' ? url.href : null
+    const web = url.protocol === 'http:' || url.protocol === 'https:'
+    return web && url.hostname !== '' && url.username === '' && url.password === '' ? url.href : null
   } catch {
     return null
   }

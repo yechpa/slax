@@ -37,11 +37,18 @@ type Props = {
   /** Messages after this id (by others) are "new": the rule goes before the first one. */
   unreadAfter: number | null
   onLoadOlder: () => void
+  /** Retry after a failed older page (scrolling alone no longer retries). */
+  onRetryOlder: () => void
   onRetryLoad: () => void
+  /** Retry the refresh that keeps failing after a reconnection. */
+  onRetryRefresh: () => void
   onRetry: (clientId: string) => void
   onDiscard: (clientId: string) => void
-  /** Called whenever the reader is at the bottom (the list itself checks visibility). */
-  onAtBottom: () => void
+  /**
+   * Called whenever the reader is at the bottom of a visible, focused list, with a check
+   * the caller runs again before acting (the reader may have left meanwhile).
+   */
+  onAtBottom: (stillReadable: () => boolean) => void
 }
 
 type Row =
@@ -104,7 +111,7 @@ export function MessageList(props: Props) {
   const positioned = useRef(false)
   const lastSeen = useRef<{ firstKey: string | null; lastKey: string | null; anchorTop: number | null }>({ firstKey: null, lastKey: null, anchorTop: null })
   const [newBelow, setNewBelow] = useState(0)
-  const { entries, status, hasMoreBefore, loadingOlder } = timeline
+  const { entries, status, hasMoreBefore, loadingOlder, olderFailed, refreshFailed } = timeline
 
   // Latest callbacks for listeners registered once.
   const latest = useRef(props)
@@ -118,9 +125,13 @@ export function MessageList(props: Props) {
     setNewBelow(0)
   }, [])
 
+  const readable = useCallback(
+    () => atBottom.current && document.visibilityState === 'visible' && document.hasFocus() && (listRef.current?.isConnected ?? false),
+    [],
+  )
   const reportIfReadable = useCallback(() => {
-    if (atBottom.current && document.visibilityState === 'visible' && document.hasFocus()) latest.current.onAtBottom()
-  }, [])
+    if (readable()) latest.current.onAtBottom(readable)
+  }, [readable])
 
   const onScroll = () => {
     const el = listRef.current
@@ -216,7 +227,14 @@ export function MessageList(props: Props) {
   } else {
     content = (
       <>
-        {hasMoreBefore ? (
+        {hasMoreBefore && olderFailed ? (
+          <p class="message-list__edge message-list__edge--failed">
+            {t('message.olderFailed')}{' '}
+            <Button variant="quiet" size="sm" onClick={props.onRetryOlder}>
+              {t('action.retry')}
+            </Button>
+          </p>
+        ) : hasMoreBefore ? (
           <p class="message-list__edge" aria-hidden={!loadingOlder}>
             {loadingOlder ? t('message.loadingOlder') : ''}
           </p>
@@ -251,6 +269,20 @@ export function MessageList(props: Props) {
         onScroll={onScroll}
       >
         <div class="message-list__paper">{content}</div>
+      </div>
+      {/* Always present, so the notice is announced when it appears. */}
+      <div class="refresh-notice-region" role="status">
+        {refreshFailed && (
+          <p class="refresh-notice">
+            <span class="refresh-notice__tag" aria-hidden="true">
+              [!!]
+            </span>
+            {t('channel.refreshFailed')}
+            <Button variant="quiet" size="sm" onClick={props.onRetryRefresh}>
+              {t('action.retry')}
+            </Button>
+          </p>
+        )}
       </div>
       {newBelow > 0 && (
         <button type="button" class="jump-pill" onClick={() => scrollToBottom(true)}>

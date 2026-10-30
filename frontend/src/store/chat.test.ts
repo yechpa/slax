@@ -4,8 +4,8 @@ import { api } from '../api/endpoints.ts'
 import type { Message } from '../api/types.ts'
 import { ME, channel, live, tombstone } from '../test/fixtures.ts'
 import { FakeRealtime, deferred, fakeFetch, flush, type FakeReply } from '../test/fakes.ts'
-import { createChat } from './chat.ts'
-import { channelById, resetChannels } from './channels.ts'
+import { FAILURES_BEFORE_NOTICE, createChat } from './chat.ts'
+import { channelById, channels, resetChannels } from './channels.ts'
 import type { Entry } from './merge.ts'
 import { channelKey, resetTimelines, timeline } from './messages.ts'
 import { session } from './session.ts'
@@ -294,5 +294,197 @@ describe('reading', () => {
     const reads = server.calls.filter((c) => c.path.endsWith('/read'))
     expect(reads.map((c) => c.body)).toEqual([{ message_id: 3 }])
     expect(channelById.value.get(CHANNEL)).toMatchObject({ unread_count: 0, last_read_message_id: 3 })
+  })
+
+  it('re-checks visibility, focus and position when the second is up', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup({
+      'GET /api/v1/channels': () => ({ body: [channel(CHANNEL, { unread_count: 2, last_read_message_id: 1 })] }),
+      'GET /api/v1/channels/7/messages': () => ({ body: { data: [live(1), live(2), live(3)], has_more: false } }),
+      'POST /api/v1/channels/7/read': () => ({ status: 204 }),
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await vi.advanceTimersByTimeAsync(0)
+    let readable = true
+    chat.noteReadable(CHANNEL, () => readable)
+    // The tab was hidden (or the window left, or the list scrolled up) within the second.
+    readable = false
+    await vi.advanceTimersByTimeAsync(1000)
+    chat.noteReadable(CHANNEL, () => readable)
+    chat.closeChannel(CHANNEL)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(server.calls.some((c) => c.path.endsWith('/read'))).toBe(false)
+    expect(channelById.value.get(CHANNEL)).toMatchObject({ unread_count: 2, last_read_message_id: 1 })
+  })
+})
+
+describe('refreshing without losing events', () => {
+  it('keeps showing live events after a failed catch-up, then retries with backoff and repairs', async () => {
+    vi.useFakeTimers()
+    let reconnected = false
+    let failures = 2
+    const { chat, server } = setup({
+      'GET /api/v1/channels/7/messages': ({ query }) => {
+        if (!reconnected) return { body: { data: [live(1), live(2)], has_more: false } }
+        if (failures > 0) {
+          if (query.get('after') === null) failures -= 1
+          return { status: 500, body: { message: 'Server Error' } }
+        }
+        if (query.get('after') !== null) return { body: { data: [live(3)], has_more: false } }
+        return { body: { data: [live(1, { body: 'edited', edited_at: '2026-10-30T10:01:00Z' }), live(2), live(3)], has_more: false } }
+      },
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await vi.advanceTimersByTimeAsync(0)
+    reconnected = true
+    realtime.reconnect()
+    await vi.advanceTimersByTimeAsync(0)
+
+    // The catch-up failed: the open channel still shows what arrives live.
+    realtime.emit('private-channel.7', 'message.created', live(4))
+    expect(summary(entries())).toEqual(['1:message 1', '2:message 2', '4:message 4'])
+    expect(timeline(channelKey(CHANNEL)).value.refreshFailed).toBe(false)
+
+    // Retried after 1 s (fails again), then after 2 s (succeeds) and repaired.
+    await vi.advanceTimersByTimeAsync(999)
+    const attempts = () => server.calls.filter((c) => c.path === '/api/v1/channels/7/messages' && c.query.get('after') === null).length
+    expect(attempts()).toBe(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(attempts()).toBe(3)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(attempts()).toBe(4)
+    expect(summary(entries())).toEqual(['1:edited', '2:message 2', '3:message 3', '4:message 4'])
+    expect(timeline(channelKey(CHANNEL)).value.refreshFailed).toBe(false)
+  })
+
+  it('says so after a few failures, offers a retry, and stops retrying once the channel is left', async () => {
+    vi.useFakeTimers()
+    let down = false
+    const { chat, server } = setup({
+      'GET /api/v1/channels/7/messages': () => (down ? { status: 503 } : { body: { data: [live(1)], has_more: false } }),
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await vi.advanceTimersByTimeAsync(0)
+    down = true
+    realtime.reconnect()
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(1000 + 2000)
+    expect(timeline(channelKey(CHANNEL)).value.refreshFailed).toBe(true)
+    expect(FAILURES_BEFORE_NOTICE).toBe(3)
+
+    // The view's Retry goes at once.
+    const before = server.calls.length
+    down = false
+    chat.retryRefresh(CHANNEL)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.calls.length).toBeGreaterThan(before)
+    expect(timeline(channelKey(CHANNEL)).value.refreshFailed).toBe(false)
+
+    // Failing again, then leaving: no more requests, refetched on the next opening.
+    down = true
+    realtime.reconnect()
+    await vi.advanceTimersByTimeAsync(0)
+    chat.closeChannel(CHANNEL)
+    const afterLeaving = server.calls.length
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(server.calls.length).toBe(afterLeaving)
+    expect(timeline(channelKey(CHANNEL)).value.stale).toBe(true)
+  })
+
+  it('keeps an event that arrives while a stale channel reloads, and a deletion is not undone by the page', async () => {
+    let reconnected = false
+    const page = deferred<FakeReply>()
+    const { chat } = setup({
+      'GET /api/v1/channels/7/messages': () => (reconnected ? page.promise : { body: { data: [live(1), live(2)], has_more: false } }),
+      'GET /api/v1/channels/8/messages': () => ({ body: { data: [], has_more: false } }),
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+    chat.closeChannel(CHANNEL)
+    chat.openChannel(8)
+    reconnected = true
+    realtime.reconnect() // channel 7 is now stale
+    await flush()
+    chat.closeChannel(8)
+    chat.openChannel(CHANNEL) // reload starts
+    await flush()
+
+    // The server ran the page's query, then these happened, then the response came.
+    realtime.emit('private-channel.7', 'message.created', live(5))
+    realtime.emit('private-channel.7', 'message.deleted', tombstone(2))
+    page.resolve({ body: { data: [live(1), live(2), live(3)], has_more: false } })
+    await flush()
+    expect(summary(entries())).toEqual(['1:message 1', '2:deleted', '3:message 3', '5:message 5'])
+    expect(timeline(channelKey(CHANNEL)).value.stale).toBe(false)
+  })
+
+  it('a POST that fails after the realtime copy confirmed the message leaves it confirmed', async () => {
+    const response = deferred<FakeReply>()
+    const { chat } = setup({
+      'GET /api/v1/channels/7/messages': () => ({ body: { data: [], has_more: false } }),
+      'POST /api/v1/channels/7/messages': () => response.promise,
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+    chat.send(CHANNEL, 'hello')
+    realtime.emit('private-channel.7', 'message.created', mine(6))
+    response.resolve('network-error')
+    await flush()
+    expect(summary(entries())).toEqual(['6:hello'])
+  })
+
+  it('ignores whatever finishes after stop() (signed out)', async () => {
+    const list = deferred<FakeReply>()
+    const older = deferred<FakeReply>()
+    let first = true
+    const { chat } = setup({
+      'GET /api/v1/channels': () => (first ? ((first = false), { body: [channel(CHANNEL)] }) : list.promise),
+      'GET /api/v1/channels/7/messages': ({ query }) =>
+        query.get('before') ? older.promise : { body: { data: [live(10), live(11)], has_more: true } },
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+    const refreshing = chat.refreshChannels()
+    void chat.loadOlder(CHANNEL)
+    chat.stop()
+    resetChannels()
+    list.resolve({ body: [channel(CHANNEL), channel(9)] })
+    older.resolve({ body: { data: [live(5)], has_more: false } })
+    await refreshing
+    await flush()
+    expect(channels.value).toEqual([])
+    expect(summary(entries())).toEqual(['10:message 10', '11:message 11'])
+  })
+
+  it('stops loading older pages by itself after a failure, until asked', async () => {
+    let fail = true
+    const { chat, server } = setup({
+      'GET /api/v1/channels/7/messages': ({ query }) =>
+        query.get('before') === null
+          ? { body: { data: [live(10)], has_more: true } }
+          : fail
+            ? { status: 500 }
+            : { body: { data: [live(9)], has_more: false } },
+    })
+    await chat.start()
+    chat.openChannel(CHANNEL)
+    await flush()
+    await chat.loadOlder(CHANNEL)
+    expect(timeline(channelKey(CHANNEL)).value.olderFailed).toBe(true)
+    const olderCalls = () => server.calls.filter((c) => c.query.get('before') !== null).length
+    await chat.loadOlder(CHANNEL) // a scroll event
+    await chat.loadOlder(CHANNEL)
+    expect(olderCalls()).toBe(1)
+    fail = false
+    await chat.loadOlder(CHANNEL, { force: true }) // the view's Retry
+    expect(olderCalls()).toBe(2)
+    expect(summary(entries())).toEqual(['9:message 9', '10:message 10'])
+    expect(timeline(channelKey(CHANNEL)).value.olderFailed).toBe(false)
   })
 })

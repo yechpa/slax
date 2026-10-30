@@ -86,4 +86,31 @@ describe('message bodies', () => {
     )
     expect(host.querySelector('.tombstone')?.textContent).toContain('This message was deleted.')
   })
+
+  it('ends a URL at bidi and invisible formatting characters', () => {
+    const links = (text: string) => tokenize(text).filter((t) => t.type === 'link').map((t) => (t.type === 'link' ? t.href : ''))
+    // RLO (U+202E) must not end up inside a link, where it would reorder what is displayed.
+    expect(links('see https://good.test/\u202Etxt.exe')).toEqual(['https://good.test/'])
+    // RLM before the final full stop: the stop is still trimmed.
+    expect(links('ראו https://a.test/x\u200F.')).toEqual(['https://a.test/x'])
+    for (const mark of ['\u200B', '\u200C', '\u200D', '\u200E', '\u202A', '\u202B', '\u202C', '\u202D', '\u2066', '\u2067', '\u2068', '\u2069', '\uFEFF']) {
+      expect(links(`https://a.test/p${mark}q`)).toEqual(['https://a.test/p'])
+    }
+  })
+
+  it('does not link a URL carrying user info (https://google.com@evil.test)', () => {
+    show('login at https://google.com@evil.test/login or https://user:pw@host.test')
+    const body = host.querySelector('.message__body')!
+    expect(body.querySelector('a')).toBeNull()
+    expect(body.textContent).toContain('https://google.com@evil.test/login')
+  })
+
+  it('handles a very long URL quickly and safely', () => {
+    const long = `https://a.test/${'x'.repeat(2500)}${')'.repeat(2000)}`
+    const started = performance.now()
+    const tokens = tokenize(`see ${long}. and ${'(('.repeat(1000)}`)
+    const elapsed = performance.now() - started
+    expect(tokens.find((t) => t.type === 'link')?.text).toBe(`https://a.test/${'x'.repeat(2500)}`)
+    expect(elapsed).toBeLessThan(50)
+  })
 })

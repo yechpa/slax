@@ -1,6 +1,7 @@
 import type { ComponentChildren, Ref } from 'preact'
 import { useId, useRef } from 'preact/hooks'
 import { plural, t } from '../../i18n/index.ts'
+import { charCount, trimBody } from '../../lib/text.ts'
 import { Button } from './Button.tsx'
 import { Cursor } from './Cursor.tsx'
 
@@ -23,9 +24,6 @@ type Props = {
 /** Remaining characters below which the counter appears. */
 const COUNTER_FROM = 200
 
-/** Code points, like the server's char_length (an emoji is one, not two UTF-16 units). */
-export const charCount = (text: string) => [...text].length
-
 /**
  * The message box, presentation only: "$" prompt, auto-growing textarea
  * (dir="auto", so Hebrew aligns itself), and a hand-drawn placeholder ending
@@ -37,10 +35,11 @@ export function Composer({ channel, placeholder: given, value, onInput, onSend, 
   const counterId = useId()
   const composing = useRef(false)
   const placeholder = given ?? t('composer.placeholder', { channel })
-  const length = maxLength === undefined ? 0 : charCount(value.trim())
-  const remaining = maxLength === undefined ? Infinity : maxLength - length
+  // Measured exactly as the server will: same trim, same count.
+  const body = trimBody(value)
+  const remaining = maxLength === undefined ? Infinity : maxLength - charCount(body)
   const showCounter = remaining <= COUNTER_FROM
-  const blank = value.trim() === ''
+  const blank = body === ''
   const sendable = !blank && remaining >= 0
 
   const onKeyDown = (event: KeyboardEvent) => {

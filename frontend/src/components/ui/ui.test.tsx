@@ -146,6 +146,17 @@ describe('Composer input methods and limits', () => {
     render(<Composer channel="#general" value="short" onInput={() => undefined} maxLength={4000} />, host)
     expect(host.querySelector('.composer__counter')).toBeNull()
   })
+
+  it('measures with the same trim as the server (ASCII whitespace only)', () => {
+    // A no-break space is content for the server: 4000 letters plus it are one too many.
+    render(<Composer channel="#general" value={'\u00A0' + 'a'.repeat(4000) + '  \n'} onInput={() => undefined} maxLength={4000} />, host)
+    expect(host.querySelector('.composer__counter')?.textContent).toBe('1 character too many')
+    expect(host.querySelector<HTMLButtonElement>('.btn--primary')!.disabled).toBe(true)
+    // Plain whitespace around 4000 characters is trimmed, as the server does: sendable.
+    render(<Composer channel="#general" value={'\n ' + 'a'.repeat(4000) + ' \t'} onInput={() => undefined} maxLength={4000} />, host)
+    expect(host.querySelector('.composer__counter')?.textContent).toBe('0 characters left')
+    expect(host.querySelector<HTMLButtonElement>('.btn--primary')!.disabled).toBe(false)
+  })
 })
 
 describe('ChannelName and Mention', () => {

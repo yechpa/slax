@@ -62,3 +62,17 @@ describe('resetTo', () => {
     expect(ids(resetTo(entries, [live(20), live(21)], ME))).toEqual([20, 21, 50, 'p'])
   })
 })
+
+describe('resetTo keeps what is fresher than the page', () => {
+  it('never resurrects a message deleted while the page was on its way, nor rolls back an edit', () => {
+    const entries = mergeMessages([], [live(1), tombstone(2), live(3, { body: 'v2', edited_at: '2026-10-30T10:05:00Z' })], ME)
+    // The page's snapshot was taken before the deletion and the edit.
+    const reset = resetTo(entries, [live(1), live(2), live(3, { body: 'v1' }), live(4)], ME)
+    expect(reset.map((e) => (e.kind === 'server' ? (e.message.deleted ? `${e.message.id}:deleted` : `${e.message.id}:${e.message.body}`) : e.key))).toEqual([
+      '1:message 1',
+      '2:deleted',
+      '3:v2',
+      '4:message 4',
+    ])
+  })
+})

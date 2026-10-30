@@ -99,11 +99,13 @@ const sameContent = (a: Message, b: Message) => a === b || JSON.stringify(a) ===
 /**
  * A fresh latest page replaces the server window (a gap may separate it from what was
  * loaded). Messages newer than the page (realtime events received meanwhile) and pending
- * ones stay.
+ * ones stay, and a message in both goes through `fresher`: a deletion or an edit applied
+ * while the page was on its way is never undone by the page's older snapshot.
  */
 export function resetTo(entries: readonly Entry[], page: readonly Message[], meId: number | null): Entry[] {
   const newest = page.reduce((max, message) => Math.max(max, message.id), 0)
-  const kept = entries.filter((entry) => entry.kind === 'pending' || entry.message.id > newest)
+  const inPage = new Set(page.map((message) => message.id))
+  const kept = entries.filter((entry) => entry.kind === 'pending' || entry.message.id > newest || inPage.has(entry.message.id))
   return mergeMessages(kept, page, meId)
 }
 
