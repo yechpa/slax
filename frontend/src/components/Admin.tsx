@@ -506,6 +506,8 @@ function AccountsPanel() {
       })
     } catch (failure) {
       if (!isApiError(failure, 'rate_limited')) setError(failure)
+      // What the server holds now, not what this page thought (another administrator, a race).
+      reload()
     } finally {
       setBusy(false)
       setConfirming(null)

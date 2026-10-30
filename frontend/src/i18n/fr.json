@@ -364,7 +364,7 @@
   "admin.accounts.memberTitle": "Passer {name} en membre ?",
   "admin.accounts.memberBody": "Un membre est un compte de la famille : ses messages, conversations, réactions et canaux sont conservés et ne sont plus effacés chaque nuit. Le compte n'expire jamais. Une conversation avec un compte démo reste effacée chaque nuit, ses messages compris. L'action est inscrite au journal d'audit.",
   "admin.accounts.demoTitle": "Repasser {name} en compte démo ?",
-  "admin.accounts.demoBody": "Ses messages, réactions, canaux et conversations seront supprimés à la prochaine réinitialisation nocturne, et le compte lui-même après 7 jours sans activité. L'action est inscrite au journal d'audit.",
+  "admin.accounts.demoBody": "Ses messages, réactions, canaux et conversations seront supprimés à la prochaine réinitialisation nocturne, et le compte lui-même après 7 jours sans activité, sauf s'il est banni (un compte banni est conservé pour que le bannissement tienne). L'action est inscrite au journal d'audit.",
   "admin.accounts.madeMember": "{name} est membre maintenant.",
   "admin.accounts.madeDemo": "{name} est un compte démo maintenant.",
   "admin.moderation.messagesHint": "Pour supprimer un message ou un fichier, utilisez « Supprimer (modération) » dans le menu du message.",

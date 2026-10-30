@@ -364,7 +364,7 @@
   "admin.accounts.memberTitle": "Make {name} a member?",
   "admin.accounts.memberBody": "A member is a family account: their messages, conversations, reactions and channels are kept, and they are no longer reset every night. The account never expires. A conversation with a demo account is still deleted every night, theirs included. It is recorded in the audit log.",
   "admin.accounts.demoTitle": "Make {name} a demo account?",
-  "admin.accounts.demoBody": "Their messages, reactions, channels and conversations are deleted at the next nightly reset, and the account itself after 7 days without activity. It is recorded in the audit log.",
+  "admin.accounts.demoBody": "Their messages, reactions, channels and conversations are deleted at the next nightly reset, and the account itself after 7 days without activity, unless it is banned (a banned account is kept so the ban holds). It is recorded in the audit log.",
   "admin.accounts.madeMember": "{name} is a member now.",
   "admin.accounts.madeDemo": "{name} is a demo account now.",
   "admin.moderation.messagesHint": "To delete a message or a file, use “Delete as moderator” in that message's menu.",

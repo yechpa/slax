@@ -276,6 +276,8 @@ describe('administration', () => {
     dialog = document.querySelector('dialog[open]')!
     expect(plain(dialog.querySelector('.dialog__title')?.textContent)).toBe('Make Yossi a demo account?')
     expect(plain(dialog.textContent)).toContain('deleted at the next nightly reset')
+    // A banned demo account is kept by the reset: the sentence must not promise its deletion.
+    expect(plain(dialog.textContent)).toContain('unless it is banned')
     ;[...dialog.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Make demo account')!.click()
     await settle()
     expect(changes).toEqual([{ account_type: 'member' }, { account_type: 'demo' }])
@@ -306,6 +308,8 @@ describe('administration', () => {
     const error = plain(app.host.querySelector('.admin__section .admin__error')?.textContent)
     expect(error).toMatch(/\p{Script=Hebrew}/u)
     expect(app.host.textContent).not.toContain('cannot_change_admin')
+    // The list is asked for again: what the server holds now is shown, not a guess.
+    expect(adminCalls(app).filter((c) => c.method === 'GET' && c.path === '/api/v1/admin/users')).toHaveLength(2)
   })
 
   it('locks and unlocks any channel, private ones the administrator is not in included', async () => {
