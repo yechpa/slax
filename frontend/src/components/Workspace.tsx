@@ -11,13 +11,14 @@
  * drawer when the screen is narrower than 64rem (the rest is then inert).
  *
  * Also here for the session's life: presence (heartbeats, the workspace presence
- * channel), the channel list refreshed every minute and when the tab comes back (new
- * conversations and invitations are not pushed), and the sidebar's dialogs.
+ * channel), the channel list refreshed every minute while the tab is visible and when it
+ * comes back (new conversations and invitations are not pushed), and the sidebar's dialogs.
  */
 import { effect } from '@preact/signals'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { api } from '../api/endpoints.ts'
 import { t } from '../i18n/index.ts'
+import { pollWhileVisible } from '../lib/poll.ts'
 import { readPref } from '../lib/prefs.ts'
 import type { Realtime } from '../realtime/echo.ts'
 import { channelPath, navigate, route } from '../router.ts'
@@ -91,23 +92,16 @@ export function Workspace({ connect, chat: given }: Props) {
     }
   }, [chat, connect])
 
-  // New conversations and invitations to private rooms are not pushed: the list is refetched.
-  useEffect(() => {
-    let last = Date.now()
-    const refresh = () => {
-      last = Date.now()
-      void chat.refreshChannels().catch(() => undefined)
-    }
-    const timer = setInterval(refresh, CHANNELS_REFRESH_MS)
-    const onVisible = () => {
-      if (document.visibilityState === 'visible' && Date.now() - last > CHANNELS_ON_RETURN_MS) refresh()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [chat])
+  // New conversations and invitations to private rooms are not pushed: the list is refetched
+  // (not while the tab is hidden; once when it comes back).
+  useEffect(
+    () =>
+      pollWhileVisible(() => void chat.refreshChannels().catch(() => undefined), {
+        everyMs: CHANNELS_REFRESH_MS,
+        staleAfterMs: CHANNELS_ON_RETURN_MS,
+      }),
+    [chat],
+  )
 
   // Files dropped anywhere but on a drop zone must not make the browser open them (and leave the app).
   useEffect(() => {
