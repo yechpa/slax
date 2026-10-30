@@ -2,8 +2,14 @@
 /ctl/status (read at each request): an HTTP status code ("200", "503"), "hang" (no answer for
 30 s) or "close" (the connection closed without a reply). Runs in a pinned python image
 (deploy/monitoring/test/monitor-test.sh).
+
+On port 9090, a silent listener: it accepts every connection and never reads or answers. A
+check against it (HTTPS, PostgreSQL, Redis) waits for its own timeout, the same way on every
+host, unlike an unroutable address whose failure depends on the host's network.
 """
 
+import socket
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -32,4 +38,16 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def hold_silently(port):
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("0.0.0.0", port))
+    listener.listen(64)
+    held = []  # kept open, never read
+    while True:
+        connection, _ = listener.accept()
+        held.append(connection)
+
+
+threading.Thread(target=hold_silently, args=(9090,), daemon=True).start()
 ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

@@ -2,7 +2,7 @@
 # The uptime monitor (deploy/monitoring/uptime.sh) against throwaway services, in containers
 # (make monitor-test):
 #   - a fake health endpoint whose answer the test sets (fake-target.py: a status code, a
-#     hang, a closed connection);
+#     hang, a closed connection), and beside it a listener that accepts and never answers;
 #   - PostgreSQL 16 and Redis 7 (with a password), as in the chart;
 #   - a size-limited tmpfs volume as the watched disk, filled by the test;
 #   - a fake Telegram (deploy/backup/test/telegram-sink.py) recording every alert.
@@ -293,14 +293,16 @@ check "the next run reads it, its state kept (10 %: the all-clear for the alert 
     matches "$(last_alert)" '\[Prod\] DISK OK: volumes disk back to 1[01]% \(below 75%\)\.'
 
 echo "== the real timeouts: everything hangs, Telegram too; the run still ends in time"
-# Five checks that never answer, at the chart's timeouts (10 s per check, 5 s per Telegram
+# Six checks that never answer, at the chart's timeouts (10 s per check, 5 s per Telegram
 # call, a 35 s budget, the Job's deadline 50 s), each at its 3rd failure, two disks over
-# the threshold: 7 alerts to send to a Telegram that holds every call.
+# the threshold: 8 alerts to send to a Telegram that holds every call.
 set_target hang
-hang_checks=(-e "MONITOR_CHECKS=app=http://$target:8080/api/v1/health reverb=http://$target:8080/up public=https://10.255.255.1/api/v1/health postgres=pg://10.255.255.1:5432 redis=redis://10.255.255.1:6379"
+# The last four connect to a listener that accepts and never answers (fake-target.py, port
+# 9090): they wait for their timeouts the same way on any host.
+hang_checks=(-e "MONITOR_CHECKS=app=http://$target:8080/api/v1/health reverb=http://$target:8080/up public=https://$target:9090/api/v1/health postgres=pg://$target:9090 redis=redis://$target:9090 api=http://$target:9090/api/v1/health"
     -e "MONITOR_DISKS=node=/state volumes=/disk" -e MONITOR_DISK_ALERT_PERCENT=1 -e MONITOR_DISK_RECOVER_PERCENT=0
     -e MONITOR_TIMEOUT=10 -e MONITOR_TELEGRAM_TIMEOUT=5 -e MONITOR_BUDGET_SECONDS=35 -e MONITOR_STATE_FILE=/state/t)
-preload t check.{app,reverb,public,postgres,redis}.fails=2 check.{app,reverb,public,postgres,redis}.since="$clock"
+preload t check.{app,reverb,public,postgres,redis,api}.fails=2 check.{app,reverb,public,postgres,redis,api}.since="$clock"
 before="$(alerts)"
 alerts > "$dir/out/hang"
 started="$(date +%s)"
@@ -310,15 +312,16 @@ rm -f "$dir/out/hang"
 echo "      (the run took ${elapsed} s, container start included)"
 check "the run ends well inside the Job's 50 s deadline, exit 0" \
     test "$((elapsed < 48)) $status" = "1 0"
-check "... the probes ran in parallel (one timeout for all five)" has "$out" 'uptime: app=FAIL\(timeout\) reverb=FAIL\(timeout\) public=FAIL\(timeout\) postgres=FAIL\((no answer|timeout)\) redis=FAIL\((timeout|no answer)\)'
+check "... the probes ran in parallel (one timeout for all six)" has "$out" 'uptime: app=FAIL\(timeout\) reverb=FAIL\(timeout\) public=FAIL\(timeout\) postgres=FAIL\((no answer|timeout)\) redis=FAIL\((timeout|no answer|no reply)\) api=FAIL\(timeout\)'
 check "... alerts that would end past the budget are deferred, not attempted" has "$out" 'deferred to the next run \(no time left in this one\)'
+check "... and no disk is read past the budget" has "$out" 'disk:node=skipped disk:volumes=skipped'
 check "... nothing reached Telegram" test "$(alerts)" = "$before"
 monitor "${hang_checks[@]}"
-check "Telegram back, the next run: all 7 alerts, once each" test "$(alerts)" = $((before + 7))
-check "... the 5 checks as DOWN at their 4th failure" test "$(tail -n 7 "$dir/out/texts" | grep -c 'failed 4 checks in a row')" = 5
-check "... and the 2 disks" test "$(tail -n 7 "$dir/out/texts" | grep -c '^\[Prod\] DISK: ')" = 2
+check "Telegram back, the next run: all 8 alerts, once each" test "$(alerts)" = $((before + 8))
+check "... the 6 checks as DOWN at their 4th failure" test "$(tail -n 8 "$dir/out/texts" | grep -c 'failed 4 checks in a row')" = 6
+check "... and the 2 disks" test "$(tail -n 8 "$dir/out/texts" | grep -c '^\[Prod\] DISK: ')" = 2
 monitor "${hang_checks[@]}"
-check "... and the run after: nothing more" test "$(alerts)" = $((before + 7))
+check "... and the run after: nothing more" test "$(alerts)" = $((before + 8))
 set_target 200
 
 echo "== killed right after an alert went out: that alert is never sent again"
