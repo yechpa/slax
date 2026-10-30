@@ -330,8 +330,8 @@ all four images anonymously and refuses to deploy while one is private. Check, l
 
 ### 3.11 First release: v0.1.0
 
-1. Pick a commit of `main` whose `Images` run is green (all four `build`/`push`/`manifest`
-   jobs) and that dev runs well.
+1. Pick a commit of `main` whose `Images` run is green (every job: 8 `build`, 8 `push` and
+   4 `manifest` jobs, 4 images on 2 architectures) and that dev runs well.
 2. Tag and push it:
 
    ```sh

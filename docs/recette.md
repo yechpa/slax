@@ -30,7 +30,7 @@ Record each run here (copy the table per environment):
 
 | # | Check | How | |
 |---|---|---|---|
-| 1.1 | CI green on the commit: `lint`, `test`, `e2e` (Playwright, 15 tests, then the 10-second load smoke), `chart`, `secrets` (gitleaks), Images (6 builds, 4 manifests, Trivy) | GitHub → Actions, or `gh run list --branch main --limit 5` | A |
+| 1.1 | CI green on the commit: `lint`, `test`, `e2e` (Playwright, 15 tests, then the 10-second load smoke), `chart`, `secrets` (gitleaks), Images (4 images x 2 architectures: 8 `build` jobs with Trivy, 8 `push` jobs, 4 `manifest` jobs) | GitHub → Actions, or `gh run list --branch main --limit 5` | A |
 | 1.2 | The deployment pieces' own tests (`make chart-lint` also runs in CI, job `chart`; the others do not) | `make chart-lint backup-test monitor-test proxy-test aws-test edge-guard-test` | A (local) |
 | 1.3 | The load test: 50 WebSocket clients, 10 messages/s for 2 min, 0 lost, 0 duplicated, 0 HTTP error (CI runs only the 10-second smoke at the end of `e2e`) | `make load` → docs/load-test-results.md (a run is committed) | A (local) |
 | 1.4 | No secret in the repository or its history | CI `secrets`; GitHub → Security → Secret scanning: no open alert | A+M |
