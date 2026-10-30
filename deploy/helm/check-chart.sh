@@ -59,6 +59,9 @@ for env in dev prod; do
     expect "$env: the app and the queue worker read the VAPID pair from the Secret (optional: push off without it)" \
         "$(yq e -N 'select(.kind == "Deployment" and (.metadata.name == "slax-app" or .metadata.name == "slax-queue")) | .metadata.name + ":" + ([.spec.template.spec.containers[] | .env[]? | select(.name | test("^VAPID_")) | .valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key + "/" + (.valueFrom.secretKeyRef.optional | tostring)] | join(","))' "$file" | grep . | sort | tr '\n' ' ')" \
         "slax-app:slax-secrets/VAPID_PUBLIC_KEY/true,slax-secrets/VAPID_PRIVATE_KEY/true slax-queue:slax-secrets/VAPID_PUBLIC_KEY/true,slax-secrets/VAPID_PRIVATE_KEY/true "
+    expect "$env: the queue worker drains default (broadcasts) before push (Web Push)" \
+        "$(yq e -N 'select(.kind == "Deployment" and .metadata.name == "slax-queue") | .spec.template.spec.containers[0].args | map(select(test("^--queue="))) | join(",")' "$file" | grep . || true)" \
+        "--queue=default,push"
     empty "$env: Reverb and the monitor never get the VAPID pair" \
         "$(yq e -N 'select((.kind == "Deployment" and .metadata.name == "slax-reverb") or (.kind == "CronJob" and .metadata.name == "slax-monitor")) | .. | select(tag == "!!map" and has("name")) | select(.name | test("^VAPID_")) | .name' "$file" | grep . || true)"
     expect "$env: VAPID_SUBJECT is the public https URL unless push.subject says otherwise" \
