@@ -7,10 +7,10 @@ use App\Http\Resources\ChannelResource;
 use App\Models\Channel;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\ReadState;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
@@ -19,8 +19,11 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ChannelController extends Controller
 {
-    /** Public channels plus the private channels and conversations the caller belongs to. */
-    public function index(Request $request): AnonymousResourceCollection
+    /**
+     * Public channels plus the private channels and conversations the caller belongs to,
+     * with the caller's read state. A fixed number of queries, whatever the number of channels.
+     */
+    public function index(Request $request): JsonResponse
     {
         $user = $request->user();
 
@@ -31,13 +34,38 @@ class ChannelController extends Controller
                     ->whereIn('kind', [Channel::KIND_PRIVATE, Channel::KIND_DM, Channel::KIND_GROUP_DM])
                     ->whereHas('members', fn ($members) => $members->whereKey($user->id))))
             ->withExists(['members' => fn ($members) => $members->whereKey($user->id)])
+            ->withCount('members')
             ->orderBy('name')
             ->orderBy('id')
             ->get();
 
         $channels->filter->isDirect()->load(['members' => fn ($members) => $members->orderBy('users.id')]);
+        $readStates = ReadState::forChannels($user, $channels->modelKeys());
 
-        return ChannelResource::collection($channels);
+        return response()->json($channels->map(
+            fn (Channel $channel) => (new ChannelResource($channel))->withReadState($readStates[$channel->id])->resolve($request),
+        ));
+    }
+
+    /**
+     * POST /channels/{id}/read {message_id}: the caller has seen the timeline up to this
+     * top-level message. Members only (404 otherwise, public channels included); the pointer
+     * never moves back.
+     */
+    public function read(Request $request, Channel $channel): Response
+    {
+        abort_unless($channel->hasMember($request->user()), 404);
+
+        $data = $request->validate([
+            'message_id' => [
+                'bail', 'required', 'integer', 'min:1',
+                Rule::exists('messages', 'id')->where('channel_id', $channel->id)->whereNull('parent_id'),
+            ],
+        ]);
+
+        ReadState::markRead($request->user(), $channel, (int) $data['message_id']);
+
+        return response()->noContent();
     }
 
     public function show(Request $request, Channel $channel): ChannelResource

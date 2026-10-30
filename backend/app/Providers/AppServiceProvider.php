@@ -46,6 +46,8 @@ class AppServiceProvider extends ServiceProvider
         // One tab pings 2.4 times a minute; this leaves room for about eight.
         RateLimiter::for('presence-heartbeat', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
         RateLimiter::for('messages', fn (Request $request) => Limit::perMinute(30)->by('user:'.$request->user()->id));
+        // Clients debounce (about one call a second while reading); this leaves room for several tabs.
+        RateLimiter::for('reads', fn (Request $request) => Limit::perMinute(120)->by('user:'.$request->user()->id));
         RateLimiter::for('uploads', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
 
         // Ids are bigints: anything else is a 404, not a database error.

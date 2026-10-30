@@ -5,6 +5,7 @@ namespace App\Listeners;
 use App\Events\UserRegistered;
 use App\Models\Channel;
 use App\Models\Workspace;
+use App\Services\ReadState;
 use Illuminate\Support\Facades\DB;
 
 /** A new user lands in every public channel of the default workspace. */
@@ -25,6 +26,8 @@ class JoinPublicChannels
                 'channel_id' => $channelId,
                 'user_id' => $event->user->id,
                 'role' => Channel::ROLE_MEMBER,
+                // Nothing unread on arrival: the history is there to scroll, not a backlog.
+                'last_read_message_id' => ReadState::upToNow($channelId),
                 'created_at' => $now,
                 'updated_at' => $now,
             ])->all();

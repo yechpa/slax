@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ReadState;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -68,7 +69,8 @@ class Channel extends Model
     }
 
     /**
-     * Idempotent: an existing membership (and its role) is left untouched.
+     * Idempotent: an existing membership (and its role, its read pointer) is left untouched.
+     * A new member starts with the history read (see ReadState::upToNow).
      * Returns whether a new membership was created.
      */
     public function addMember(User $user, string $role = self::ROLE_MEMBER): bool
@@ -79,6 +81,7 @@ class Channel extends Model
             'channel_id' => $this->id,
             'user_id' => $user->id,
             'role' => $role,
+            'last_read_message_id' => ReadState::upToNow($this->id),
             'created_at' => $now,
             'updated_at' => $now,
         ]) > 0;

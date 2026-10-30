@@ -28,6 +28,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/channels/{channel}', [ChannelController::class, 'show']);
         Route::post('/channels/{channel}/join', [ChannelController::class, 'join']);
         Route::post('/channels/{channel}/leave', [ChannelController::class, 'leave']);
+        Route::post('/channels/{channel}/read', [ChannelController::class, 'read'])->middleware('throttle:reads');
         Route::post('/channels/{channel}/members', [ChannelController::class, 'addMember']);
         Route::delete('/channels/{channel}/members/{user}', [ChannelController::class, 'removeMemberRoute']);
 
