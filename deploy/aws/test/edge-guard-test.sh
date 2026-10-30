@@ -64,6 +64,25 @@ check "stop (twice): no jump, no chain" sh -c "! docker exec $name-node iptables
 check "after stop: 6443 answers again" reach 6443
 check "status after stop: not guarded (non-zero)" sh -c "! docker exec $name-node sh /usr/local/sbin/slax-edge-guard status >/dev/null"
 
+echo "== boot: the default route comes late"
+gateway="$(docker exec "$name-node" ip -4 route show default | awk '{print $3; exit}')"
+docker exec "$name-node" ip route del default
+docker exec -e SLAX_EDGE_GUARD_ROUTE_WAIT=20 "$name-node" sh /usr/local/sbin/slax-edge-guard start > /dev/null 2>&1 &
+late=$!
+sleep 4
+docker exec "$name-node" ip route add default via "$gateway"
+if wait "$late"; then late_status=0; else late_status=$?; fi
+check "start waits for a default route that appears late, then guards" test "$late_status" = 0
+check "... on that route's interface" sh -c "docker exec $name-node iptables -t mangle -S SLAX-EDGE-GUARD | grep -q -- '-i eth0 '"
+guard stop
+docker exec "$name-node" ip route del default
+started="$(date +%s)"
+if out="$(docker exec -e SLAX_EDGE_GUARD_ROUTE_WAIT=3 "$name-node" sh /usr/local/sbin/slax-edge-guard start 2>&1)"; then status=0; else status=$?; fi
+check "no default route at all: start fails after the wait (systemd retries it)" \
+    sh -c "test $status != 0 && test $(($(date +%s) - started)) -ge 3 && printf '%s' \"\$1\" | grep -q 'no default route after 3 s'" _ "$out"
+check "... and stop still works without a route" docker exec "$name-node" sh /usr/local/sbin/slax-edge-guard stop
+docker exec "$name-node" ip route add default via "$gateway"
+
 for bad in tailscale0 cni0 lo; do
     check "refuses $bad as a public interface" sh -c "! docker exec -e PUBLIC_INTERFACES=$bad $name-node sh -c 'mkdir -p /etc/default && echo PUBLIC_INTERFACES=$bad > /etc/default/slax-edge-guard && sh /usr/local/sbin/slax-edge-guard start' 2>/dev/null"
 done

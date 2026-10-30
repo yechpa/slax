@@ -18,7 +18,13 @@
 # A failed first boot is re-run, once the cause is fixed, with
 #   tailscale ssh ubuntu@slax-prod -- sudo bash /usr/local/sbin/slax-bootstrap.sh
 # (every step is safe to repeat; `tailscale up` is skipped once the node is on the tailnet).
-# If Tailscale itself never came up, use the break-glass shell (docs/runbook.md §5).
+# If `tailscale up` failed after reaching the coordination server, the single-use key may be
+# spent: create a NEW key (docs/runbook.md §3.2), open the break-glass shell (SSM Session
+# Manager, docs/runbook.md §5), run
+#   printf '%s' '<new key>' > /run/slax-bootstrap/ts-authkey   (mkdir -p it first, chmod 600)
+#   tailscale up --auth-key=file:/run/slax-bootstrap/ts-authkey --hostname=slax-prod \
+#     --advertise-tags=tag:slax-prod --ssh
+# then re-run the bootstrap as above.
 #
 # Result: Tailscale (SSH through the tailnet only; sshd disabled, port 22 closed anyway), k3s
 # without Traefik and ServiceLB, behind a host firewall rule for its ports on the public
@@ -41,6 +47,9 @@ packages:
   - curl
   - jq
   - unattended-upgrades
+  # slax-edge-guard's tools (in Ubuntu's server image already; listed so they never go missing).
+  - iptables
+  - iproute2
 
 # 2 GiB of swap: headroom for a 2 GiB node during spikes (pods themselves do not swap).
 swap:
@@ -84,17 +93,27 @@ write_files:
       ExecStart=/usr/local/sbin/slax-edge-guard start
       ExecReload=/usr/local/sbin/slax-edge-guard start
       ExecStop=/usr/local/sbin/slax-edge-guard stop
+      # A failed start (no route yet, a transient error) is retried, never left failed.
+      Restart=on-failure
+      RestartSec=10
 
       [Install]
       WantedBy=multi-user.target
 
-  # k3s never runs unguarded: it requires the guard (stopping the guard stops k3s).
+  # k3s never runs unguarded, and a guard problem at boot is not a lasting outage: k3s applies
+  # the rules itself before it starts (ExecStartPre; k3s's unit has Restart=always, so a
+  # failure is retried every 5 s instead of leaving k3s down for good), and stops or restarts
+  # with the guard unit (PartOf). Not Requires=: a failed dependency would never be retried.
   - path: /etc/systemd/system/k3s.service.d/edge-guard.conf
     permissions: "0644"
     content: |
       [Unit]
-      Requires=slax-edge-guard.service
+      Wants=slax-edge-guard.service
       After=slax-edge-guard.service
+      PartOf=slax-edge-guard.service
+
+      [Service]
+      ExecStartPre=/usr/local/sbin/slax-edge-guard start
 
   - path: /etc/sysctl.d/90-slax.conf
     permissions: "0644"

@@ -24,10 +24,22 @@ UDP_PORTS=8472
 PUBLIC_INTERFACES=""
 # shellcheck source=/dev/null
 [ ! -r /etc/default/slax-edge-guard ] || . /etc/default/slax-edge-guard
-if [ -z "$PUBLIC_INTERFACES" ]; then
-    PUBLIC_INTERFACES="$(ip -o -4 route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')"
+default_interface() {
+    ip -o -4 route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }'
+}
+# At boot the default route may come a little after this unit starts: wait for it (up to
+# SLAX_EDGE_GUARD_ROUTE_WAIT seconds, 60 by default) before giving up. Only `start` needs it.
+if [ -z "$PUBLIC_INTERFACES" ] && [ "${1:-}" != stop ]; then
+    waited=0
+    while :; do
+        PUBLIC_INTERFACES="$(default_interface)"
+        [ -z "$PUBLIC_INTERFACES" ] || break
+        [ "$waited" -lt "${SLAX_EDGE_GUARD_ROUTE_WAIT:-60}" ] || break
+        sleep 1
+        waited=$((waited + 1))
+    done
+    [ -n "$PUBLIC_INTERFACES" ] || { echo "slax-edge-guard: no default route after ${waited} s: set PUBLIC_INTERFACES in /etc/default/slax-edge-guard" >&2; exit 1; }
 fi
-[ -n "$PUBLIC_INTERFACES" ] || { echo "slax-edge-guard: no default route: set PUBLIC_INTERFACES in /etc/default/slax-edge-guard" >&2; exit 1; }
 for interface in $PUBLIC_INTERFACES; do
     case "$interface" in
         lo | tailscale* | cni* | flannel* | veth* | docker* | br-*)
