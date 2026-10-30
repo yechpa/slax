@@ -81,6 +81,8 @@ export function MessageEditor({ messageId, initial, onDone }: Props) {
         class="message-editor__input"
         dir="auto"
         rows={1}
+        // Enter saves: a phone's keyboard says so on its key.
+        enterkeyhint="done"
         value={value}
         readOnly={saving}
         aria-label={t('message.editLabel')}
