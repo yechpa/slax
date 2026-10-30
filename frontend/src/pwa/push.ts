@@ -14,14 +14,16 @@
  *   current language). One made with an older server key (a rotation) is dropped: the switch
  *   shows off, to turn on again.
  * - Sign-out removes this device from the account (DELETE) and unsubscribes the browser, so a
- *   shared family device stops showing the previous person's notifications. A ban unsubscribes
+ *   shared family device stops showing the previous person's notifications; offline, neither
+ *   happens (the sign-out itself fails, notifications keep working). A ban unsubscribes
  *   the browser (the server already deleted the account's devices).
- * - A session that merely expired (Laravel's idle timeout, an app left in the background) keeps
+ * - A session that merely expired (14 days unused, see config/session.php) keeps
  *   the subscription: the person did not sign out, and losing notifications each time would make
  *   them useless. Who turned them on is remembered on the device (PUSH_OWNER_KEY): if someone
  *   else signs in here, the previous person's subscription is dropped, never taken over.
  */
 import { signal } from '@preact/signals'
+import { isApiError } from '../api/client.ts'
 import { api } from '../api/endpoints.ts'
 import { getLocale, t } from '../i18n/index.ts'
 import { readPref, removePref, writePref } from '../lib/prefs.ts'
@@ -200,27 +202,37 @@ export async function refreshPush(): Promise<void> {
 /**
  * Sign-out, before the session ends: this device leaves the account (at most `timeoutMs`).
  * Push off on the server (no key was ever given to this page): nothing to do, and nothing is
- * awaited, so sign-out goes out at once.
+ * awaited, so sign-out goes out at once. Returns false, with everything left as it was, when
+ * the server could not be told (offline, an error, too slow).
  */
-export async function forgetPushOnSignOut(timeoutMs = 3000): Promise<void> {
+export async function forgetPushOnSignOut(timeoutMs = 3000): Promise<boolean> {
   generation++
   if (publicKey === null) {
     pushStatus.value = 'hidden'
-    return
+    return true
   }
+  // The browser is unsubscribed only once the server has forgotten the device: offline, the
+  // sign-out fails too, and the person must stay signed in with notifications still working.
+  // (A logout that does go through drops the browser's subscription anyway: endSession.)
   const work = (async () => {
     const subscription = await (await registration(false))?.pushManager.getSubscription().catch(() => null)
-    if (!subscription) return
+    if (!subscription) return true
     // Part of the sign-out: it goes out while every other request is held.
-    await api.push.unsubscribe(subscription.endpoint, true).catch(() => undefined)
-    await subscription.unsubscribe().catch(() => false)
+    const forgotten = await api.push.unsubscribe(subscription.endpoint, true).then(
+      () => true,
+      (error: unknown) => isApiError(error, 'not_found'),
+    )
+    if (forgotten) await subscription.unsubscribe().catch(() => false)
+    return forgotten
   })()
   let timer: ReturnType<typeof setTimeout> | undefined
-  await Promise.race([work.catch(() => undefined), new Promise((resolve) => (timer = setTimeout(resolve, timeoutMs)))])
+  const forgotten = await Promise.race([work.catch(() => false), new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), timeoutMs)))])
   clearTimeout(timer)
+  if (!forgotten) return false
   removePref(PUSH_OWNER_KEY)
   publicKey = null
   pushStatus.value = 'hidden'
+  return true
 }
 
 /** A ban (or a sign-out that could not finish): the browser stops receiving. No server call. */

@@ -294,7 +294,8 @@ receives the channel's events until it disconnects.
   None of this alerts the administrators, and none of it can fail sending a message. There is no periodic cleanup:
   a device that silently stopped working stays until something is pushed to it; an account keeps ten devices at
   most, an eleventh replaces the one that went longest without a push.
-- **Sign-out removes this device** (DELETE, then the browser's unsubscribe, three seconds at most even offline). A ban
+- **Sign-out removes this device** (DELETE, then the browser's unsubscribe once the server answered, three seconds
+  at most; offline neither happens: the sign-out fails too and notifications keep working). A ban
   deletes all of the account's devices on the server and unsubscribes the browser. A session that merely **expired**
   (14 days without any request, typically a phone left unused) keeps its notifications: the person
   did not sign out, and losing them at every expiry would make them useless. The cost, on a shared device: until

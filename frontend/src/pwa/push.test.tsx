@@ -5,7 +5,7 @@ import type { Me } from '../api/types.ts'
 import { UserMenu } from '../components/UserMenu.tsx'
 import { setLocale, t } from '../i18n/index.ts'
 import { route } from '../router.ts'
-import { endSession } from '../session.ts'
+import { endSession, signOut } from '../session.ts'
 import { session } from '../store/session.ts'
 import { fakeFetch, flush, type FakeHandler } from '../test/fakes.ts'
 import { PushSettings } from './PushSettings.tsx'
@@ -293,16 +293,56 @@ describe('turning off, and signing out', () => {
     expect(pushStatus.value).toBe('off')
   })
 
-  it('forgetPushOnSignOut: DELETE then unsubscribe, even when the server cannot be reached', async () => {
+  it('forgetPushOnSignOut: DELETE, then the browser unsubscribes once the server has forgotten the device', async () => {
     localStorage.setItem(PUSH_OWNER_KEY, String(ME.id))
     const existing = subscription()
     fakeBrowser({ permission: 'granted', existing })
-    const { calls } = server({ 'DELETE /api/v1/push/subscriptions': () => 'network-error' })
+    const { calls } = server()
     await initPush()
-    await forgetPushOnSignOut()
+    expect(await forgetPushOnSignOut()).toBe(true)
     expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/v1/push/subscriptions')).toBe(true)
     expect(existing.unsubscribe).toHaveBeenCalled()
     expect(pushStatus.value).toBe('hidden')
+    expect(localStorage.getItem(PUSH_OWNER_KEY)).toBeNull()
+  })
+
+  it('forgetPushOnSignOut, the server out of reach: nothing changes here (the sign-out cannot finish either)', async () => {
+    localStorage.setItem(PUSH_OWNER_KEY, String(ME.id))
+    const existing = subscription()
+    fakeBrowser({ permission: 'granted', existing })
+    server({ 'DELETE /api/v1/push/subscriptions': () => 'network-error' })
+    await initPush()
+    expect(await forgetPushOnSignOut()).toBe(false)
+    expect(existing.unsubscribe).not.toHaveBeenCalled()
+    expect(pushStatus.value).toBe('on')
+    expect(localStorage.getItem(PUSH_OWNER_KEY)).toBe(String(ME.id))
+  })
+
+  it('an offline sign-out leaves the person signed in with notifications still on', async () => {
+    localStorage.setItem(PUSH_OWNER_KEY, String(ME.id))
+    const existing = subscription()
+    fakeBrowser({ permission: 'granted', existing })
+    session.value = { status: 'signed-in', me: ME }
+    server({ 'DELETE /api/v1/push/subscriptions': () => 'network-error', 'POST /api/v1/auth/logout': () => 'network-error' })
+    await initPush()
+    expect(await signOut()).toBe(false)
+    expect(session.value.status).toBe('signed-in')
+    expect(existing.unsubscribe).not.toHaveBeenCalled()
+    expect(pushStatus.value).toBe('on')
+  })
+
+  it('the device DELETE failed but the logout went through: the browser unsubscribes all the same', async () => {
+    localStorage.setItem(PUSH_OWNER_KEY, String(ME.id))
+    const existing = subscription()
+    fakeBrowser({ permission: 'granted', existing })
+    session.value = { status: 'signed-in', me: ME }
+    server({ 'DELETE /api/v1/push/subscriptions': () => ({ status: 500, body: {} }) })
+    await initPush()
+    expect(await signOut()).toBe(true)
+    await flush()
+    expect(session.value.status).toBe('signed-out')
+    expect(existing.unsubscribe).toHaveBeenCalled()
+    expect(localStorage.getItem(PUSH_OWNER_KEY)).toBeNull()
   })
 
   it('forgetPushOnSignOut with push off on the server: no request, nothing awaited', async () => {
