@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e load load-smoke chart-lint images web-check backup-test monitor-test proxy-test aws-test edge-guard-test
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots icons e2e load load-smoke chart-lint images web-check backup-test monitor-test proxy-test aws-test edge-guard-test
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
@@ -90,6 +90,12 @@ screenshots: env deps ## Capture the design-system kitchen sink (2 themes x 3 la
 		-v $(CURDIR)/frontend/dist-design-system:/dist:ro -v $(CURDIR)/frontend/scripts:/scripts:ro -v $(CURDIR)/docs/design:/out \
 		$(PLAYWRIGHT_IMAGE) sh -c 'npm install --silent --no-audit --no-fund --prefix /tmp/pw playwright-core@1.64.1 \
 		&& PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core/index.mjs node /scripts/design-screenshots.mjs'
+
+icons: ## Render the install icons (frontend/public/icons) from frontend/public/favicon.svg
+	docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) -e HOME=/tmp \
+		-v $(CURDIR)/frontend/public:/public -v $(CURDIR)/frontend/scripts:/scripts \
+		$(PLAYWRIGHT_IMAGE) sh -c 'npm install --silent --no-audit --no-fund --prefix /tmp/pw playwright-core@1.64.1 \
+		&& PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core/index.mjs node /scripts/icons.mjs'
 
 # The end-to-end stack: its own Compose project (fresh volumes, nothing published on the host),
 # configured from e2e/stack.env alone, APP_ENV=e2e. See docker-compose.e2e.yml.

@@ -5,12 +5,17 @@
  *
  * Until the user picks one, the theme follows `prefers-color-scheme` (and keeps
  * following it live). An explicit choice is persisted and wins from then on.
+ *
+ * The browser's own chrome (address bar, installed app's title bar) follows too: every
+ * `<meta name="theme-color">` of index.html gets the active theme's background.
  */
 import { readPref, writePref } from './lib/prefs.ts'
 
 export type Theme = 'console' | 'listing'
 
 export const THEMES: readonly Theme[] = ['console', 'listing']
+/** Each theme's page background (--color-bg in tokens.css; also in index.html and the manifest). */
+export const THEME_COLORS: Readonly<Record<Theme, string>> = { console: '#0b0f0d', listing: '#f6f9ef' }
 const STORAGE_KEY = 'slax.theme'
 const LIGHT_QUERY = '(prefers-color-scheme: light)'
 
@@ -64,5 +69,9 @@ function apply(theme: Theme): void {
   current = theme
   const root = globalThis.document?.documentElement
   if (root) root.dataset.theme = theme
+  // Both metas (one per colour scheme in index.html): the chosen theme wins over the system's.
+  globalThis.document?.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]').forEach((meta) => {
+    meta.content = THEME_COLORS[theme]
+  })
   if (changed) listeners.forEach((listener) => listener(theme))
 }

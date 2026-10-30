@@ -36,6 +36,7 @@ describe('production build', () => {
     const { files, version } = precacheManifest(out)
     expect(files).toContain('/index.html')
     expect(files).toContain('/favicon.svg')
+    expect(files).toContain('/manifest.webmanifest')
     expect(files.filter((file) => file.startsWith('/assets/') && file.endsWith('.js')).length).toBeGreaterThan(0)
     expect(files.filter((file) => file.startsWith('/fonts/') && file.endsWith('.woff2')).length).toBe(6)
     // Not the worker itself, nor what the page never loads.
