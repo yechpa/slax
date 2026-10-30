@@ -58,4 +58,19 @@
   .skip-link:focus-visible {
     translate: 0 0;
   }
+
+  /*
+   * Touch screens: no field under 16 px, or iOS Safari zooms the page in when one is focused
+   * (and leaves it zoomed). In this last layer, so it wins over every component's size; the
+   * composer's whole line follows, for its prompt and placeholder to stay level with the text.
+   * Zooming itself is never disabled (no maximum-scale in the viewport meta).
+   */
+  @media (pointer: coarse) {
+    input:not([type='checkbox'], [type='radio'], [type='file'], [type='range'], [type='color'], [type='hidden']),
+    textarea,
+    select,
+    .composer__line {
+      font-size: max(16px, 1rem);
+    }
+  }
 }
