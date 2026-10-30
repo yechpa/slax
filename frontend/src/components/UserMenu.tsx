@@ -9,6 +9,7 @@ import { useEffect, useId, useRef, useState } from 'preact/hooks'
 import { isApiError } from '../api/client.ts'
 import { api } from '../api/endpoints.ts'
 import { t } from '../i18n/index.ts'
+import { useLocale } from '../i18n/useLocale.ts'
 import { ADMIN_PATH } from '../router.ts'
 import { endSession } from '../session.ts'
 import { me } from '../store/session.ts'
@@ -24,7 +25,9 @@ function save(changes: Parameters<typeof api.updateMe>[0]): void {
   api.updateMe(changes).catch(() => undefined)
 }
 
+/** Prop-less: re-rendered on a change of language by useLocale only (see Workspace). */
 export function UserMenu() {
+  useLocale()
   const user = me.value
   const [open, setOpen] = useState(false)
   const [leaving, setLeaving] = useState(false)

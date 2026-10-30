@@ -18,6 +18,7 @@ import { effect } from '@preact/signals'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { api } from '../api/endpoints.ts'
 import { t } from '../i18n/index.ts'
+import { useLocale } from '../i18n/useLocale.ts'
 import { pollWhileVisible } from '../lib/poll.ts'
 import { readPref } from '../lib/prefs.ts'
 import type { Realtime } from '../realtime/echo.ts'
@@ -59,6 +60,9 @@ type Props = {
 }
 
 export function Workspace({ connect, chat: given }: Props) {
+  // A component whose props do not change is not re-rendered by its parent (@preact/signals):
+  // every string below follows the language from here.
+  useLocale()
   const [chat] = useState(() => given ?? createChat({ api, realtime: null }))
   const [loadFailed, setLoadFailed] = useState(false)
 
@@ -160,6 +164,8 @@ function defaultChannelId(): number | null {
 
 /** The sidebar's dialogs, one at a time. */
 function Dialogs() {
+  // Prop-less: without it, an open dialog would keep the previous language.
+  useLocale()
   const close = () => (openDialog.value = null)
   switch (openDialog.value) {
     case 'create-channel':

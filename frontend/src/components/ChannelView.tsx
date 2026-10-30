@@ -8,6 +8,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { isApiError } from '../api/client.ts'
 import type { Channel } from '../api/types.ts'
 import { plural, t } from '../i18n/index.ts'
+import { useLocale } from '../i18n/useLocale.ts'
 import { writePref } from '../lib/prefs.ts'
 import { channelPath, navigate } from '../router.ts'
 import { canPostIn, isDirect, lockedFor } from '../store/channels.ts'
@@ -137,6 +138,8 @@ export function LockedBar({ label }: { label: string }) {
 }
 
 function JoinBar({ channel, label }: { channel: Channel; label: string }) {
+  // Its props stay the same when the language changes: re-rendered by useLocale (see Workspace).
+  useLocale()
   const chat = useChat()
   const [joining, setJoining] = useState(false)
   const join = async () => {

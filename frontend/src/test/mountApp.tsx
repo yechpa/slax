@@ -6,7 +6,7 @@ import { render } from 'preact'
 import { vi } from 'vitest'
 import { resetClientState } from '../api/client.ts'
 import { App } from '../app.tsx'
-import { setLocale } from '../i18n/index.ts'
+import { setLocale, type Locale } from '../i18n/index.ts'
 import { parseRoute, route } from '../router.ts'
 import { boot, endSession, installClientEvents } from '../session.ts'
 import { resetPeople } from '../store/people.ts'
@@ -26,9 +26,9 @@ export async function settle(rounds = 6): Promise<void> {
   for (let i = 0; i < rounds; i += 1) await flush()
 }
 
-export async function mountApp(routes: Record<string, FakeHandler>, path = '/'): Promise<Mounted> {
+export async function mountApp(routes: Record<string, FakeHandler>, path = '/', { locale = 'en' }: { locale?: Locale } = {}): Promise<Mounted> {
   localStorage.clear()
-  setLocale('en')
+  setLocale(locale)
   resetClientState()
   const realtime = new FakeRealtime()
   const uninstall = installClientEvents()

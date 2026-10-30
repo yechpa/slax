@@ -1,8 +1,11 @@
 import { t } from '../i18n/index.ts'
+import { useLocale } from '../i18n/useLocale.ts'
 import { dismissToast, showConnectionBanner, toasts } from '../store/ui.ts'
 import { Toast } from './ui/Toast.tsx'
 
+// Prop-less: re-rendered on a change of language by useLocale only (see Workspace).
 export function Toasts() {
+  useLocale()
   return (
     <div class="toast-region toast-region--app">
       {toasts.value.map((toast) => (
@@ -16,6 +19,7 @@ export function Toasts() {
 
 /** A quiet line at the top while the connection is down (the live region is always there). */
 export function ConnectionBanner() {
+  useLocale()
   return (
     <div class="conn-banner-region" role="status">
       {showConnectionBanner.value && (

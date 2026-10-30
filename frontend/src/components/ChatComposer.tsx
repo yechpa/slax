@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Channel } from '../api/types.ts'
 import { t } from '../i18n/index.ts'
+import { useLocale } from '../i18n/useLocale.ts'
 import { ACCEPT } from '../lib/files.ts'
 import { MAX_BODY, charCount, trimBody } from '../lib/text.ts'
 import type { Chat } from '../store/chat.ts'
@@ -37,6 +38,8 @@ type Props = {
 }
 
 export function ChatComposer({ channel, label, parentId = null, onSent }: Props) {
+  // Its props stay the same when the language changes: re-rendered by useLocale (see Workspace).
+  useLocale()
   const chat = useChat()
   const key = trayKey(channel.id, parentId)
   const [value, setValue] = useState(() => drafts.get(key) ?? '')

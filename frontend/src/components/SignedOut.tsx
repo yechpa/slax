@@ -12,6 +12,7 @@ import { isApiError } from '../api/client.ts'
 import { api } from '../api/endpoints.ts'
 import { cloudflareTurnstile, TurnstileError, type TurnstileClient } from '../auth/turnstile.ts'
 import { getLocale, t } from '../i18n/index.ts'
+import { useLocale } from '../i18n/useLocale.ts'
 import { getTheme } from '../theme.ts'
 import { Brand } from './ui/Brand.tsx'
 import { Button } from './ui/Button.tsx'
@@ -71,6 +72,8 @@ type Props = {
 }
 
 export function SignedOut({ error = null, turnstile = cloudflareTurnstile, goTo = (url) => location.assign(url) }: Props) {
+  // Its props stay the same when the language changes: re-rendered by useLocale (see Workspace).
+  useLocale()
   const [failure, setFailure] = useState<string | null>(() => takeAuthErrorFromUrl() ?? error)
   const [pending, setPending] = useState(false)
   const widget = useRef<HTMLDivElement>(null)
