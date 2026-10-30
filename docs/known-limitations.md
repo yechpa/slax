@@ -133,7 +133,7 @@ receives the channel's events until it disconnects.
   refuses.
 - **Verified in emulation only.** Playwright runs desktop Chromium: registration, the offline shell (with the worker
   itself offline), the update banner after a simulated deploy, the notices and toasts never covering each other or
-  the composer (1280x800 and 375x667, English and Hebrew), and sign-out's cleanup, under the production CSP. The iOS
+  the composer (1280x800 and 375x667, English and Hebrew), and sign-out's cleanup, (the CSP is injected by the test as a copy of the production one, `PRODUCTION_CSP` in `e2e/tests/pwa.spec.ts`, and the other PWA e2e tests run without a CSP; `make web-check` is what pins `worker-src 'self'` in nginx itself). The iOS
   Add to Home Screen help and Chromium's Install button are covered by unit tests (user agents and a fake
   `beforeinstallprompt`), not by a browser: headless Chromium does not offer installation, and the service worker is
   tested in Chromium only (the WebKit phone project blocks it, see "Phones" below). **To try on real devices:** install from
@@ -180,7 +180,7 @@ receives the channel's events until it disconnects.
   (`SESSION_DRIVER=redis-tiered`), and Redis evicts sessions and cache before it refuses writes (`volatile-lru`,
   never the queue; runbook 4.8). A flood of new visitors can therefore sign some people out, not stop the app.
   **No rate limit per address on session creation** (`GET /sanctum/csrf-cookie`, the app's first call): nginx's
-  `limit_req` would need the visitor's real address behind Caddy (trusted `X-Forwarded-For`), deferred. There is no "sign out everywhere" for oneself yet; an administrator's
+  a `limit_req_zone $binary_remote_addr` on `/sanctum/csrf-cookie` and `/api/v1/auth` would work today (nginx already takes the visitor's address from the trusted `X-Forwarded-For` of Caddy, see `docker/web/entrypoint.sh`); it is simply not added yet. There is no "sign out everywhere" for oneself yet; an administrator's
   ban, then lifting it, does it (and also removes the account's notification devices).
 - **After a deploy, a sign-out can leave no offline shell for a while.** The refill after a sign-out is all or
   nothing: the old worker still in control refills its own list, whose hashed files the deploy removed, so it gets

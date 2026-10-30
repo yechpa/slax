@@ -60,8 +60,9 @@ session:
   # SESSION_LIFETIME, in minutes: how long a session lasts without a request. Rolling: every
   # request starts the count again. 14 days, so a notification tapped after a quiet week opens
   # the conversation instead of the sign-in screen. Sign-out and a ban end a session at once
-  # whatever this says. Each session (a visitor's without an account too) is kept in Redis
-  # this long: see docs/runbook.md 4.8 for its memory.
+  # whatever this says. Only a session with someone signed in is kept this long; any
+  # other session (a visitor's, a crawler's) is kept 2 hours at most (SESSION_DRIVER=redis-tiered).
+  # See docs/runbook.md 4.8 for Redis's memory.
   lifetimeMinutes: 20160
 
 # Web Push (VAPID). The key pair lives in the Secret only (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY:
@@ -169,7 +170,9 @@ redis:
   # Sessions, cache, rate limits, presence and the queue. volatile-lru: when full, Redis evicts
   # the least recently used keys that carry an expiry (sessions, cache, throttles, presence,
   # tombstones: all of them do), never the queue's lists and sets (they have none), so a flood
-  # of sessions signs a few people out instead of failing every request. A guest's session
+  # of sessions signs a few people out instead of failing every request. LRU does not tell a guest
+  # from a member: the first evicted are the sessions idle the longest, i.e. family phones unused
+  # for days, before a fresh guest session. A guest's session
   # lives 2 hours at most (SESSION_DRIVER=redis-tiered).
   maxmemory: 128mb
   storage:

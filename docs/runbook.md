@@ -542,7 +542,7 @@ and the **queue** (`slax-database-queues:*`); database 1 holds the cache and the
 `maxmemory` is 96 MB in production with `--maxmemory-policy volatile-lru`: when full, Redis
 evicts the least recently used keys **that have an expiry** (all of the above but the queue)
 instead of refusing writes, so the app keeps working; the price is that some people are signed
-out (their session evicted) and presence or a rate-limit window may restart. A guest session is
+out (their session evicted: LRU does not tell a guest from a member, so the first to go are the sessions idle the longest, such as a family phone unused for days, before a fresh guest session) and presence or a rate-limit window may restart. A guest session is
 about 420 bytes: 96 MB holds roughly 200 000 of them, a sustained 30 new visitors a second for 2
 hours. Check:
 

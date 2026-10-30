@@ -72,6 +72,9 @@ for env in dev prod; do
     expect "$env: sessions in Redis, a guest's kept 2 hours at most (SESSION_DRIVER=redis-tiered)" \
         "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SESSION_DRIVER' "$file")" \
         "redis-tiered"
+    expect "$env: SESSION_ENCRYPT is not set (the redis-tiered driver reads the session payload and refuses encryption at the first request)" \
+        "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SESSION_ENCRYPT // "unset"' "$file")" \
+        "unset"
     expect "$env: sessions last 14 days, rolling (SESSION_LIFETIME=20160 from session.lifetimeMinutes; never expire on close)" \
         "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SESSION_LIFETIME + "/" + (.data.SESSION_EXPIRE_ON_CLOSE // "unset")' "$file")" \
         "20160/unset"
