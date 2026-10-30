@@ -70,7 +70,8 @@
     --safe-bottom: env(safe-area-inset-bottom, 0px);
     --safe-inline-start: env(safe-area-inset-left, 0px);
     --safe-inline-end: env(safe-area-inset-right, 0px);
-    /* The header takes the top inset unless a notice band above it already does (app.css). */
+    /* The header takes the top inset unless a notice band above it already does (app.css);
+       the footers take the bottom one unless the keyboard covers the home indicator. */
     --header-safe-top: var(--safe-top);
     --footer-safe-bottom: var(--safe-bottom);
   }
@@ -78,6 +79,10 @@
   :root[dir='rtl'] {
     --safe-inline-start: env(safe-area-inset-right, 0px);
     --safe-inline-end: env(safe-area-inset-left, 0px);
+  }
+
+  :root[data-keyboard] {
+    --footer-safe-bottom: 0px;
   }
 
   :root:not([data-theme]) {

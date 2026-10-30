@@ -943,6 +943,22 @@
     overflow: auto;
   }
 
+  /*
+   * The on-screen keyboard (lib/viewport.ts sets these while it is up): the app takes the height
+   * it leaves visible, where Safari has panned the page, so the composer sits right on the
+   * keyboard and the header stays in sight. (Chrome on Android resizes the page instead: the
+   * dynamic viewport shrinks, and these are not set.)
+   */
+  :root[data-keyboard] #app {
+    position: relative;
+    inset-block-start: var(--visible-page-top);
+  }
+
+  :root[data-keyboard] .shell--app,
+  :root[data-keyboard] #app:has(> .top-bands :is(.update-banner, .conn-banner)) {
+    block-size: var(--visible-block-size);
+  }
+
   .update-banner {
     display: inline-flex;
     flex-wrap: wrap;

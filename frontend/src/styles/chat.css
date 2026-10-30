@@ -565,6 +565,16 @@
     max-block-size: calc(100dvh - 2rem - var(--safe-top) - var(--safe-bottom));
   }
 
+  /* The on-screen keyboard is up (lib/viewport.ts): the dialog sits in what it leaves visible. */
+  :root[data-keyboard] .dialog {
+    inset-block: var(--visible-top) auto;
+    margin-block: var(--space-4) auto;
+  }
+
+  :root[data-keyboard] :is(.dialog, .dialog__form) {
+    max-block-size: calc(var(--visible-block-size) - 2rem);
+  }
+
   .dialog__header {
     display: flex;
     align-items: center;
