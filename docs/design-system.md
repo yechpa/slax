@@ -2,8 +2,10 @@
 
 The look of an old monitor, built with modern CSS. Two themes, three languages (one of them right to left), one monospace typeface.
 
-- **Kitchen sink:** `frontend/design-system.html` (dev server: `/design-system.html`; `?theme=listing&lang=he` picks a combination). It is a second Vite entry and the app never links to it.
-- **Review screenshots:** `make screenshots` builds the frontend and captures `docs/design/` with headless Chromium in the official Playwright image. Playwright is installed inside that container only, so it is not an app dependency. You get six 1280×900 shots (`{console,listing}-{en,he,fr}.png`), their full-page versions under `docs/design/full/`, and `mobile-console-fr.png` at 390×844.
+- **Kitchen sink:** `frontend/design-system.html`, served by the dev server at `/design-system.html` (`?theme=listing&lang=he` picks a combination). **A production `vite build` ships the app only.** The kitchen sink has its own build, `vite build --mode design-system` into `dist-design-system/`, used by `make screenshots`. `src/build.test.ts` builds both and asserts that `dist/` has no `design-system.html`.
+- **Review screenshots:** `make screenshots` captures `docs/design/` with headless Chromium in the official Playwright image. Playwright is installed inside that container only, so it is not an app dependency. You get six 1280×900 shots (`{console,listing}-{en,he,fr}.png`), their full-page versions under `docs/design/full/`, and `mobile-console-fr.png` at 390×844.
+  - **It checks before it saves.** All 12 combinations (2 themes × 3 languages × 1280/390px) are loaded and checked.
+  - **It fails on:** any sideways page scroll, a clipped input or composer placeholder (text measured against the field's content box), console errors, and failed requests.
 - **Code:** tokens and styles are in `frontend/src/styles/`, reusable components in `frontend/src/components/ui/`, i18n in `frontend/src/i18n/`, and the theme logic in `frontend/src/theme.ts`.
 
 > Status: first version, submitted for yechpa's review before Task 9. The Hebrew strings in particular are a proposal, not final.
@@ -135,10 +137,26 @@ Every interactive element shows `:focus-visible` as a 2px solid `--color-focus` 
 ## Right to left
 
 - `setLocale('he')` sets `<html lang="he" dir="rtl">`, and `en` and `fr` set `dir="ltr"`. The layout mirrors with no extra CSS: the sidebar moves to the right, the current-channel bar moves to the right edge, and toasts anchor bottom-left.
-- **Logical properties only.** Use `margin-inline-start`, `padding-block`, `inset-inline-end`, `border-inline-start`, `text-align: start`, `float: inline-start`. `src/styles/styles.test.ts` fails on any physical `left`/`right` property, positioning, `float`, `clear` or `text-align` anywhere under `src/` (the test checks that its detector catches each form). Vertical shadows and gradients (`to bottom`) are direction-neutral and allowed. Symmetric backgrounds (holes on both paper edges) are too.
+- **Logical properties only.** Use `margin-inline-start`, `padding-block`, `inset-inline-end`, `border-inline-start`, `text-align: start`, `float: inline-start`.
+  - **What the guard rejects.** `src/styles/styles.test.ts` fails on these anywhere under `src/`, and it tests that its detector catches each form:
+    - any physical `left`/`right` property, positioning, `float`, `clear` or `text-align`
+    - `left`/`right` keywords in `*-position`
+    - **4-value shorthands** of `margin`, `padding`, `inset`, `scroll-margin`/`scroll-padding`, `border-width`/`-style`/`-color` and `border-radius` (top/right/bottom/left, or corner by corner); use the logical longhands instead
+  - **Blind spots.** These are physical but cannot be told apart from legitimate CSS by text alone, so reviewers must catch them:
+    - horizontal transforms (`translateX(…)`, `translate: 4px 0`)
+    - horizontal box-shadow or text-shadow offsets
+    - `linear-gradient(to left | to right | 90deg)`
+    - `background-position` given as numbers (`0 0` vs `100% 0`)
+
+    Use them only when the effect is symmetric or truly direction-free, and say so in a comment. Vertical shadows and gradients (`to bottom`) and symmetric backgrounds (holes on both paper edges) are fine.
 - **Logical properties resolve against the element's own direction.** Never force `direction: ltr` on something you position with `inset-inline-*`: in Hebrew it lands on the wrong side. This happened to the search key cap; `kbd` is now isolated without forcing a direction.
 - **Every message body is `dir="auto"`**, so its direction comes from its first strong letter. The body box is shrink-wrapped (`inline-size: fit-content`, capped at 76ch), so an English message in the Hebrew UI, or the reverse, still sits beside its author.
 - **Usernames, channel names, file names and file sizes are in `<bdi>`.** Without it, `1.2 MB` prints as `MB 1.2` in a Hebrew line.
+- **`#channel` and `@mention` are one bidi unit** (`ChannelName`, `Mention`): the sigil and the name share one `<bdi>`, so the reference takes the name's own direction.
+  - A Latin channel always reads `#general`, even in a Hebrew header. Isolating only the name would leave the `#` free to drift: `general#`.
+  - A Hebrew name reads right to left with its sigil first, so `@נעם` shows the `@` on its right, even inside an English sentence.
+  - The sidebar is the exception, deliberately: its `#` sigils form a column at the inline start, outside the isolated names.
+- **Language tags.** Mixed-language demo content carries `lang` (`Message` has `lang` for the body and `authorLang` for the name; `NavItem` and `ChannelName`/`Mention` take `lang`), so screen readers switch voice.
 - **Links in a message are `dir="ltr"`**, which also isolates them.
 - **Code is `direction: ltr`.**
 - **Interpolated values are isolated too.** `t()` wraps them in FSI/PDI (U+2068/U+2069), the plain-text `<bdi>`. That keeps `"נעם is typing…"` or `"dana מקליד/ה…"` in order even in a `title` or `aria-label`.
