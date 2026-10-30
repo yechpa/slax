@@ -106,6 +106,33 @@ class ChannelController extends Controller
         return ChannelResource::withMembership($channel, true)->response()->setStatusCode(201);
     }
 
+    public const MAX_MEMBERS_LISTED = 200;
+
+    /**
+     * GET /channels/{id}/members: who is in a channel the caller may see (any public channel,
+     * or one they belong to; 404 otherwise). Owners first, then by name; at most 200.
+     * Only the public profile, never an e-mail address.
+     */
+    public function members(Channel $channel): JsonResponse
+    {
+        Gate::authorize('view', $channel);
+
+        $members = $channel->members()
+            ->orderByRaw("CASE WHEN channel_members.role = 'owner' THEN 0 ELSE 1 END")
+            ->orderByRaw('lower(users.name)')
+            ->orderBy('users.name')
+            ->orderBy('users.id')
+            ->limit(self::MAX_MEMBERS_LISTED)
+            ->get(['users.id', 'users.name', 'users.avatar_url']);
+
+        return response()->json($members->map(fn (User $member) => [
+            'id' => $member->id,
+            'name' => $member->name,
+            'avatar_url' => $member->avatar_url,
+            'role' => $member->pivot->role,
+        ]));
+    }
+
     public function join(Request $request, Channel $channel): ChannelResource
     {
         Gate::authorize('view', $channel);

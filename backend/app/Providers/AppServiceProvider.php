@@ -48,6 +48,8 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('messages', fn (Request $request) => Limit::perMinute(30)->by('user:'.$request->user()->id));
         // Clients debounce (about one call a second while reading); this leaves room for several tabs.
         RateLimiter::for('reads', fn (Request $request) => Limit::perMinute(120)->by('user:'.$request->user()->id));
+        // Clients debounce typing (250 ms) and abort stale searches: about four a second at most.
+        RateLimiter::for('user-search', fn (Request $request) => Limit::perMinute(60)->by('user:'.$request->user()->id));
         RateLimiter::for('uploads', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
 
         // Ids are bigints: anything else is a 404, not a database error.

@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,6 +25,8 @@ class UserResource extends JsonResource
             'locale' => $this->locale,
             'theme' => $this->theme,
             'is_admin' => $this->is_admin,
+            // Slax v1 has one workspace; the client needs its id for the presence channel.
+            'workspace_id' => Workspace::where('slug', Workspace::DEFAULT_SLUG)->value('id'),
         ];
     }
 }

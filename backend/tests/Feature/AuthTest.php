@@ -254,6 +254,8 @@ test('me returns the current user without secrets', function () {
             'locale' => 'en',
             'theme' => 'console',
             'is_admin' => false,
+            // No workspace in this test (UserDirectoryTest checks the seeded one).
+            'workspace_id' => null,
         ]);
 });
 

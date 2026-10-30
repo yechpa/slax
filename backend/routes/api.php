@@ -8,6 +8,7 @@ use App\Http\Controllers\MeController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\PresenceController;
 use App\Http\Controllers\ReactionController;
+use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -23,12 +24,15 @@ Route::prefix('v1')->group(function () {
         Route::post('/presence/heartbeat', [PresenceController::class, 'heartbeat'])->middleware('throttle:presence-heartbeat');
         Route::get('/presence', [PresenceController::class, 'index']);
 
+        Route::get('/users', [UserController::class, 'index'])->middleware('throttle:user-search');
+
         Route::get('/channels', [ChannelController::class, 'index']);
         Route::post('/channels', [ChannelController::class, 'store']);
         Route::get('/channels/{channel}', [ChannelController::class, 'show']);
         Route::post('/channels/{channel}/join', [ChannelController::class, 'join']);
         Route::post('/channels/{channel}/leave', [ChannelController::class, 'leave']);
         Route::post('/channels/{channel}/read', [ChannelController::class, 'read'])->middleware('throttle:reads');
+        Route::get('/channels/{channel}/members', [ChannelController::class, 'members']);
         Route::post('/channels/{channel}/members', [ChannelController::class, 'addMember']);
         Route::delete('/channels/{channel}/members/{user}', [ChannelController::class, 'removeMemberRoute']);
 
