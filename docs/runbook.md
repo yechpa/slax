@@ -49,7 +49,7 @@ What runs where, and why:
 | Front door | **Caddy on the host.** It terminates TLS (automatic Let's Encrypt), sets HSTS (`max-age=31536000; includeSubDomains`, no `preload`), replaces any client `X-Forwarded-For`/`X-Real-IP` with the real peer address, and proxies to the web pod's Service on a fixed ClusterIP. k3s runs without Traefik and ServiceLB: nothing in the cluster listens on a public port, and ServiceLB's source-address rewriting does not exist. nginx in the web pod believes `X-Forwarded-For` only from the pod network, and the web pod's network policy admits no pod (only its node). Laravel trusts no proxy itself. Proven by `make proxy-test`. |
 | Files | **Presigned S3 URLs, straight from the bucket** (`https://<bucket>.s3.eu-central-1.amazonaws.com`): a cross-site origin of the bucket's own, so an uploaded file can never run with the app's cookies or origin. The presigned request forces the stored type (`response-content-type`, from the scanner's allowlist: PNG/JPEG/GIF/WebP/PDF/text/zip) and the disposition (`attachment` for everything but images and PDFs). `nosniff` cannot be added to S3 responses; forcing the type covers it (browsers never sniff an `image/*` into HTML). No `files.slax.yechpa.com` record, no CloudFront, no CORS (uploads go through the app; `<img>` needs no CORS). The CSP's `img-src` names exactly that host. |
 | AWS credentials | **The EC2 instance role**, through IMDSv2 with hop limit 2 so pods can reach it. The chart references no AWS key at all in production (`s3.useInstanceRole`). Only app, queue, scheduler and the backup jobs may reach the metadata service (Reverb, PostgreSQL, Redis and the migration Job are denied it; the scanner has no egress). The role can touch only the two buckets, and cannot delete backups. Flysystem sends `x-amz-acl: private` with every upload, so the role has `s3:PutObjectAcl` on the files objects; the ACL itself is inert (with *bucket owner enforced*, S3 accepts only ACLs equivalent to `bucket-owner-full-control`; `private` written by the bucket's own account grants exactly the owner full control, and is how Laravel apps write to such buckets; Block Public Access on top). Confirmed on real S3 only by checklist item 7, so the backend config is left as is. |
-| Host firewall | Besides the security group (TCP 80/443 only), `slax-edge-guard` drops TCP 22/6443/9345/10250/10256 and UDP 8472 arriving on the public interface (k3s requires it); 80/443, `tailscale0` and the pod network are untouched. |
+| Host firewall | Besides the security group (TCP 80/443 only), `slax-edge-guard` drops TCP 22/6443/10250/10256 and UDP 8472 arriving on the public interface (k3s requires it), and 9345 (the RKE2 supervisor port, unused by k3s: closed as defence in depth); 80/443, `tailscale0` and the pod network are untouched. |
 | TLS for the cluster API | k3s's own certificate, `tls-san` = the Tailscale address and names. Port 6443 is closed to the Internet; CI and you reach it over the tailnet. |
 | Backups | `pg_dump -Fc` daily to S3 (SSE-S3), weekly full restore into a throwaway PostgreSQL inside the check's pod (never the production server). Telegram: failures, and the weekly "restore check OK". |
 | Monitoring | Outside the app: the CronJob `slax-monitor` (`deploy/monitoring/uptime.sh`) checks every minute the web pod's health, Reverb, PostgreSQL, Redis and the public URL through Caddy, and the disks; Telegram `[Prod] DOWN` after 3 failures in a row, `RECOVERED` once, `DISK` above 80 % (§4.10). Inside the app: errors and warnings go to Telegram through Laravel's log, and Administration → Status shows the database, Redis, Reverb, the scanner and S3. No metrics stack (Prometheus, Grafana): not worth its memory on 2 GiB. |
@@ -330,8 +330,9 @@ all four images anonymously and refuses to deploy while one is private. Check, l
 
 ### 3.11 First release: v0.1.0
 
-1. Pick a commit of `main` whose `Images` run is green (every job: 8 `build`, 8 `push` and
-   4 `manifest` jobs, 4 images on 2 architectures) and that dev runs well.
+1. Pick a commit of `main` whose `Images` run is green (every job: `published`, then 8 `build`,
+   8 `push` and 4 `manifest` jobs for 4 images on 2 architectures; those are skipped when an
+   earlier run already published that commit) and that dev runs well.
 2. Tag and push it:
 
    ```sh
@@ -453,6 +454,8 @@ Data written since that backup is lost: say so on the site first if anyone uses 
    `kubectl -n slax patch cronjob slax-backup -p '{"spec":{"suspend":false}}'`, the monitor
    once the app answers again (`kubectl -n slax patch cronjob slax-monitor -p '{"spec":{"suspend":false}}'`),
    then the checklist items 2-4 of §7.
+5. Check that nothing stayed paused: `kubectl -n slax get cronjob slax-monitor slax-backup`
+   shows `SUSPEND` `False` for both.
 
 ### 4.5 Rotate secrets
 
@@ -563,9 +566,10 @@ Job unless its configuration is wrong (exit 2: `kubectl -n slax get jobs` shows 
   ```
 
   Or, on dev, the same with `slax-app`. Never stop PostgreSQL for a test.
-- Pause it (maintenance): `kubectl -n slax patch cronjob slax-monitor -p '{"spec":{"suspend":true}}'`,
+- Pause it (maintenance, a manual restore §4.4): `kubectl -n slax patch cronjob slax-monitor -p '{"spec":{"suspend":true}}'`,
   and `false` afterwards: it stays suspended across releases until you do (Helm leaves a
-  field it never set alone).
+  field it never set alone). `kubectl -n slax get cronjob slax-monitor` shows `SUSPEND` `False`
+  once it runs again.
 - Thresholds: `monitor.failThreshold` (3), `monitor.disk.alertPercent` (80),
   `recoverPercent` (75), `realertHours` (6) in the values; a release applies them.
 
