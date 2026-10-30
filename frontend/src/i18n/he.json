@@ -44,6 +44,7 @@
   "message.deleted": "ההודעה נמחקה.",
   "message.replies": { "one": "תשובה אחת", "two": "שתי תשובות", "other": "{count} תשובות" },
   "message.lastReply": "תשובה אחרונה ב־{time}",
+  "message.list": "הודעות ב־{channel}",
   "message.actions": "פעולות על ההודעה",
 
   "reaction.label": { "one": "אדם אחד הגיב ב־{emoji}", "two": "שני אנשים הגיבו ב־{emoji}", "other": "{count} אנשים הגיבו ב־{emoji}" },

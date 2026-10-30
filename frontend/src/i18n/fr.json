@@ -31,7 +31,7 @@
   "action.reply": "Répondre dans le fil",
 
   "search.label": "Rechercher",
-  "search.placeholder": "Rechercher des messages ou des personnes",
+  "search.placeholder": "Rechercher messages et personnes",
   "search.shortcut": "Appuyez sur {key} pour rechercher",
 
   "composer.label": "Écrire un message",
@@ -44,6 +44,7 @@
   "message.deleted": "Ce message a été supprimé.",
   "message.replies": { "one": "{count} réponse", "other": "{count} réponses" },
   "message.lastReply": "dernière réponse à {time}",
+  "message.list": "Messages dans {channel}",
   "message.actions": "Actions sur le message",
 
   "reaction.label": { "one": "{count} personne a réagi avec {emoji}", "other": "{count} personnes ont réagi avec {emoji}" },

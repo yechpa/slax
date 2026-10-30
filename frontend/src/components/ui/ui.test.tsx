@@ -1,9 +1,11 @@
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setLocale } from '../../i18n/index.ts'
+import { ChannelName } from './ChannelName.tsx'
 import { Composer } from './Composer.tsx'
 import { FileChip } from './FileChip.tsx'
 import { LocaleSwitcher } from './LocaleSwitcher.tsx'
+import { Mention } from './Mention.tsx'
 import { Message } from './Message.tsx'
 import { NavItem } from './NavItem.tsx'
 import { PresenceDot } from './PresenceDot.tsx'
@@ -82,6 +84,15 @@ describe('Composer', () => {
     expect(host.querySelector('textarea')?.getAttribute('dir')).toBe('auto')
   })
 
+  it('does not send a blank message on Enter (like the disabled Send button)', () => {
+    const onSend = vi.fn()
+    render(<Composer channel="#general" value={'  \n '} onInput={() => undefined} onSend={onSend} />, host)
+    const textarea = host.querySelector('textarea')!
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    expect(onSend).not.toHaveBeenCalled()
+    expect(host.querySelector<HTMLButtonElement>('.btn--primary')!.disabled).toBe(true)
+  })
+
   it('sends on Enter but not on Shift+Enter', () => {
     const onSend = vi.fn()
     render(<Composer channel="#general" value="hi" onInput={() => undefined} onSend={onSend} />, host)
@@ -90,6 +101,39 @@ describe('Composer', () => {
     expect(onSend).not.toHaveBeenCalled()
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     expect(onSend).toHaveBeenCalledOnce()
+  })
+})
+
+describe('ChannelName and Mention', () => {
+  it('keep the sigil and the name together in one <bdi>', () => {
+    render(
+      <p>
+        <ChannelName name="general" /> <ChannelName name="עיצוב" /> <Mention name="נעם" />
+      </p>,
+      host,
+    )
+    const [latin, hebrew] = host.querySelectorAll('bdi.channel-name')
+    expect(latin.textContent).toBe('#general')
+    expect(hebrew.textContent).toBe('#עיצוב')
+    expect(host.querySelector('bdi.mention')?.textContent).toBe('@נעם')
+  })
+
+  it('accept a lang for screen readers', () => {
+    render(<Mention name="נעם" lang="he" />, host)
+    expect(host.querySelector('bdi.mention')?.getAttribute('lang')).toBe('he')
+  })
+})
+
+describe('Message lang', () => {
+  it('tags the body and the author with their languages', () => {
+    render(
+      <Message author="נעם" authorLang="he" hue={2} time={{ iso: 'x', label: '09:43' }} lang="he">
+        שלום
+      </Message>,
+      host,
+    )
+    expect(host.querySelector('.message__body')?.getAttribute('lang')).toBe('he')
+    expect(host.querySelector('.message__author')?.getAttribute('lang')).toBe('he')
   })
 })
 

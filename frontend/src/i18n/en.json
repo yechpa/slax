@@ -44,6 +44,7 @@
   "message.deleted": "This message was deleted.",
   "message.replies": { "one": "{count} reply", "other": "{count} replies" },
   "message.lastReply": "last reply {time}",
+  "message.list": "Messages in {channel}",
   "message.actions": "Message actions",
 
   "reaction.label": { "one": "{count} person reacted with {emoji}", "other": "{count} people reacted with {emoji}" },

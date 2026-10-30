@@ -9,12 +9,13 @@ const at = (hh: number, mm: number) => {
 
 export const time = at
 
-export const people: Record<string, { name: string; hue: number; presence: Presence }> = {
+/** `lang` only where the name is not Latin-script (the page language may be anything). */
+export const people: Record<string, { name: string; hue: number; presence: Presence; lang?: string }> = {
   dana: { name: 'dana', hue: 1, presence: 'online' },
-  noam: { name: 'נעם', hue: 2, presence: 'away' },
+  noam: { name: 'נעם', hue: 2, presence: 'away', lang: 'he' },
   maya: { name: 'maya', hue: 3, presence: 'offline' },
   lea: { name: 'léa', hue: 4, presence: 'online' },
-  yael: { name: 'יעל', hue: 5, presence: 'online' },
+  yael: { name: 'יעל', hue: 5, presence: 'online', lang: 'he' },
   omer: { name: 'omer', hue: 6, presence: 'offline' },
 }
 
@@ -22,7 +23,7 @@ export const channels = [
   { name: 'general', selected: true },
   { name: 'engineering', unread: 3 },
   { name: 'security' },
-  { name: 'עיצוב', unread: 1 },
+  { name: 'עיצוב', unread: 1, lang: 'he' },
   { name: 'random', muted: true, unread: 12 },
 ]
 

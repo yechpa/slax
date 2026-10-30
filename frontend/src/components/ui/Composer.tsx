@@ -25,7 +25,8 @@ export function Composer({ channel, value, onInput, onSend, onAttach, files }: P
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault()
-      onSend?.()
+      // Same rule as the disabled Send button: nothing to send.
+      if (value.trim() !== '') onSend?.()
     }
   }
   return (

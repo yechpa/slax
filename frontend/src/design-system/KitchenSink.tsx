@@ -7,6 +7,7 @@ import { Composer } from '../components/ui/Composer.tsx'
 import { EmptyState } from '../components/ui/EmptyState.tsx'
 import { FileChip } from '../components/ui/FileChip.tsx'
 import { LocaleSwitcher } from '../components/ui/LocaleSwitcher.tsx'
+import { Mention } from '../components/ui/Mention.tsx'
 import { Message } from '../components/ui/Message.tsx'
 import { NavItem } from '../components/ui/NavItem.tsx'
 import { PresenceDot } from '../components/ui/PresenceDot.tsx'
@@ -99,10 +100,10 @@ export function KitchenSink() {
               ))}
             </div>
             <div class="ds-specimen">
-              <p dir="auto" class="ds-specimen__line">
+              <p dir="auto" lang="he" class="ds-specimen__line">
                 {FONT_TEST}
               </p>
-              <p dir="auto" class="ds-specimen__line ds-specimen__line--strong">
+              <p dir="auto" lang="he" class="ds-specimen__line ds-specimen__line--strong">
                 {FONT_TEST}
               </p>
               <Caption>Cascadia Mono 300 / 700 · OFL</Caption>
@@ -158,7 +159,7 @@ export function KitchenSink() {
               <NavItem name="security" href="#" />
               <NavItem name="random" href="#" muted unread={12} />
               <NavItem name={dana.name} href="#" presence="online" />
-              <NavItem name={noam.name} href="#" presence="away" unread={2} />
+              <NavItem name={noam.name} lang={noam.lang} href="#" presence="away" unread={2} />
               <NavItem name={omer.name} href="#" presence="offline" />
             </div>
             <Caption>[aria-current=page] · --unread · --muted · presence</Caption>
@@ -173,7 +174,9 @@ export function KitchenSink() {
               </div>
               <div class="cluster ds-gap-4">
                 {[dana, noam, maya, lea, yael, omer].map((p) => (
-                  <Avatar key={p.name} name={p.name} hue={p.hue} presence={p.presence} />
+                  <span key={p.name} lang={p.lang}>
+                    <Avatar name={p.name} hue={p.hue} presence={p.presence} />
+                  </span>
                 ))}
               </div>
             </div>
@@ -186,6 +189,7 @@ export function KitchenSink() {
                 hue={dana.hue}
                 time={time(14, 5)}
                 edited
+                lang="en"
                 footer={
                   <>
                     <div class="message__reactions">
@@ -198,7 +202,14 @@ export function KitchenSink() {
               >
                 Backups restored on staging in 4 min. Runbook updated.
               </Message>
-              <Message author={yael.name} hue={yael.hue} time={time(14, 7)} footer={<ThreadLink href="#" replies={1} />}>
+              <Message
+                author={yael.name}
+                authorLang={yael.lang}
+                hue={yael.hue}
+                time={time(14, 7)}
+                lang="he"
+                footer={<ThreadLink href="#" replies={1} />}
+              >
                 הגיבוי עלה ב־staging, אפשר לבדוק את ה־dashboard כאן:{' '}
                 <a href={GRAFANA_URL} dir="ltr">
                   {GRAFANA_URL}
@@ -212,11 +223,11 @@ export function KitchenSink() {
           <Section id="ds-bidi" title={t('ds.bidi')}>
             <p class="dim ds-note">{t('ds.bidiNote')}</p>
             <div class="ds-messages">
-              <Message author={noam.name} hue={noam.hue} time={time(15, 1)}>
+              <Message author={noam.name} authorLang={noam.lang} hue={noam.hue} time={time(15, 1)} lang="he">
                 שלחתי PR חדש ל־<code>slax-api</code>, מי שיכול לעשות review לפני 17:00?
               </Message>
-              <Message author={omer.name} hue={omer.hue} time={time(15, 2)}>
-                On it. Looks like <span class="mention">@{noam.name}</span> fixed the RTL bug (#42).
+              <Message author={omer.name} hue={omer.hue} time={time(15, 2)} lang="en">
+                On it. Looks like <Mention name={noam.name} lang={noam.lang} /> fixed the RTL bug (#42).
               </Message>
             </div>
           </Section>
