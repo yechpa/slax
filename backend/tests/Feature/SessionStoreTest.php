@@ -1,10 +1,13 @@
 <?php
 
 use App\Contracts\IdentityProvider;
+use App\Models\Channel;
 use App\Models\User;
 use App\Services\Identity\GoogleProfile;
 use App\Services\UserSessions;
 use App\Session\TieredSessionHandler;
+use Database\Seeders\DefaultWorkspaceSeeder;
+use Illuminate\Cache\RateLimiter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
@@ -119,19 +122,19 @@ test('everything Slax keeps in Redis but the queue carries an expiry, so volatil
     app()->forgetInstance('cache.store');
     app('session')->forgetDrivers();
     app()->forgetInstance('session.store');
-    $this->seed(Database\Seeders\DefaultWorkspaceSeeder::class);
+    $this->seed(DefaultWorkspaceSeeder::class);
     app(IdentityProvider::class)->returns(new GoogleProfile(sub: 'sub-2', email: 'bob@example.com', emailVerified: true, name: 'Bob', avatar: null));
 
     $guest = sessionIdOf(test()->withHeaders(['Referer' => 'http://localhost/'])->postJson('/api/v1/auth/google/start', ['turnstile_token' => 'ok'])->assertOk());
     $id = sessionIdOf(withSessionCookie($guest)->get('/auth/google/callback?'.http_build_query(['code' => 'c', 'state' => session('google_oauth')['state']]))->assertRedirect('/'));
-    $general = App\Models\Channel::where('name', 'general')->sole();
+    $general = Channel::where('name', 'general')->sole();
     withSessionCookie($id)->postJson('/api/v1/presence/heartbeat', ['active' => true])->assertNoContent();
     withSessionCookie($id)->getJson('/api/v1/presence?'.http_build_query(['user_ids' => [1]]))->assertOk();
     withSessionCookie($id)->postJson("/api/v1/channels/{$general->id}/join")->assertSuccessful();
     withSessionCookie($id)->postJson("/api/v1/channels/{$general->id}/messages", ['body' => 'hello', 'client_id' => (string) Str::uuid()])->assertCreated();
     withSessionCookie($id)->postJson('/api/v1/auth/logout')->assertNoContent();
     // The rate limiters (built at boot on the test's array store) and the audit's once-per keys, on Redis.
-    $limiter = new Illuminate\Cache\RateLimiter(app('cache')->store('redis'));
+    $limiter = new RateLimiter(app('cache')->store('redis'));
     $limiter->hit('messages:user:1', 60);
     app('cache')->store('redis')->add('audit:once:x', 1, 600);
     app(UserSessions::class)->remember(User::sole(), 'another-session');
@@ -141,4 +144,33 @@ test('everything Slax keeps in Redis but the queue carries an expiry, so volatil
     $prefix = (string) config('database.redis.options.prefix');
     $forever = collect($keys)->filter(fn (string $key) => Redis::connection()->ttl(Str::after($key, $prefix)) < 0)->values()->all();
     expect($forever)->toBe([]);
+});
+
+test('the index of a person\'s sessions is refreshed while they use Slax, so a ban still reaches a session months old', function () {
+    $user = User::factory()->create();
+    $sessions = app(UserSessions::class);
+    $store = app('session')->driver();
+    $id = Str::random(40);
+    $store->setId($id);
+    $store->start();
+    $store->put(Auth::guard('web')->getName(), $user->id);
+    $store->save();
+    $sessions->remember($user, $id);
+    $index = "user-sessions:{$user->id}";
+
+    // Weeks later the index is about to expire, while the session itself keeps rolling.
+    Redis::connection()->expire($index, 10);
+    $this->travel(10)->minutes();
+    withSessionCookie($id)->getJson('/api/v1/me')->assertOk();
+    expect(Redis::connection()->ttl($index))->toBeGreaterThan(20160 * 60)
+        ->and(Redis::connection()->smembers($index))->toBe([$id]);
+
+    // At most once every few minutes: the next request soon after leaves it alone.
+    Redis::connection()->expire($index, 100);
+    withSessionCookie($id)->getJson('/api/v1/me')->assertOk();
+    expect(Redis::connection()->ttl($index))->toBeLessThanOrEqual(100);
+
+    // So a ban ends it.
+    expect($sessions->destroyAll($user))->toBe(1);
+    withSessionCookie($id)->getJson('/api/v1/me')->assertUnauthorized();
 });

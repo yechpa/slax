@@ -11,7 +11,8 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Runs after authentication: a banned user loses the session they already hold, and a session
  * that was signed out (UserSessions::end) stays signed out even if a request that was in flight
- * during the sign-out wrote it back.
+ * during the sign-out wrote it back. It also keeps the session in the user's index, so a ban
+ * reaches it however long it has rolled.
  */
 class EnsureNotBanned
 {
@@ -33,6 +34,11 @@ class EnsureNotBanned
             }
 
             return response()->json(['error' => 'account_banned'], 403);
+        }
+
+        // A ban must still reach this session months from now (it rolls while used).
+        if ($request->user() !== null && $request->hasSession()) {
+            $this->sessions->keepIndexed($request->user(), $request->session());
         }
 
         return $next($request);

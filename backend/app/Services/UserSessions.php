@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
+use Illuminate\Contracts\Session\Session;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -32,6 +33,26 @@ class UserSessions
         } catch (Throwable $e) {
             report($e);
         }
+    }
+
+    /** How often a request in use refreshes the index (keepIndexed). */
+    public const INDEX_REFRESH_SECONDS = 300;
+
+    private const INDEXED_AT = '_slax_indexed_at';
+
+    /**
+     * A session rolls for as long as it is used, the index would expire after twice the
+     * lifetime: every authenticated request (EnsureNotBanned) puts the session back in it, at
+     * most every five minutes (a timestamp in the session itself, so no Redis call otherwise).
+     */
+    public function keepIndexed(User $user, Session $session): void
+    {
+        $now = now()->getTimestamp();
+        if ($now - (int) $session->get(self::INDEXED_AT, 0) < self::INDEX_REFRESH_SECONDS) {
+            return;
+        }
+        $this->remember($user, $session->getId());
+        $session->put(self::INDEXED_AT, $now);
     }
 
     public function forget(User $user, string $sessionId): void
