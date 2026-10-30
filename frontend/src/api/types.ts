@@ -43,6 +43,8 @@ export interface Channel {
   unread_count: number
   /** Only for dm and group_dm. */
   members?: UserSummary[]
+  /** Locked by an administrator: members read, only administrators post (403 `channel_locked`). */
+  locked?: boolean
 }
 
 /** {emoji, count, reacted_by_me, user_ids (first 50 reactors)}: broadcasts always say reacted_by_me=false. */
@@ -117,3 +119,39 @@ export interface TypingWhisper {
 
 /** Realtime events on `private-channel.{id}`; every payload is a MessageResource. */
 export type MessageEventName = 'message.created' | 'message.updated' | 'message.deleted' | 'reaction.changed'
+
+/** GET /admin/status: each service `ok` or `degraded`, with its probe's time. */
+export interface ServiceHealth {
+  name: 'database' | 'redis' | 'reverb' | 'scanner' | 's3'
+  status: 'ok' | 'degraded'
+  latency_ms: number
+}
+
+export interface AdminStatus {
+  environment: string
+  checked_at: string
+  services: ServiceHealth[]
+}
+
+/** GET /admin/audit: ids and display names, never an e-mail address or content. */
+export interface AuditEntry {
+  id: number
+  action: string
+  created_at: string
+  ip: string | null
+  actor: { id: number; name: string } | null
+  target: { type: string; id: number | null; label: string | null } | null
+}
+
+export interface AuditPage {
+  data: AuditEntry[]
+  page: number
+  per_page: number
+  has_more: boolean
+}
+
+/** A person as administrators see them: POST /admin/users/{id}/ban, GET /admin/users/banned. */
+export interface ModeratedUser extends UserSummary {
+  banned: boolean
+  banned_at: string | null
+}

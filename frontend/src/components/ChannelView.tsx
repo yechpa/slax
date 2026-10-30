@@ -10,7 +10,7 @@ import type { Channel } from '../api/types.ts'
 import { plural, t } from '../i18n/index.ts'
 import { writePref } from '../lib/prefs.ts'
 import { channelPath, navigate } from '../router.ts'
-import { isDirect } from '../store/channels.ts'
+import { canPostIn, isDirect, lockedFor } from '../store/channels.ts'
 import { channelKey, timeline } from '../store/messages.ts'
 import { me } from '../store/session.ts'
 import { showToast } from '../store/ui.ts'
@@ -42,6 +42,7 @@ type Props = {
 export function ChannelView({ channel, threadId, threadModal, navOpen, onToggleNav, toggleRef }: Props) {
   const chat = useChat()
   const meId = me.value?.id ?? null
+  const canPost = canPostIn(channel, me.value)
   const label = channelLabel(channel, meId)
   const messages = timeline(channelKey(channel.id)).value
   const [details, setDetails] = useState(false)
@@ -67,7 +68,7 @@ export function ChannelView({ channel, threadId, threadModal, navOpen, onToggleN
         timeline={messages}
         meId={meId}
         unreadAfter={unreadAfter}
-        place={{ channelId: channel.id, canPost: channel.is_member, inThread: false }}
+        place={{ channelId: channel.id, canPost, inThread: false }}
         inert={behind}
         onLoadOlder={() => void chat.loadOlder(channel.id)}
         onRetryOlder={() => void chat.loadOlder(channel.id, { force: true })}
@@ -81,8 +82,10 @@ export function ChannelView({ channel, threadId, threadModal, navOpen, onToggleN
       <footer class="shell__footer" inert={behind}>
         {/* Keeps its line, so the composer never jumps. */}
         <Typing channelId={channel.id} />
-        {channel.is_member ? (
+        {canPost ? (
           <ChatComposer channel={channel} label={label} onSent={() => setUnreadAfter(null)} />
+        ) : lockedFor(channel, me.value) ? (
+          <LockedBar label={label} />
         ) : (
           <JoinBar channel={channel} label={label} />
         )}
@@ -114,13 +117,22 @@ export function ChannelView({ channel, threadId, threadModal, navOpen, onToggleN
         </div>
       </header>
 
-      {channel.is_member ? <DropZone onFiles={(files) => addFiles(chat, channel.id, null, files)}>{main}</DropZone> : main}
+      {canPost ? <DropZone onFiles={(files) => addFiles(chat, channel.id, null, files)}>{main}</DropZone> : main}
 
       {threadId !== null && (
         <ThreadPanel key={threadId} channel={channel} parentId={threadId} label={label} modal={threadModal} onClose={() => navigate(channelPath(channel.id))} />
       )}
       {details && <ChannelDetails channel={channel} label={label} onClose={() => setDetails(false)} />}
     </>
+  )
+}
+
+/** A member of a locked channel reads it; an administrator locked it, nobody else posts. */
+export function LockedBar({ label }: { label: string }) {
+  return (
+    <div class="join-bar join-bar--locked" role="status">
+      <p class="join-bar__text">{t('channel.locked', { channel: label })}</p>
+    </div>
   )
 }
 

@@ -1,6 +1,7 @@
 /**
  * The account menu at the foot of the sidebar: who is signed in, language and theme
- * (applied at once, remembered on this device and saved to the account), sign out.
+ * (applied at once, remembered on this device and saved to the account), administration
+ * (administrators only), sign out.
  * A disclosure: the button toggles the panel above it; Escape or a click elsewhere
  * closes it and focus returns to the button.
  */
@@ -8,9 +9,10 @@ import { useEffect, useId, useRef, useState } from 'preact/hooks'
 import { isApiError } from '../api/client.ts'
 import { api } from '../api/endpoints.ts'
 import { t } from '../i18n/index.ts'
+import { ADMIN_PATH } from '../router.ts'
 import { endSession } from '../session.ts'
 import { me } from '../store/session.ts'
-import { showToast } from '../store/ui.ts'
+import { navOpen, showToast } from '../store/ui.ts'
 import { Avatar } from './ui/Avatar.tsx'
 import { Button } from './ui/Button.tsx'
 import { userHue } from './ui/hue.ts'
@@ -79,6 +81,19 @@ export function UserMenu() {
         </p>
         <LocaleSwitcher onChange={(locale) => save({ locale })} />
         <ThemeSwitcher onChange={(theme) => save({ theme })} />
+        {user.is_admin && (
+          <a
+            class="user-menu__admin"
+            href={ADMIN_PATH}
+            onClick={() => {
+              // Closes the menu, and the channel drawer it sits in on small screens.
+              setOpen(false)
+              navOpen.value = false
+            }}
+          >
+            {t('admin.open')}
+          </a>
+        )}
         <Button variant="secondary" size="sm" class="user-menu__signout" onClick={() => void signOut()} disabled={leaving}>
           {t('action.signOut')}
         </Button>

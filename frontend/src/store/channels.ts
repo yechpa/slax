@@ -4,7 +4,7 @@
  * a list fetched before one of our own POST /read calls landed must not resurrect a badge.
  */
 import { computed, signal } from '@preact/signals'
-import type { Channel } from '../api/types.ts'
+import type { Channel, Me } from '../api/types.ts'
 
 export const channels = signal<Channel[]>([])
 /** False until the first GET /channels answered. */
@@ -17,6 +17,15 @@ export const rooms = computed(() => channels.value.filter((c) => c.kind === 'pub
 export const conversations = computed(() => channels.value.filter((c) => c.kind === 'dm' || c.kind === 'group_dm'))
 
 export const isDirect = (channel: Channel) => channel.kind === 'dm' || channel.kind === 'group_dm'
+
+/**
+ * May post, react and edit there: members, except in a channel an administrator locked,
+ * where only administrators still do. The server decides in the end (403 `channel_locked`).
+ */
+export const canPostIn = (channel: Channel, user: Me | null) => channel.is_member && (!channel.locked || user?.is_admin === true)
+
+/** A member reading a locked channel, who cannot write in it. */
+export const lockedFor = (channel: Channel, user: Me | null) => channel.is_member && !canPostIn(channel, user)
 
 export function setChannels(list: Channel[]): void {
   const previous = channelById.peek()

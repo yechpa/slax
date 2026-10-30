@@ -11,6 +11,7 @@ import { useEffect, useId, useLayoutEffect, useRef } from 'preact/hooks'
 import type { Channel } from '../api/types.ts'
 import { sameDay } from '../i18n/format.ts'
 import { plural, t } from '../i18n/index.ts'
+import { canPostIn } from '../store/channels.ts'
 import { threadKey, timeline, type Timeline } from '../store/messages.ts'
 import { me } from '../store/session.ts'
 import { Button } from './ui/Button.tsx'
@@ -44,7 +45,8 @@ export function ThreadPanel({ channel, parentId, label, modal, onClose }: Props)
   const titleId = useId()
   const close = useRef(onClose)
   close.current = onClose
-  const place: MessagePlace = { channelId: channel.id, canPost: channel.is_member, inThread: true }
+  const canPost = canPostIn(channel, me.value)
+  const place: MessagePlace = { channelId: channel.id, canPost, inThread: true }
 
   useEffect(() => {
     chat.openThread(channel.id, parentId)
@@ -101,7 +103,7 @@ export function ThreadPanel({ channel, parentId, label, modal, onClose }: Props)
         </Button>
       </header>
       <ThreadLog thread={thread} place={place} onRetry={() => chat.retryThread(channel.id, parentId)} onOlder={() => chat.loadOlderReplies(parentId)} />
-      {channel.is_member && !thread.missing && (
+      {canPost && !thread.missing && (
         <footer class="thread__footer">
           <Typing channelId={channel.id} parentId={parentId} />
           <ChatComposer channel={channel} label={label} parentId={parentId} />
@@ -120,7 +122,7 @@ export function ThreadPanel({ channel, parentId, label, modal, onClose }: Props)
       aria-labelledby={titleId}
       onKeyDown={onKeyDown}
     >
-      {channel.is_member ? <DropZone onFiles={(files) => addFiles(chat, channel.id, parentId, files)}>{content}</DropZone> : content}
+      {canPost ? <DropZone onFiles={(files) => addFiles(chat, channel.id, parentId, files)}>{content}</DropZone> : content}
     </div>
   )
 }

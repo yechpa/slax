@@ -135,6 +135,27 @@ const dragFiles = async (page) => {
   })
   await page.waitForSelector('.drop-zone__overlay')
 }
+// Administration (?admin=1): reached from the account menu, as an administrator does.
+const openAdmin = async (page) => {
+  await page.click('.user-menu__toggle')
+  await page.click('.user-menu__admin')
+  await page.waitForSelector('.admin-status__row')
+  await settle(page)
+}
+const adminTab = (index, ready) => async (page) => {
+  await openAdmin(page)
+  await page.click(`.admin__tab >> nth=${index}`)
+  await page.waitForSelector(ready)
+  await settle(page)
+}
+const adminAudit = adminTab(1, '.admin-table tbody tr')
+const adminModeration = adminTab(2, '.admin-list__row')
+const adminMessageMenu = async (page) => {
+  const item = messageItem(page, 4)
+  await item.hover()
+  await item.locator('.message-actions__more').click()
+  await page.waitForSelector('.popover--placed .menu')
+}
 // Every theme × language is loaded and checked at both widths; only some are saved.
 const shots = []
 for (const theme of ['console', 'listing']) {
@@ -187,6 +208,18 @@ for (const [theme, lang] of [['console', 'fr'], ['listing', 'he']]) {
 }
 shots.push({ url: signIn('listing', 'fr', '&auth_error=provider_error'), files: ['app/signin-error-listing-fr.png'], theme: 'listing', lang: 'fr', viewport: appDesktop, ready: '.signin__error' })
 shots.push({ url: app('console', 'en'), files: ['app/shell-menu-console-en.png'], theme: 'console', lang: 'en', viewport: appDesktop, ready: '.message__body', before: (page) => page.click('.user-menu__toggle') })
+
+const adminApp = (theme, lang) => app(theme, lang, '&admin=1')
+for (const [theme, lang] of [['console', 'en'], ['console', 'he'], ['listing', 'fr']]) {
+  shots.push({ url: adminApp(theme, lang), files: [`app/admin-status-${theme}-${lang}.png`], theme, lang, viewport: appDesktop, ready: '.message__body', before: openAdmin })
+  shots.push({ url: adminApp(theme, lang), files: [`app/admin-audit-${theme}-${lang}.png`], theme, lang, viewport: appDesktop, ready: '.message__body', before: adminAudit })
+  shots.push({ url: adminApp(theme, lang), files: [`app/admin-moderation-${theme}-${lang}.png`], theme, lang, viewport: appDesktop, ready: '.message__body', before: adminModeration })
+}
+shots.push({ url: adminApp('console', 'en'), files: ['app/admin-message-menu-console-en.png'], theme: 'console', lang: 'en', viewport: appDesktop, ready: '.message__body', before: adminMessageMenu })
+shots.push({ url: adminApp('console', 'fr'), files: ['app/mobile-admin-console-fr.png'], theme: 'console', lang: 'fr', viewport: mobile, isMobile: true, ready: '.message__body', before: async (page) => {
+  await openDrawer(page)
+  await openAdmin(page)
+} })
 
 /** Runs in the page: anything clipped that must not be. */
 function layoutProblems() {

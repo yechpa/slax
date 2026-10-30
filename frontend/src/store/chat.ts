@@ -479,16 +479,37 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     if (still()) applyKnown(reactions.overlay(message))
   }
 
-  /** Deletes a message: it becomes a tombstone everywhere (a reply leaves its parent's count). */
-  async function deleteMessage(messageId: number): Promise<void> {
+  /**
+   * Deletes a message: it becomes a tombstone everywhere (a reply leaves its parent's count).
+   * `asModerator`: an administrator deleting someone else's, with its files.
+   */
+  async function deleteMessage(messageId: number, { asModerator = false } = {}): Promise<void> {
     const still = alive()
-    const message = await api.deleteMessage(messageId)
+    const message = await (asModerator ? api.admin.deleteMessage(messageId) : api.deleteMessage(messageId))
     if (!still()) return
     batch(() => {
       applyKnown(message)
       threads.onParent(message)
       if (message.parent_id !== null) threads.noteReply(message, 'message.deleted')
     })
+  }
+
+  /**
+   * An administrator removes one file of a message. Shown at once without it (a moderator
+   * may not be subscribed to the channel); a message left with neither text nor file is a
+   * tombstone, as on the server.
+   */
+  async function deleteFileAsModerator(messageId: number, fileId: number): Promise<void> {
+    const still = alive()
+    await api.admin.deleteFile(fileId)
+    const message = findMessage(messageId)
+    if (!still() || !message || message.deleted) return
+    const files = message.files.filter((file) => file.id !== fileId)
+    applyKnown(
+      message.body === '' && files.length === 0
+        ? { id: message.id, channel_id: message.channel_id, parent_id: message.parent_id, created_at: message.created_at, reply_count: message.reply_count, last_reply_at: message.last_reply_at, deleted: true }
+        : { ...message, files },
+    )
   }
 
   /** Opens a thread beside its channel (the parent shows at once when we have it). */
@@ -654,6 +675,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     toggleReaction: (messageId: number, emoji: string) => reactions.toggle(messageId, emoji),
     editMessage,
     deleteMessage,
+    deleteFileAsModerator,
     uploads,
     presence,
     typing,

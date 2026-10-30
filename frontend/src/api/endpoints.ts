@@ -2,7 +2,19 @@
 import type { Locale } from '../i18n/index.ts'
 import type { Theme } from '../theme.ts'
 import { apiPath, request, requestWithStatus } from './client.ts'
-import type { Channel, ChannelMember, Me, Message, MessagePage, PresenceState, RepliesPage, UserSummary } from './types.ts'
+import type {
+  AdminStatus,
+  AuditPage,
+  Channel,
+  ChannelMember,
+  Me,
+  Message,
+  MessagePage,
+  ModeratedUser,
+  PresenceState,
+  RepliesPage,
+  UserSummary,
+} from './types.ts'
 
 const emojiPath = (messageId: number, emoji: string) => apiPath(`/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`)
 
@@ -52,6 +64,21 @@ export const api = {
   heartbeat: (active: boolean) => request<void>(apiPath('/presence/heartbeat'), { method: 'POST', body: { active }, quiet: true }),
   presence: (userIds: number[], signal?: AbortSignal) =>
     request<Record<string, PresenceState>>(apiPath('/presence'), { query: { 'user_ids[]': userIds }, signal, quiet: true }),
+
+  /** Administrators only (403 for everyone else): moderation, audit log, service status. */
+  admin: {
+    status: (signal?: AbortSignal) => request<AdminStatus>(apiPath('/admin/status'), { signal }),
+    audit: (page: number, signal?: AbortSignal) => request<AuditPage>(apiPath('/admin/audit'), { query: { page }, signal }),
+    banned: (signal?: AbortSignal) => request<{ data: ModeratedUser[] }>(apiPath('/admin/users/banned'), { signal }),
+    /** Idempotent; `false` lifts the ban. */
+    ban: (userId: number, banned: boolean) => request<ModeratedUser>(apiPath(`/admin/users/${userId}/ban`), { method: 'POST', body: { banned } }),
+    /** The tombstone; 503 `storage_unavailable` when a file could not be removed yet (retry). */
+    deleteMessage: (id: number) => request<Message>(apiPath(`/admin/messages/${id}`), { method: 'DELETE' }),
+    deleteFile: (id: number) => request<void>(apiPath(`/admin/files/${id}`), { method: 'DELETE' }),
+    /** Idempotent; `false` unlocks. */
+    lock: (channelId: number, locked: boolean) =>
+      request<{ id: number; name: string; locked: boolean }>(apiPath(`/admin/channels/${channelId}/lock`), { method: 'POST', body: { locked } }),
+  },
 }
 
 export type Api = typeof api

@@ -99,11 +99,13 @@ function ServerMessage({ message, compact, place }: { message: ApiMessage; compa
 function LiveItem({ message, compact, place, threadLink }: { message: LiveMessage; compact: boolean; place?: MessagePlace; threadLink?: ComponentChildren }) {
   const chat = useContext(ChatContext)
   const [editing, setEditing] = useState(false)
-  const [confirming, setConfirming] = useState(false)
+  /** What the confirmation dialog is about: my own delete, or a moderator's. */
+  const [confirming, setConfirming] = useState<Confirm>(null)
   const [deleting, setDeleting] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const mine = message.user.id === me.value?.id
+  const moderator = me.value?.is_admin === true && !mine
   const canPost = place?.canPost ?? false
   const presence = chat?.presence.stateOf(message.user.id)
 
@@ -111,19 +113,31 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
   const refocus = () => queueMicrotask(() => root.current?.querySelector<HTMLElement>('.message-actions__more')?.focus())
 
   const remove = async () => {
-    if (!chat) return
+    if (!chat || !confirming) return
+    const what = confirming
     // The message turns into a tombstone (this component goes): focus stays in its list.
     const list = root.current?.closest<HTMLElement>('[role="log"]')
     setDeleting(true)
     try {
-      await chat.deleteMessage(message.id)
-      setConfirming(false)
+      if (what.kind === 'file') {
+        await chat.deleteFileAsModerator(message.id, what.fileId)
+        setDeleting(false)
+        setConfirming(null)
+        refocus()
+        showToast({ tone: 'success', text: t('moderation.fileDeleted', { name: what.name }), key: 'moderation' })
+        return
+      }
+      await chat.deleteMessage(message.id, { asModerator: what.kind === 'moderate' })
+      setConfirming(null)
       list?.focus({ preventScroll: true })
+      if (what.kind === 'moderate') showToast({ tone: 'success', text: t('moderation.messageDeleted'), key: 'moderation' })
     } catch (error) {
       setDeleting(false)
-      setConfirming(false)
+      setConfirming(null)
       refocus()
-      if (!isApiError(error, 'rate_limited')) showToast({ tone: 'error', text: t('error.deleteFailed'), key: 'delete' })
+      if (isApiError(error, 'rate_limited')) return
+      const text = what.kind === 'own' ? t('error.deleteFailed') : moderationError(error)
+      showToast({ tone: 'error', text, key: 'delete' })
     }
   }
 
@@ -135,7 +149,16 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
         onReply={place.inThread ? undefined : () => navigate(threadPath(place.channelId, message.id))}
         onReact={(emoji) => void chat.toggleReaction(message.id, emoji)}
         onEdit={() => setEditing(true)}
-        onDelete={() => setConfirming(true)}
+        onDelete={() => setConfirming({ kind: 'own' })}
+        moderation={
+          moderator
+            ? {
+                files: message.files,
+                onDeleteMessage: () => setConfirming({ kind: 'moderate' }),
+                onDeleteFile: (fileId) => setConfirming({ kind: 'file', fileId, name: message.files.find((f) => f.id === fileId)?.name ?? '' }),
+              }
+            : undefined
+        }
         onOpenChange={setActionsOpen}
       />
     ) : undefined
@@ -183,11 +206,11 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
       {confirming && (
         <Dialog
           role="alertdialog"
-          title={t('message.deleteTitle')}
-          description={t('message.deleteBody')}
+          title={confirmTitle(confirming)}
+          description={confirmBody(confirming, message.user.name)}
           onClose={() => {
             if (deleting) return
-            setConfirming(false)
+            setConfirming(null)
             refocus()
           }}
           footer={
@@ -196,7 +219,7 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
                 variant="secondary"
                 data-autofocus
                 onClick={() => {
-                  setConfirming(false)
+                  setConfirming(null)
                   refocus()
                 }}
                 disabled={deleting}
@@ -212,4 +235,23 @@ function LiveItem({ message, compact, place, threadLink }: { message: LiveMessag
       )}
     </div>
   )
+}
+
+type Confirm = null | { kind: 'own' } | { kind: 'moderate' } | { kind: 'file'; fileId: number; name: string }
+
+function confirmTitle(what: NonNullable<Confirm>): string {
+  if (what.kind === 'file') return t('moderation.deleteFileTitle')
+  return what.kind === 'moderate' ? t('moderation.deleteMessageTitle') : t('message.deleteTitle')
+}
+
+function confirmBody(what: NonNullable<Confirm>, author: string): string {
+  if (what.kind === 'file') return t('moderation.deleteFileBody', { name: what.name, author })
+  return what.kind === 'moderate' ? t('moderation.deleteMessageBody', { author }) : t('message.deleteBody')
+}
+
+/** A moderator's delete failed: storage not ready yet (retry) or anything else. */
+function moderationError(error: unknown): string {
+  if (isApiError(error, 'storage_unavailable')) return t('moderation.error.storage_unavailable')
+  if (isApiError(error, 'forbidden')) return t('moderation.error.forbidden')
+  return t('moderation.error.generic')
 }

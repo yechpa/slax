@@ -1,7 +1,7 @@
 /**
  * The real application on fixtures, for review screenshots (`make screenshots`):
- * ?screen=signed-out|app, ?theme=console|listing, ?lang=en|he|fr, and
- * ?auth_error=<code> on the sign-in screen.
+ * ?screen=signed-out|app, ?theme=console|listing, ?lang=en|he|fr, ?admin=1 (signed in as an
+ * administrator), and ?auth_error=<code> on the sign-in screen.
  */
 import { render } from 'preact'
 import '../styles/index.css'
@@ -20,7 +20,7 @@ const lang = params.get('lang')
 if (isTheme(theme)) setTheme(theme)
 if (isLocale(lang)) setLocale(lang)
 
-installFixtureServer({ signedIn: params.get('screen') !== 'signed-out' })
+installFixtureServer({ signedIn: params.get('screen') !== 'signed-out', admin: params.get('admin') === '1' })
 installClientEvents()
 listenToHistory()
 void boot()

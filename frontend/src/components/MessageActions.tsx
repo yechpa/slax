@@ -1,6 +1,7 @@
 /**
- * What can be done to a message: react, reply in its thread, and (its author) edit or
- * delete. The quick buttons show on hover or keyboard focus; the "more" button opens a
+ * What can be done to a message: react, reply in its thread, (its author) edit or
+ * delete, and (an administrator, on someone else's) delete it or one of its files as a
+ * moderator. The quick buttons show on hover or keyboard focus; the "more" button opens a
  * menu with every action, and it stays visible on touch screens (no hover there), so
  * nothing depends on hovering. The server decides in the end; errors come back as toasts.
  */
@@ -19,13 +20,19 @@ type Props = {
   onReact: (emoji: string) => void
   onEdit: () => void
   onDelete: () => void
+  /** An administrator, on someone else's message: moderation items (each confirmed first). */
+  moderation?: {
+    files: readonly { id: number; name: string }[]
+    onDeleteMessage: () => void
+    onDeleteFile: (fileId: number) => void
+  }
   /** A menu or the picker is open: the toolbar stays shown. */
   onOpenChange?: (open: boolean) => void
 }
 
 type Open = null | 'menu' | 'picker' | 'picker-from-menu'
 
-export function MessageActions({ canPost, mine, onReply, onReact, onEdit, onDelete, onOpenChange }: Props) {
+export function MessageActions({ canPost, mine, onReply, onReact, onEdit, onDelete, moderation, onOpenChange }: Props) {
   const [open, setOpen] = useState<Open>(null)
   const reactButton = useRef<HTMLButtonElement>(null)
   const moreButton = useRef<HTMLButtonElement>(null)
@@ -40,6 +47,12 @@ export function MessageActions({ canPost, mine, onReply, onReact, onEdit, onDele
   if (canPost) items.push({ label: t('action.react'), run: () => setOpen('picker-from-menu'), replacesMenu: true })
   if (mine && canPost) items.push({ label: t('action.edit'), run: onEdit })
   if (mine) items.push({ label: t('action.delete'), run: onDelete, danger: true })
+  if (moderation && !mine) {
+    items.push({ label: t('moderation.deleteMessage'), run: moderation.onDeleteMessage, danger: true })
+    for (const file of moderation.files) {
+      items.push({ key: `file-${file.id}`, label: t('moderation.deleteFile', { name: file.name }), run: () => moderation.onDeleteFile(file.id), danger: true })
+    }
+  }
   if (items.length === 0) return null
 
   const close = (restoreFocus: boolean, anchor = moreButton) => {
@@ -105,7 +118,7 @@ export function MessageActions({ canPost, mine, onReply, onReact, onEdit, onDele
   )
 }
 
-type Item = { label: string; run: () => void; danger?: boolean; replacesMenu?: boolean }
+type Item = { label: string; run: () => void; danger?: boolean; replacesMenu?: boolean; key?: string }
 
 /** A menu: focus on its first item, arrows move, Home/End, Tab leaves (and closes it). */
 export function Menu({ items, onDone, onTab }: { items: Item[]; onDone: (item: Item) => void; onTab: () => void }) {
@@ -130,7 +143,7 @@ export function Menu({ items, onDone, onTab }: { items: Item[]; onDone: (item: I
     <div class="menu" role="menu" ref={list} onKeyDown={onKeyDown}>
       {items.map((item) => (
         <button
-          key={item.label}
+          key={item.key ?? item.label}
           type="button"
           role="menuitem"
           tabIndex={-1}

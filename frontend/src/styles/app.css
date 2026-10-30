@@ -593,6 +593,233 @@
     font-size: var(--text-sm);
   }
 
+  /* A member of a locked channel: reading only. */
+  .join-bar--locked {
+    border-style: solid;
+    border-color: var(--color-warn);
+  }
+
+  .user-menu__admin {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    color: var(--color-link);
+    font-size: var(--text-sm);
+  }
+
+  /* ── Administration (/admin) ─────────────────────────── */
+  .admin {
+    display: grid;
+    align-content: start;
+    gap: var(--space-4);
+    min-block-size: 0;
+    overflow: auto;
+    padding: var(--space-4);
+  }
+
+  .admin__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .admin__tab {
+    min-block-size: var(--control-height);
+    padding-inline: var(--space-3);
+    color: var(--color-text-dim);
+    background: none;
+    border: var(--border-width) solid transparent;
+    border-block-end: none;
+    border-start-start-radius: var(--radius-1);
+    border-start-end-radius: var(--radius-1);
+    cursor: pointer;
+  }
+
+  .admin__tab:hover {
+    color: var(--color-text);
+    background: var(--color-hover);
+  }
+
+  .admin__tab[aria-selected='true'] {
+    color: var(--color-accent);
+    border-color: var(--color-border);
+    background: var(--color-surface);
+    font-weight: var(--weight-strong);
+  }
+
+  .admin__panel {
+    display: grid;
+    gap: var(--space-6);
+    min-inline-size: 0;
+  }
+
+  .admin__section {
+    display: grid;
+    gap: var(--space-3);
+    min-inline-size: 0;
+  }
+
+  .admin__bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  .admin__heading {
+    font-size: var(--text-md);
+    font-weight: var(--weight-strong);
+    color: var(--color-accent);
+  }
+
+  .admin__subheading {
+    font-size: var(--text-sm);
+    color: var(--color-text-dim);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-label);
+  }
+
+  .admin__note,
+  .admin__muted {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+  }
+
+  .admin__error {
+    color: var(--color-danger);
+    font-size: var(--text-sm);
+  }
+
+  .admin__pager {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .admin__ban {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .admin__ban > :first-child {
+    flex: 1 1 18rem;
+    min-inline-size: 0;
+  }
+
+  .admin__badge {
+    padding-inline: var(--space-1);
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-0);
+  }
+
+  .admin__badge--locked {
+    color: var(--color-warn);
+    border-color: var(--color-warn);
+  }
+
+  .admin-status,
+  .admin-list {
+    display: grid;
+    gap: var(--space-1);
+    padding: 0;
+    list-style: none;
+  }
+
+  .admin-status__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 6rem;
+    align-items: baseline;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-1);
+  }
+
+  .admin-status__row--ok .admin-status__state {
+    color: var(--color-accent);
+  }
+
+  .admin-status__row--degraded {
+    border-color: var(--color-danger);
+  }
+
+  .admin-status__row--degraded .admin-status__state {
+    color: var(--color-danger);
+  }
+
+  .admin-status__latency {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+    text-align: end;
+  }
+
+  .admin-list__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+    padding-block: var(--space-1);
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .admin-list__row > :last-child {
+    margin-inline-start: auto;
+  }
+
+  .admin-list__name {
+    font-weight: var(--weight-strong);
+  }
+
+  .admin-table__scroll {
+    overflow-x: auto;
+  }
+
+  .admin-table {
+    inline-size: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+  }
+
+  .admin-table th,
+  .admin-table td {
+    padding: var(--space-1) var(--space-2);
+    text-align: start;
+    vertical-align: baseline;
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .admin-table th {
+    color: var(--color-text-dim);
+    font-weight: var(--weight-strong);
+    white-space: nowrap;
+  }
+
+  .admin-table__time {
+    white-space: nowrap;
+    color: var(--color-text-dim);
+  }
+
+  @container shell (width < 44rem) {
+    .admin {
+      padding: var(--space-3);
+    }
+
+    .admin-status__row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .admin-status__latency {
+      grid-column: 1 / -1;
+      text-align: start;
+    }
+  }
+
   /* In the app, toasts sit at the top, under the header: never over the composer and its Send. */
   .toast-region--app {
     inset-block: 3.5rem auto;
@@ -642,6 +869,9 @@
     .shell--app .channel-header__nav,
     .shell--app .composer .btn,
     .shell--app .join-bar .btn,
+    .shell--app .admin__tab,
+    .shell--app .admin .btn,
+    .shell--app .user-menu__admin,
     .shell--app .segmented__option,
     .shell--app .jump-pill {
       min-block-size: 2.75rem;

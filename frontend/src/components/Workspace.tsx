@@ -27,6 +27,7 @@ import { me } from '../store/session.ts'
 import { connection, everConnected, navOpen, openDialog, realtimeDown } from '../store/ui.ts'
 import { Button } from './ui/Button.tsx'
 import { EmptyState } from './ui/EmptyState.tsx'
+import { Admin } from './Admin.tsx'
 import { BrowseChannelsDialog } from './BrowseChannelsDialog.tsx'
 import { ChannelView, LAST_CHANNEL_KEY } from './ChannelView.tsx'
 import { ChatContext } from './chatContext.ts'
@@ -181,6 +182,7 @@ function Dialogs() {
 function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: () => void }) {
   const current = route.value
   const currentId = current.name === 'channel' ? current.id : null
+  const adminPage = current.name === 'admin'
   const threadId = current.name === 'channel' ? current.thread : null
   const channel = currentId === null ? undefined : channelById.value.get(currentId)
   const open = navOpen.value
@@ -193,7 +195,7 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
 
   // "/" (or an unknown path) opens a channel as soon as the list is known.
   useEffect(() => {
-    if (current.name === 'channel' || !channelsLoaded.value) return
+    if (current.name === 'channel' || current.name === 'admin' || !channelsLoaded.value) return
     const id = defaultChannelId()
     if (id !== null) navigate(channelPath(id), { replace: true })
   }, [current, channelsLoaded.value])
@@ -229,7 +231,9 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
   }
 
   let main
-  if (channel) {
+  if (adminPage) {
+    main = <Admin navOpen={open} onToggleNav={toggle} toggleRef={toggleRef} />
+  } else if (channel) {
     main = (
       <ChannelView
         key={channel.id}
@@ -280,7 +284,7 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
       {drawer && <div class="shell__scrim" aria-hidden="true" onClick={() => (navOpen.value = false)} />}
       <section
         class={threadId !== null && channel ? 'shell__main shell__main--thread' : 'shell__main'}
-        aria-labelledby={channel ? 'channel-title' : undefined}
+        aria-labelledby={channel || adminPage ? 'channel-title' : undefined}
         inert={drawer || undefined}
       >
         {main}

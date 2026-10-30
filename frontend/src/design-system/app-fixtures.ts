@@ -6,7 +6,7 @@
  * screenshots only (it is part of the design-system build, never of the production one).
  */
 import { signal } from '@preact/signals'
-import type { Channel, ChannelMember, FileInfo, Me, Message, PresenceState, UserSummary } from '../api/types.ts'
+import type { AdminStatus, AuditPage, Channel, ChannelMember, FileInfo, Me, Message, ModeratedUser, PresenceState, UserSummary } from '../api/types.ts'
 import type { Realtime } from '../realtime/echo.ts'
 
 const ALICE: UserSummary = { id: 1, name: 'Alice Martin', avatar_url: null }
@@ -118,7 +118,7 @@ const channels: Channel[] = [
   room(1, 'general', 'Announcements and everything that fits nowhere else', { member_count: 12, last_read_message_id: lastRead, unread_count: 3 }),
   room(2, 'ingenierie', 'Engineering', { unread_count: 3 }),
   room(5, 'ops-oncall', 'Pager rotation', { kind: 'private', unread_count: 128, member_count: 4 }),
-  room(3, 'random', 'Off-topic chatter'),
+  room(3, 'random', 'Off-topic chatter', { locked: true }),
   room(4, 'securite', 'Security', { is_member: false }),
   room(9, 'design', 'Mockups, fonts and the green-bar paper', { is_member: false, member_count: 5 }),
   { ...room(6, '', null), kind: 'dm', name: null, member_count: 2, members: [ALICE, DANA] },
@@ -142,11 +142,41 @@ function room(id: number, name: string, topic: string | null, extra: Partial<Cha
 const json = (body: unknown, status = 200) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
-export function installFixtureServer({ signedIn }: { signedIn: boolean }): void {
+/** The administration screens (?admin=1). */
+const ADMIN_STATUS: AdminStatus = {
+  environment: 'Dev',
+  checked_at: at(0, 9, 41),
+  services: [
+    { name: 'database', status: 'ok', latency_ms: 3 },
+    { name: 'redis', status: 'ok', latency_ms: 1 },
+    { name: 'reverb', status: 'ok', latency_ms: 6 },
+    { name: 'scanner', status: 'degraded', latency_ms: 2004 },
+    { name: 's3', status: 'ok', latency_ms: 41 },
+  ],
+}
+const AUDIT: AuditPage = {
+  page: 1,
+  per_page: 50,
+  has_more: true,
+  data: [
+    { id: 9, action: 'channel.locked', created_at: at(0, 9, 38), ip: '100.64.0.7', actor: ALICE, target: { type: 'channel', id: 3, label: 'random' } },
+    { id: 8, action: 'message.moderated_delete', created_at: at(0, 9, 31), ip: '100.64.0.7', actor: ALICE, target: { type: 'message', id: 1204, label: null } },
+    { id: 7, action: 'user.banned', created_at: at(0, 9, 30), ip: '100.64.0.7', actor: ALICE, target: { type: 'user', id: 44, label: 'Spam Bot 3000' } },
+    { id: 6, action: 'auth.sign_in_failed.invalid_token', created_at: at(0, 8, 2), ip: '203.0.113.9', actor: null, target: null },
+    { id: 5, action: 'message.send_refused', created_at: at(0, 7, 55), ip: '198.51.100.23', actor: { id: 12, name: 'Zoé Martin' }, target: { type: 'channel', id: 3, label: 'random' } },
+    { id: 4, action: 'demo.reset', created_at: at(0, 3, 0), ip: null, actor: null, target: null },
+  ],
+}
+const BANNED: ModeratedUser[] = [{ id: 44, name: 'Spam Bot 3000', avatar_url: null, banned: true, banned_at: at(0, 9, 30) }]
+
+export function installFixtureServer({ signedIn, admin = false }: { signedIn: boolean; admin?: boolean }): void {
   globalThis.fetch = async (input: RequestInfo | URL) => {
     const url = new URL(String(input instanceof Request ? input.url : input), location.href)
     const path = url.pathname
-    if (path === '/api/v1/me') return signedIn ? json(ME) : json({ message: 'Unauthenticated.' }, 401)
+    if (path === '/api/v1/me') return signedIn ? json({ ...ME, is_admin: admin }) : json({ message: 'Unauthenticated.' }, 401)
+    if (path === '/api/v1/admin/status') return admin ? json(ADMIN_STATUS) : json({ message: 'Forbidden' }, 403)
+    if (path === '/api/v1/admin/audit') return admin ? json(AUDIT) : json({ message: 'Forbidden' }, 403)
+    if (path === '/api/v1/admin/users/banned') return admin ? json({ data: BANNED }) : json({ message: 'Forbidden' }, 403)
     if (path === '/api/v1/channels') return json(channels)
     if (path === '/api/v1/users') {
       const q = (url.searchParams.get('q') ?? '').toLowerCase()
