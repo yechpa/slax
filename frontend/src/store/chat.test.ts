@@ -574,6 +574,38 @@ describe('refreshing without losing events', () => {
     expect(summary(entries())).toEqual(['10:message 10', '11:message 11'])
   })
 
+  it('a join, new channel, conversation or leave answered after stop() changes nothing', async () => {
+    const joined = deferred<FakeReply>()
+    const created = deferred<FakeReply>()
+    const opened = deferred<FakeReply>()
+    const left = deferred<FakeReply>()
+    const { chat } = setup({
+      'POST /api/v1/channels/8/join': () => joined.promise,
+      'POST /api/v1/channels': () => created.promise,
+      'POST /api/v1/dms': () => opened.promise,
+      'POST /api/v1/channels/7/leave': () => left.promise,
+    })
+    await chat.start()
+    const before = channels.value
+    const pending = [
+      chat.join(8),
+      chat.createChannel({ name: 'new', kind: 'public', topic: null }),
+      chat.openConversation([2]),
+      chat.leave(CHANNEL),
+    ]
+    await flush()
+    // Signed out meanwhile: the answers come to a stopped session.
+    chat.stop()
+    joined.resolve({ body: channel(8, { name: 'other', is_member: true }) })
+    created.resolve({ status: 201, body: channel(30, { name: 'new' }) })
+    opened.resolve({ status: 201, body: channel(40, { kind: 'dm', name: null, members: [] }) })
+    left.resolve({ status: 204 })
+    await Promise.allSettled(pending)
+    await flush()
+    expect(channels.value).toBe(before)
+    expect([...realtime.subscriptions.keys()]).toEqual([])
+  })
+
   it('stops loading older pages by itself after a failure, until asked', async () => {
     let fail = true
     const { chat, server } = setup({

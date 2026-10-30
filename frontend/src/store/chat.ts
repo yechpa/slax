@@ -487,10 +487,14 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     }
   }
 
+  /** Joins a public room. Answered after stop() (signed out meanwhile): nothing is listed or subscribed. */
   async function join(channelId: number): Promise<Channel> {
+    const still = alive()
     const channel = await api.joinChannel(channelId)
-    upsertChannel(channel)
-    syncSubscriptions()
+    if (still()) {
+      upsertChannel(channel)
+      syncSubscriptions()
+    }
     return channel
   }
 
@@ -555,17 +559,23 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
 
   /** A new room: listed and subscribed at once. */
   async function createChannel(input: { name: string; kind: 'public' | 'private'; topic: string | null }): Promise<Channel> {
+    const still = alive()
     const channel = await api.createChannel(input)
-    upsertChannel(channel)
-    syncSubscriptions()
+    if (still()) {
+      upsertChannel(channel)
+      syncSubscriptions()
+    }
     return channel
   }
 
   /** A conversation with these people: the existing one (200) or a new one (201), listed and subscribed. */
   async function openConversation(userIds: number[]): Promise<{ channel: Channel; created: boolean }> {
+    const still = alive()
     const { status, body } = await api.openConversation(userIds)
-    upsertChannel(body)
-    syncSubscriptions()
+    if (still()) {
+      upsertChannel(body)
+      syncSubscriptions()
+    }
     return { channel: body, created: status === 201 }
   }
 
@@ -574,7 +584,9 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
    * Its timeline will be refetched when opened again (events stop with the subscription).
    */
   async function leave(channelId: number): Promise<void> {
+    const still = alive()
     await api.leaveChannel(channelId)
+    if (!still()) return
     updateTimeline(channelKey(channelId), (t) => (t.status === 'idle' ? t : { ...t, stale: true }))
     const channel = channelById.peek().get(channelId)
     if (channel?.kind === 'public') upsertChannel({ ...channel, is_member: false, unread_count: 0, member_count: Math.max(0, channel.member_count - 1) })
