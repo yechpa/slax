@@ -106,7 +106,7 @@ export async function initPush(): Promise<void> {
     pushStatus.value = support === 'install-first' ? 'install-first' : 'hidden'
     return
   }
-  if (Notification.permission === 'denied') {
+  if (globalThis.Notification?.permission === 'denied') {
     pushStatus.value = 'blocked'
     return
   }
@@ -118,7 +118,7 @@ export async function initPush(): Promise<void> {
   }
   const existing = await found.pushManager.getSubscription().catch(() => null)
   if (run !== generation) return
-  if (!existing || Notification.permission !== 'granted') {
+  if (!existing || globalThis.Notification?.permission !== 'granted') {
     pushStatus.value = 'off'
     return
   }
@@ -197,9 +197,18 @@ export async function refreshPush(): Promise<void> {
   if (subscription) await save(subscription).catch(() => undefined)
 }
 
-/** Sign-out, before the session ends: this device leaves the account (at most `timeoutMs`). */
+/**
+ * Sign-out, before the session ends: this device leaves the account (at most `timeoutMs`).
+ * Push off on the server (no key was ever given to this page): nothing to do, and nothing is
+ * awaited, so sign-out goes out at once (any request still in flight during POST /auth/logout
+ * risks writing the old session back: docs/known-limitations.md).
+ */
 export async function forgetPushOnSignOut(timeoutMs = 3000): Promise<void> {
   generation++
+  if (publicKey === null) {
+    pushStatus.value = 'hidden'
+    return
+  }
   const work = (async () => {
     const subscription = await (await registration(false))?.pushManager.getSubscription().catch(() => null)
     if (!subscription) return

@@ -294,16 +294,27 @@ describe('turning off, and signing out', () => {
   })
 
   it('forgetPushOnSignOut: DELETE then unsubscribe, even when the server cannot be reached', async () => {
+    localStorage.setItem(PUSH_OWNER_KEY, String(ME.id))
     const existing = subscription()
     fakeBrowser({ permission: 'granted', existing })
     const { calls } = server({ 'DELETE /api/v1/push/subscriptions': () => 'network-error' })
+    await initPush()
     await forgetPushOnSignOut()
     expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/v1/push/subscriptions')).toBe(true)
     expect(existing.unsubscribe).toHaveBeenCalled()
     expect(pushStatus.value).toBe('hidden')
   })
 
-  it('dropPushLocally (session expired, banned): unsubscribes without calling the server', async () => {
+  it('forgetPushOnSignOut with push off on the server: no request, nothing awaited', async () => {
+    const browser = fakeBrowser({ permission: 'granted' })
+    const { calls } = server({ 'GET /api/v1/push/public-key': () => ({ status: 404, body: { error: 'push_disabled' } }) })
+    await initPush()
+    await forgetPushOnSignOut()
+    expect(pushCalls(calls)).toEqual(['GET /api/v1/push/public-key'])
+    expect(browser.pushManager.getSubscription).not.toHaveBeenCalled()
+  })
+
+  it('dropPushLocally (banned): unsubscribes without calling the server', async () => {
     const existing = subscription()
     fakeBrowser({ permission: 'granted', existing })
     const { calls } = server()
@@ -340,6 +351,10 @@ describe('turning off, and signing out', () => {
     const { calls } = server()
     await act(async () => {
       render(<UserMenu />, host)
+    })
+    // The account menu's PushSettings has asked for the key (as on any real page).
+    await act(async () => {
+      await vi.waitFor(() => expect(pushStatus.value).toBe('on'))
     })
     await act(async () => {
       host.querySelector<HTMLButtonElement>('.user-menu__signout')!.click()
