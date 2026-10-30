@@ -1,4 +1,5 @@
-# Production images: ghcr.io/yechpa/slax-{app,web,scanner}.
+# Production images: ghcr.io/yechpa/slax-{app,web,scanner,backup} (backup: the production
+# database backup CronJobs, deploy/backup/).
 #
 # Pull request: build and scan only (no registry login, nothing pushed, read-only token).
 #
@@ -30,6 +31,7 @@ on:
       - frontend/**
       - services/scanner/**
       - docker/**
+      - deploy/backup/*.sh
       - .github/workflows/images.yml
 
 permissions:
@@ -63,7 +65,7 @@ jobs:
       - id: check
         run: |
           all=true
-          for image in app web scanner; do
+          for image in app web scanner backup; do
             if docker buildx imagetools inspect "$IMAGE_PREFIX-$image:$GITHUB_SHA" >/dev/null 2>&1; then
               echo "$IMAGE_PREFIX-$image:$GITHUB_SHA already published"
             else
@@ -87,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [app, web, scanner]
+        image: [app, web, scanner, backup]
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -105,6 +107,10 @@ jobs:
           - image: scanner
             context: services/scanner
             file: services/scanner/Dockerfile
+            target: runtime
+          - image: backup
+            context: .
+            file: docker/backup/Dockerfile
             target: runtime
     env:
       IMAGE: ${{ matrix.image }}
@@ -159,7 +165,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [app, web, scanner]
+        image: [app, web, scanner, backup]
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -177,6 +183,10 @@ jobs:
           - image: scanner
             context: services/scanner
             file: services/scanner/Dockerfile
+            target: runtime
+          - image: backup
+            context: .
+            file: docker/backup/Dockerfile
             target: runtime
     env:
       REF: ghcr.io/yechpa/slax-${{ matrix.image }}:${{ github.sha }}-${{ matrix.arch }}
@@ -229,7 +239,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        image: [app, web, scanner]
+        image: [app, web, scanner, backup]
     env:
       IMAGE: ${{ matrix.image }}
     steps:
@@ -275,7 +285,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for image in app web scanner; do
+          for image in app web scanner backup; do
             ref="$IMAGE_PREFIX-$image:$GITHUB_SHA"
             if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
               echo "found $ref"
@@ -290,7 +300,7 @@ jobs:
       - name: Name it ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          for image in app web scanner; do
+          for image in app web scanner backup; do
             base="$IMAGE_PREFIX-$image"
             docker buildx imagetools create --tag "$base:$GITHUB_REF_NAME" "$base:$GITHUB_SHA"
             echo "$base:$GITHUB_REF_NAME -> $(docker buildx imagetools inspect "$base:$GITHUB_SHA" --format '{{json .Manifest.Digest}}')"
