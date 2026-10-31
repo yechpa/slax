@@ -1,7 +1,7 @@
 /**
  * What has to happen live between two browsers (two people, two contexts, two sockets):
  * messages without a reload, a network cut survived without losing or doubling anything,
- * a removed member who stops receiving, typing, and presence.
+ * a removed member who stops receiving, a new conversation listed at once, typing, and presence.
  */
 import { expect, test } from '@playwright/test'
 import {
@@ -180,6 +180,30 @@ test('a member removed from a private channel receives nothing from it any more'
   await removed.page.goto(`/c/${secret.id}`)
   await expect(removed.page.locator('.shell__main')).toContainText(t('en', 'error.notFound'))
   await expect(removed.page.getByText(words)).toHaveCount(0)
+})
+
+test('a conversation started by someone else shows up in the sidebar at once, without a reload', async ({ browser }) => {
+  const a = await person(browser, 'Ori')
+  const b = await person(browser, 'Pia')
+  // Bea's own channel subscribed (the list's poll is a minute: only the push can be this quick).
+  const frames = recordFrames(b.page)
+  await reload(b)
+  const own = `private-App.Models.User.${b.id}`
+  await expect
+    .poll(() => frames.some((frame) => frame.includes('subscription_succeeded') && frame.includes(own)), { timeout: 15_000 })
+    .toBe(true)
+  const loads = countLoads(b.page)
+  await expect(ui(b).navItem(a.name)).toHaveCount(0)
+
+  const { id } = await api(a.page).openConversation([b.id])
+
+  await expect(ui(b).navItem(a.name)).toHaveCount(1, { timeout: 5_000 })
+  expect(loads()).toBe(0)
+  // The event carries the channel id and nothing else.
+  const pushed = frames
+    .map((frame) => JSON.parse(frame) as { event?: string; channel?: string; data?: string })
+    .filter((frame) => frame.event === 'channel.added')
+  expect(pushed.map((frame) => [frame.channel, JSON.parse(frame.data ?? 'null')])).toEqual([[own, { channel_id: id }]])
 })
 
 test('typing shows in the other browser, by name, and stops when the message is sent', async ({ browser }) => {
