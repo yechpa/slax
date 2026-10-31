@@ -131,6 +131,10 @@ export function SignedOut({ error = null, turnstile = cloudflareTurnstile, goTo 
           </Button>
           <div class="signin__turnstile" ref={widget} />
           <p class="signin__note">{t('auth.note')}</p>
+          <p class="signin__legal">
+            <a href="/privacy">{t('legal.privacy')}</a>
+            <a href="/terms">{t('legal.terms')}</a>
+          </p>
         </section>
       </main>
     </div>

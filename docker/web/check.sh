@@ -69,6 +69,11 @@ check "no HSTS unless asked (the TLS terminator sets it)" sh -c "! printf '%s' \
 check "index.html is not cached" has "$page" '^cache-control: no-cache'
 check "the page carries the public settings" has "$body" '<meta name="slax:turnstile-site-key" content="test-site-key" /><meta name="slax:reverb-app-key" content="test-app-key" />'
 
+for legal in privacy terms; do
+    legal_page="$(headers "$base/$legal")"
+    check "/$legal (public legal page, the Google consent screen links to it) answers 200 with the app, no cache" has "$legal_page" '^HTTP/1.1 200' "^content-security-policy: default-src 'self'" '^cache-control: no-cache'
+done
+
 api="$(headers "$base/api/v1/health")"
 check "API through PHP-FPM, with the security headers" has "$api" "^content-security-policy: default-src 'self'"
 check "API responses are never stored by the browser (shared devices): Cache-Control: no-store" has "$api" '^cache-control: no-store$'

@@ -395,5 +395,10 @@
   "push.testFailed": "Le test n'a pas pu être envoyé. Réessayez dans une minute.",
   "push.failed": "Les notifications n'ont pas pu être activées sur cet appareil.",
   "push.blocked": "Les notifications de Slax sont bloquées dans les réglages de ce navigateur. Autorisez-les là, puis revenez ici.",
-  "push.installFirst": "Sur iPhone et iPad, les notifications ne fonctionnent que dans l'application installée (iOS 16.4 ou plus récent) : ajoutez d'abord Slax à l'écran d'accueil, puis ouvrez-le depuis son icône."
+  "push.installFirst": "Sur iPhone et iPad, les notifications ne fonctionnent que dans l'application installée (iOS 16.4 ou plus récent) : ajoutez d'abord Slax à l'écran d'accueil, puis ouvrez-le depuis son icône.",
+  "legal.privacy": "Confidentialité",
+  "legal.terms": "Conditions",
+  "legal.back": "Retour à Slax",
+  "legal.updated": "Dernière mise à jour : {date}",
+  "legal.nav": "Pages légales"
 }

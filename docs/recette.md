@@ -233,6 +233,10 @@ profile`), and is "In production" (any Google account can sign in, not only test
 the same account; signing out on one does not sign out the other.
 11.3 [ ] Cancel on Google's screen: back on Slax with a clear message, no error page.
 11.4 [ ] Dev and prod each use their own redirect URI (`/auth/google/callback` on their host).
+11.5 [ ] Signed out, `https://<host>/privacy` and `/terms` open (the sign-in screen links to
+both) in English, Hebrew (right to left) and French, and match what Slax does (nightly demo
+reset at 03:00 UTC, 14-day sessions, 35-day backups, 180-day audit). The Google consent screen's
+branding page uses these two addresses (privacy policy, terms) and `https://<host>` as home page.
 
 ## 12. Accessibility and performance (suggestions; nothing here is automated)
 
