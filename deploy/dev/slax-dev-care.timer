@@ -1,0 +1,12 @@
+# Every night at 03:30 (server time). Persistent: a night the server was off, the run happens
+# at the next start. The random delay keeps it away from the exact minute of other jobs.
+[Unit]
+Description=Nightly care of slax-dev
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

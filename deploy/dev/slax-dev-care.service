@@ -1,0 +1,16 @@
+# Updates and health report of the dev server (deploy/dev/slax-dev-care.sh), started by
+# slax-dev-care.timer. The Telegram keys are in /etc/slax-dev-care.env (root, mode 0600):
+#   TELEGRAM_BOT_TOKEN=...
+#   TELEGRAM_CHAT_ID=...
+[Unit]
+Description=Install updates on slax-dev and report its health to Telegram
+Wants=network-online.target
+After=network-online.target k3s.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/slax-dev-care.env
+ExecStart=/usr/local/sbin/slax-dev-care
+# apt and a slow mirror are the only long part; a stuck run must not stay all night.
+TimeoutStartSec=45min
+Nice=10
