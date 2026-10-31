@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetClientState } from '../api/client.ts'
 import { api } from '../api/endpoints.ts'
 import type { Message } from '../api/types.ts'
-import { ME, channel, live, tombstone } from '../test/fixtures.ts'
+import { DANA, ME, channel, live, tombstone } from '../test/fixtures.ts'
 import { FakeRealtime, deferred, fakeFetch, flush, type FakeReply } from '../test/fakes.ts'
-import { FAILURES_BEFORE_NOTICE, createChat } from './chat.ts'
+import { CHANNEL_ADDED_DEBOUNCE_MS, FAILURES_BEFORE_NOTICE, createChat } from './chat.ts'
 import { channelById, channels, resetChannels } from './channels.ts'
 import type { Entry } from './merge.ts'
 import { channelKey, resetTimelines, timeline } from './messages.ts'
@@ -410,10 +410,11 @@ describe('realtime events', () => {
     let list = [channel(CHANNEL), channel(8, { is_member: false })]
     const { chat } = setup({ 'GET /api/v1/channels': () => ({ body: list }) })
     await chat.start()
-    expect([...realtime.subscriptions.keys()]).toEqual(['private-channel.7'])
+    const channelSubscriptions = () => [...realtime.subscriptions.keys()].filter((name) => name.startsWith('private-channel.'))
+    expect(channelSubscriptions()).toEqual(['private-channel.7'])
     list = [channel(8)]
     await chat.refreshChannels()
-    expect([...realtime.subscriptions.keys()]).toEqual(['private-channel.8'])
+    expect(channelSubscriptions()).toEqual(['private-channel.8'])
   })
 
   it('drops a refused subscription, retries it once if still a member, then leaves it', async () => {
@@ -428,6 +429,115 @@ describe('realtime events', () => {
     await flush()
     expect(realtime.subscriptions.has('private-channel.7')).toBe(false)
     expect(server.calls.filter((c) => c.path === '/api/v1/channels')).toHaveLength(3)
+  })
+})
+
+describe('the user’s own channel (channel.added)', () => {
+  const MINE = `private-App.Models.User.${ME.id}`
+  const listCalls = (server: ReturnType<typeof setup>['server']) =>
+    server.calls.filter((c) => c.method === 'GET' && c.path === '/api/v1/channels').length
+
+  it('is subscribed while signed in and dropped at sign-out', async () => {
+    const { chat } = setup({})
+    await chat.start()
+    expect(realtime.subscriptions.has(MINE)).toBe(true)
+    chat.stop()
+    expect(realtime.subscriptions.has(MINE)).toBe(false)
+  })
+
+  it('refreshes the channel list once for several events close together', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup({})
+    await chat.start()
+    expect(listCalls(server)).toBe(1)
+
+    for (const id of [40, 41, 42]) realtime.emit(MINE, 'channel.added', { channel_id: id })
+    await vi.advanceTimersByTimeAsync(CHANNEL_ADDED_DEBOUNCE_MS - 1)
+    expect(listCalls(server)).toBe(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(listCalls(server)).toBe(2)
+    await vi.advanceTimersByTimeAsync(5 * CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(listCalls(server)).toBe(2)
+
+    // A later one gets its own refresh.
+    realtime.emit(MINE, 'channel.added', { channel_id: 43 })
+    await vi.advanceTimersByTimeAsync(CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(listCalls(server)).toBe(3)
+  })
+
+  it('refreshes nothing after sign-out, even for an event already received or from a handler kept', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup({})
+    await chat.start()
+    const handlers = realtime.subscriptions.get(MINE)!.handlers
+    realtime.emit(MINE, 'channel.added', { channel_id: 40 })
+    chat.stop()
+    handlers['channel.added']({ channel_id: 41 })
+    await vi.advanceTimersByTimeAsync(10 * CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(listCalls(server)).toBe(1)
+  })
+
+  it('is subscribed again, once, after a reconnection when it had been refused, with no extra refresh', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup({})
+    await chat.start()
+    const subscribe = vi.spyOn(realtime, 'subscribe')
+    const mine = () => subscribe.mock.calls.filter(([name]) => name === MINE).length
+
+    // Still subscribed: pusher-js subscribes it again by itself, nothing to do here.
+    realtime.reconnect()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mine()).toBe(0)
+
+    realtime.subscriptions.get(MINE)!.onError!(null)
+    expect(realtime.subscriptions.has(MINE)).toBe(false)
+    const before = listCalls(server)
+    realtime.reconnect()
+    await vi.advanceTimersByTimeAsync(10 * CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(mine()).toBe(1)
+    expect(realtime.subscriptions.has(MINE)).toBe(true)
+    // The reconnection's own refresh only.
+    expect(listCalls(server)).toBe(before + 1)
+
+    realtime.reconnect()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mine()).toBe(1)
+  })
+
+  it('leaves a pending refresh to the reconnection’s own', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup({})
+    await chat.start()
+    realtime.emit(MINE, 'channel.added', { channel_id: 40 })
+    realtime.reconnect()
+    await vi.advanceTimersByTimeAsync(10 * CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(listCalls(server)).toBe(2)
+  })
+
+  it('ignores the callbacks of a previous session (signed out, then in as someone else)', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup({})
+    await chat.start()
+    const stale = realtime.subscriptions.get(MINE)!
+    chat.stop()
+
+    session.value = { status: 'signed-in', me: { ...ME, id: DANA.id, name: DANA.name } }
+    await chat.start()
+    const theirs = `private-App.Models.User.${DANA.id}`
+    expect(realtime.subscriptions.has(theirs)).toBe(true)
+    expect(realtime.subscriptions.has(MINE)).toBe(false)
+    const calls = listCalls(server)
+
+    // The old subscription's callbacks come late: no refresh, and the new subscription stays.
+    stale.handlers['channel.added']({ channel_id: 40 })
+    stale.onError!(403)
+    await vi.advanceTimersByTimeAsync(10 * CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(listCalls(server)).toBe(calls)
+    expect(realtime.subscriptions.has(theirs)).toBe(true)
+
+    realtime.emit(theirs, 'channel.added', { channel_id: 41 })
+    await vi.advanceTimersByTimeAsync(CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(listCalls(server)).toBe(calls + 1)
   })
 })
 

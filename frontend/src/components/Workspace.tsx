@@ -12,7 +12,7 @@
  *
  * Also here for the session's life: presence (heartbeats, the workspace presence
  * channel), the channel list refreshed every minute while the tab is visible and when it
- * comes back (new conversations and invitations are not pushed), and the sidebar's dialogs.
+ * comes back (the fallback for `channel.added`, see store/chat.ts), and the sidebar's dialogs.
  */
 import { effect } from '@preact/signals'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
@@ -95,8 +95,8 @@ export function Workspace({ connect, chat: given }: Props) {
     }
   }, [chat, connect])
 
-  // New conversations and invitations to private rooms are not pushed: the list is refetched
-  // (not while the tab is hidden; once when it comes back).
+  // New conversations and invitations to private rooms are pushed (channel.added); this poll
+  // is the fallback for a missed event (not while the tab is hidden; once when it comes back).
   useEffect(
     () =>
       pollWhileVisible(() => void chat.refreshChannels().catch(() => undefined), {
