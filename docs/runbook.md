@@ -126,8 +126,13 @@ Do the steps in this order. Each one says what proves it worked.
 
 **YOU DO THIS**
 
-- An AWS account with the AWS CLI **v2** logged in (`aws sso login` with IAM Identity Center,
-  or an IAM user with MFA) with enough rights to create EC2, IAM and S3 resources. Check:
+- An AWS account with the AWS CLI **v2** logged in with enough rights to create EC2, IAM and S3
+  resources: `aws login --region eu-central-1` (a browser sign-in as an IAM user, short-lived
+  credentials, no access key on disk; the sign-in page asks for the 12-digit account ID or
+  alias: it is in the console's account menu, in the account's e-mails and invoices, and on any
+  EC2 instance in `curl -s http://169.254.169.254/latest/dynamic/instance-identity/document`
+  with an IMDSv2 token), `aws sso login` with IAM Identity Center, or an IAM user with MFA.
+  Not the root user (use it once to find the ID and create an IAM user). Check:
   `aws sts get-caller-identity` and `aws --version` (`aws-cli/2.…`).
 - The region: `export AWS_REGION=eu-central-1`. provision.sh refuses any other unless
   `--allow-region-override` (then set `s3.region` in values-prod.yaml first: the CSP names
@@ -166,6 +171,16 @@ Do the steps in this order. Each one says what proves it worked.
    ```
 
    (`grants` syntax for the CI rule: `{"src": ["tag:ci"], "dst": ["tag:slax-prod"], "ip": ["tcp:6443"]}`.)
+
+   **`autogroup:admin` is every device of a tailnet admin**, not only your own machine: a public
+   server of yours that is signed in under the same account (an EC2 "gate", say) would reach
+   `tag:slax-prod:*` too. If you have such devices, name your own machine instead (a `hosts`
+   entry or a tag as the `src` of the first rule) and add a test that the other one is denied
+   (`{"src": "<its 100.x address>", "deny": ["tag:slax-prod:22", "tag:slax-prod:443", "tag:slax-prod:6443"]}`).
+   New devices (a phone) have no rule at all until you add one: Tailscale refuses what no rule
+   allows, silently. Each `tests` entry goes between the braces of the array, one object per
+   entry: pasting one inside another entry is the usual syntax error ("invalid character '{' at
+   start of object name").
 
 2. The node's auth key. It ends up in the instance's user data, which stays readable for the
    instance's whole life: through the EC2 API (`ec2:DescribeInstanceAttribute`), through the
@@ -216,8 +231,14 @@ same (creating nothing). Then: `unset TS_AUTHKEY`.
 | A | `slax.yechpa.com` | the Elastic IP printed by provision.sh | 300 |
 
 No `files.slax.yechpa.com` record: browsers fetch files from the bucket's own S3 host. No
-AAAA record (the instance has no IPv6). If the zone has a CAA record, it must allow
-`letsencrypt.org`. Check: `dig +short slax.yechpa.com` → the Elastic IP.
+AAAA record (the instance has no IPv6): **delete any AAAA (and replace any A) that the
+registrar's default site put there** (IONOS creates an `A` and an `AAAA` to its own placeholder
+page): a stale AAAA sends IPv6 visitors, and Let's Encrypt's validation, to the wrong machine.
+A short TTL (5 minutes) is worth it for the first days. If the zone has a CAA record, it must
+allow `letsencrypt.org`. Check: `dig +short A slax.yechpa.com @1.1.1.1` → the Elastic IP and
+`dig +short AAAA slax.yechpa.com @1.1.1.1` → nothing (type the ASCII `@`: a full-width `＠`
+pasted from a web page is read as a host name, not as the server). Caddy then gets its
+certificate by itself within a minute (`journalctl -u caddy`).
 
 ### 3.5 The node boots
 
@@ -277,9 +298,13 @@ role replaces them):
 
 ```sh
 tailscale ssh ubuntu@slax-prod -- 'cat > /tmp/create-secrets.sh' < deploy/dev/create-secrets.sh
-tailscale ssh -t ubuntu@slax-prod -- sudo S3_KEYS=none bash /tmp/create-secrets.sh
-tailscale ssh ubuntu@slax-prod -- rm /tmp/create-secrets.sh
+tailscale ssh ubuntu@slax-prod            # an interactive session: the hidden prompts need its terminal
+sudo S3_KEYS=none bash /tmp/create-secrets.sh
+rm /tmp/create-secrets.sh; exit
 ```
+
+(`tailscale ssh` takes no `-t` or other `ssh` option: everything after the host is the remote
+command, so `tailscale ssh -t …` fails with "flag provided but not defined".)
 
 Hidden prompts: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TURNSTILE_SITE_KEY`,
 `TURNSTILE_SECRET`, then optional `ADMIN_EMAILS` (administrators: personal data, so here and
@@ -307,6 +332,14 @@ all four images anonymously and refuses to deploy while one is private. Check, l
 1. **Required reviewers**: yourself (and anyone else allowed to release). Leave "Prevent
    self-review" off if you are the only maintainer, or no one can approve.
 2. **Deployment branches and tags**: *Selected* → add the tag pattern `v*`.
+   Both steps from the command line (`gh` logged in as the repository owner):
+
+   ```sh
+   gh api -X PUT repos/yechpa/slax/environments/production --input - <<EOF
+   {"reviewers":[{"type":"User","id":$(gh api user --jq .id)}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
+   EOF
+   gh api -X POST repos/yechpa/slax/environments/production/deployment-branch-policies -f name='v*' -f type=tag
+   ```
 3. Secrets (`gh` prompts without echo):
 
    ```sh
@@ -672,6 +705,12 @@ notifications", for the checklist the family runs on real devices).
   `set VAPID_PRIVATE_KEY`, then restart. Never in values, `config.extraEnv` (refused) or the
   repository. `VAPID_SUBJECT` (ConfigMap) is `push.subject` (a `mailto:` or `https:` URL),
   else the public URL.
+- **Browsers.** Chrome and Edge on Android and desktop reach FCM and just work. **Brave blocks
+  push by default** (desktop and Android): enable "Use Google Services for Push Messaging"
+  (`brave://settings/privacy`; Android: Settings → Privacy and security), then quit and reopen
+  Brave. The telltale in the nginx log (`kubectl -n slax logs deploy/slax-app -c web | grep /push/`)
+  is a `GET /api/v1/push/public-key` that is never followed by a `POST /api/v1/push/subscriptions`:
+  the browser refused to create the subscription, so the server never hears of the device.
 - **Check it is on.** In the app, account menu: "Notifications on this device" appears (on an
   iPhone, in the installed app only; in Safari the menu says to install first). Or
   `curl -s https://slax.yechpa.com/api/v1/push/public-key` with a session (404
