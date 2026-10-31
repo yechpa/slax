@@ -395,5 +395,10 @@
   "push.testFailed": "The test could not be sent. Try again in a minute.",
   "push.failed": "Notifications could not be turned on on this device.",
   "push.blocked": "Notifications are blocked for Slax in this browser's settings. Allow them there, then come back here.",
-  "push.installFirst": "On iPhone and iPad, notifications work only in the installed app (iOS 16.4 or later): add Slax to your Home Screen first, then open it from its icon."
+  "push.installFirst": "On iPhone and iPad, notifications work only in the installed app (iOS 16.4 or later): add Slax to your Home Screen first, then open it from its icon.",
+  "legal.privacy": "Privacy",
+  "legal.terms": "Terms",
+  "legal.back": "Back to Slax",
+  "legal.updated": "Last updated {date}",
+  "legal.nav": "Legal pages"
 }

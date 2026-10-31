@@ -6,6 +6,7 @@ import { useEffect } from 'preact/hooks'
 import type { TurnstileClient } from './auth/turnstile.ts'
 import { Brand } from './components/ui/Brand.tsx'
 import { Button } from './components/ui/Button.tsx'
+import { Legal } from './components/Legal.tsx'
 import { SignedOut } from './components/SignedOut.tsx'
 import { ConnectionBanner, Toasts } from './components/Toasts.tsx'
 import { Workspace, type ConnectRealtime } from './components/Workspace.tsx'
@@ -14,7 +15,7 @@ import { useLocale } from './i18n/useLocale.ts'
 import { publicConfig } from './lib/publicConfig.ts'
 import { UpdateBanner } from './pwa/UpdateBanner.tsx'
 import { connectRealtime } from './realtime/echo.ts'
-import { interceptLinks } from './router.ts'
+import { interceptLinks, route } from './router.ts'
 import { boot } from './session.ts'
 import { session } from './store/session.ts'
 import { useTheme } from './useTheme.ts'
@@ -70,6 +71,10 @@ function Screen({ connect = defaultConnect, turnstile }: Props) {
     document.addEventListener('click', onClick)
     return () => document.removeEventListener('click', onClick)
   }, [])
+
+  // The legal pages are public: the same for everyone, whatever the session is doing.
+  const here = route.value
+  if (here.name === 'legal') return <Legal page={here.page} />
 
   switch (current.status) {
     case 'loading':

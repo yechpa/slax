@@ -129,6 +129,81 @@
     font-size: var(--text-xs);
   }
 
+  .signin__legal {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    font-size: var(--text-xs);
+  }
+
+  .signin__legal a,
+  .legal__nav a {
+    color: var(--color-text-dim);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .signin__legal a:hover,
+  .legal__nav a:hover {
+    color: var(--color-accent);
+  }
+
+  /* ── Public legal pages (/privacy, /terms) ────────────── */
+  .legal__main {
+    inline-size: min(100%, 44rem);
+    margin-inline: auto;
+    padding-block: var(--space-6) calc(var(--space-16) + var(--safe-bottom));
+    padding-inline: calc(var(--space-4) + var(--safe-inline-start)) calc(var(--space-4) + var(--safe-inline-end));
+  }
+
+  .legal__brand {
+    margin-block-end: var(--space-6);
+    font-size: var(--text-xl);
+  }
+
+  .legal__doc {
+    display: grid;
+    gap: var(--space-4);
+    line-height: var(--leading);
+  }
+
+  .legal__title {
+    font-size: var(--text-2xl);
+    line-height: var(--leading-tight);
+  }
+
+  .legal__updated {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+  }
+
+  .legal__doc section {
+    display: grid;
+    gap: var(--space-3);
+    padding-block-start: var(--space-4);
+    border-block-start: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .legal__doc h2 {
+    font-size: var(--text-md);
+    font-weight: var(--weight-strong);
+  }
+
+  .legal__doc ul {
+    display: grid;
+    gap: var(--space-2);
+    padding-inline-start: var(--space-6);
+    list-style: disc;
+  }
+
+  .legal__nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-6);
+    margin-block-start: var(--space-8);
+    font-size: var(--text-sm);
+  }
+
   @media (pointer: coarse) {
     .signin .segmented__option {
       min-block-size: 2.75rem;

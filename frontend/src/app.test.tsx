@@ -58,6 +58,52 @@ const signedInRoutes = (): Record<string, FakeHandler> => ({
   'GET /api/v1/channels/8/messages': () => ({ body: { data: [], has_more: false } }),
 })
 
+describe('legal pages', () => {
+  it('shows_privacy_to_a_signed_out_visitor_without_the_sign_in_screen', async () => {
+    history.replaceState(null, '', '/privacy')
+    route.value = parseRoute('/privacy')
+    mount({ 'GET /api/v1/me': () => ({ status: 401, body: { message: 'Unauthenticated.' } }) })
+    await boot()
+    await settle()
+    expect(host.querySelector('h1')?.textContent).toBe('Privacy policy')
+    expect(host.querySelector('.signin__google')).toBeNull()
+    expect(host.querySelectorAll('.legal__doc section').length).toBeGreaterThan(5)
+    expect(document.title).toBe('Privacy policy · slax')
+  })
+
+  it('shows_terms_to_a_signed_in_member_and_follows_the_language', async () => {
+    history.replaceState(null, '', '/terms')
+    route.value = parseRoute('/terms')
+    mount(signedInRoutes())
+    await boot()
+    await settle()
+    expect(host.querySelector('h1')?.textContent).toBe('Terms of use')
+    setLocale('fr')
+    await settle()
+    expect(host.querySelector('h1')?.textContent).toBe('Conditions d’utilisation')
+    setLocale('he')
+    await settle()
+    expect(host.querySelector('h1')?.textContent).toBe('תנאי שימוש')
+    expect(document.documentElement.dir).toBe('rtl')
+  })
+
+  it('links_from_the_sign_in_screen_open_the_pages_and_back_returns', async () => {
+    mount({ 'GET /api/v1/me': () => ({ status: 401, body: { message: 'Unauthenticated.' } }) })
+    await boot()
+    await settle()
+    const links = [...host.querySelectorAll<HTMLAnchorElement>('.signin__legal a')].map((a) => a.getAttribute('href'))
+    expect(links).toEqual(['/privacy', '/terms'])
+    host.querySelector<HTMLAnchorElement>('.signin__legal a')!.click()
+    await settle()
+    expect(location.pathname).toBe('/privacy')
+    expect(host.querySelector('h1')?.textContent).toBe('Privacy policy')
+    host.querySelector<HTMLAnchorElement>('.legal__nav a')!.click()
+    await settle()
+    expect(location.pathname).toBe('/')
+    expect(host.querySelector('.signin__google')).not.toBeNull()
+  })
+})
+
 describe('App', () => {
   it('shows the sign-in screen when there is no session', async () => {
     mount({ 'GET /api/v1/me': () => ({ status: 401, body: { message: 'Unauthenticated.' } }) })

@@ -4,12 +4,13 @@
  *   /c/:id        a channel or conversation
  *   /c/:id/t/:mid the same, with the thread of message :mid open beside it
  *   /admin        administration (administrators only; the server checks every call)
+ *   /privacy, /terms  the public legal pages (shown to everyone, signed in or not)
  * Anything else is `unknown` (shown as home). Same-origin links are intercepted
  * by `interceptLinks`, so plain <a href="/c/12"> elements navigate without a reload.
  */
 import { signal } from '@preact/signals'
 
-export type Route = { name: 'home' } | { name: 'channel'; id: number; thread: number | null } | { name: 'admin' } | { name: 'unknown' }
+export type Route = { name: 'home' } | { name: 'channel'; id: number; thread: number | null } | { name: 'admin' } | { name: 'legal'; page: 'privacy' | 'terms' } | { name: 'unknown' }
 
 export const ADMIN_PATH = '/admin'
 const ID = '([1-9][0-9]{0,15})'
@@ -18,6 +19,8 @@ const CHANNEL = new RegExp(`^/c/${ID}(?:/t/${ID})?/?$`)
 export function parseRoute(pathname: string): Route {
   if (pathname === '/' || pathname === '') return { name: 'home' }
   if (pathname === ADMIN_PATH || pathname === `${ADMIN_PATH}/`) return { name: 'admin' }
+  const legal = /^\/(privacy|terms)\/?$/.exec(pathname)
+  if (legal) return { name: 'legal', page: legal[1] as 'privacy' | 'terms' }
   const match = CHANNEL.exec(pathname)
   return match ? { name: 'channel', id: Number(match[1]), thread: match[2] ? Number(match[2]) : null } : { name: 'unknown' }
 }

@@ -470,3 +470,14 @@ receives the channel's events until it disconnects.
   uploads, typing whispers or reconnect storms. `make load` is manual; `make e2e` (and so CI) runs a 10-second smoke
   of it (5 clients) that fails on any loss or error.
 
+## Legal pages
+
+- **`/privacy` and `/terms` are drafts by the maintainer, not legal advice.** They say what Slax stores and
+  does (Google sign-in data, messages and files, push registrations, 14-day sessions, the 03:00 UTC demo reset, 35-day
+  backups, 180-day audit log, Cloudflare Turnstile, AWS Frankfurt, Telegram alerts that carry ids and technical
+  details, never message text). `frontend/src/legal/legal.test.ts` pins those figures: when one of them changes, the
+  text changes in the three languages in the same commit. The Hebrew is a draft to be read by a Hebrew speaker.
+  The contact is the maintainer's public GitHub profile; there is no e-mail address and no automated export or
+  deletion form (a person asks, the administrator does it by hand).
+- **The pages are rendered by the app's script** (like the rest), so a crawler that does not run JavaScript sees the
+  empty shell. Google does not need more for the three basic scopes; an app verification would.
