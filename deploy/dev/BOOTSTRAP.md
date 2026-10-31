@@ -35,6 +35,7 @@ Contents:
 13. [Backups (dev)](#13-backups-dev)
 14. [Rotating secrets](#14-rotating-secrets)
 15. [Troubleshooting](#15-troubleshooting)
+16. [Nightly updates and health report](#16-nightly-updates-and-health-report)
 
 What the chart deploys (namespace `slax`): the web pod (nginx `slax-web` + PHP-FPM
 `slax-app`), Reverb, one queue worker, one scheduler, the upload scanner, PostgreSQL 16,
@@ -632,3 +633,42 @@ kubectl -n slax logs deploy/slax-reverb
 kubectl -n slax exec -it deploy/slax-app -c php -- php artisan tinker
 kubectl -n slax port-forward slax-minio-0 9001:9001   # MinIO console on http://localhost:9001
 ```
+
+## 16. Nightly updates and health report
+
+Every night at 03:30 `slax-dev` installs the Ubuntu updates and sends one Telegram message
+(`[Dev] Server care done, everything works.`, or the list of what failed). It checks k3s,
+Tailscale and the LAN guard, the node, the Slax pods, `https://dev.slax.yechpa.com/healthz`
+(200), the certificate (at least 14 days left) and the disks (`/` and `/mnt/ssd`, alert at
+80 %). It never reboots by itself: if an update needs one, the message says `reboot needed`;
+reboot when you are at the machine, then check that k3s, `slax-lan-guard` and `/mnt/ssd`
+came back (step 4.1 and the troubleshooting table). Runs as root; from the clone of the
+repository:
+
+```sh
+sudo install -D -m 0644 deploy/backup/lib.sh /usr/local/lib/slax-dev-care/lib.sh
+sudo install -m 0755 deploy/dev/slax-dev-care.sh /usr/local/sbin/slax-dev-care
+sudo install -m 0644 deploy/dev/slax-dev-care.service deploy/dev/slax-dev-care.timer /etc/systemd/system/
+```
+
+The Telegram keys go in a file only root can read. Type them at the hidden prompts (never in
+a command line or a repository file; it is the same bot and chat as the `[Dev]` alerts):
+
+```sh
+sudo sh -c 'umask 077; read -rsp "Telegram bot token: " t; echo; read -rp "Chat id: " c
+printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n" "$t" "$c" > /etc/slax-dev-care.env'
+sudo chmod 0600 /etc/slax-dev-care.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now slax-dev-care.timer
+```
+
+Try it once without installing anything, and read the message on Telegram:
+
+```sh
+sudo sh -c 'set -a; . /etc/slax-dev-care.env; slax-dev-care --check'
+systemctl list-timers slax-dev-care.timer
+```
+
+(`sudo systemctl start slax-dev-care` runs the full thing, updates included, once, and shows
+`failed` if a check failed; `journalctl -u slax-dev-care` has the log, without the token.)
+Without `/etc/slax-dev-care.env` the report is only printed in the journal.
