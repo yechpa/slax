@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ChannelAdded;
 use App\Http\Resources\ChannelResource;
 use App\Models\Channel;
 use App\Models\User;
@@ -86,6 +87,11 @@ class DirectChannelController extends Controller
                     'created_at' => $now,
                     'updated_at' => $now,
                 ], $ids));
+
+                // The others learn of it at once (the caller has it from the answer).
+                foreach (array_diff($ids, [$caller->id]) as $id) {
+                    ChannelAdded::dispatch($channel->id, $id);
+                }
             }
 
             return [$channel, $created];

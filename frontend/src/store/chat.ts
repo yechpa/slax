@@ -17,6 +17,8 @@
  *   A refresh that fails keeps live events flowing and is retried with backoff
  *   (1 s, 2 s, 4 s… at most 30 s) while the channel stays open; after 3 failures the
  *   view offers a Retry.
+ * - The user's own private channel (`App.Models.User.{id}`) says `channel.added` when someone
+ *   else makes them a member: the channel list is refetched (Workspace also polls it).
  * - While a latest page is on its way, events for that channel are held and applied
  *   after it, through the same merge, so none is lost and none is undone by the page.
  * - A REST answer never undoes a live event that arrived while it was on its way (the event
@@ -74,6 +76,8 @@ export const RETRY_MAX_MS = 30_000
 /** Failures after which the view says so and offers a Retry. */
 export const FAILURES_BEFORE_NOTICE = 3
 const MESSAGE_EVENTS = ['message.created', 'message.updated', 'message.deleted', 'reaction.changed'] as const
+/** `channel.added` events this close together make one refresh of the list. */
+export const CHANNEL_ADDED_DEBOUNCE_MS = 250
 
 export interface ChatDeps {
   api: Api
@@ -117,6 +121,9 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   const counted = new Set<number>()
   let current: number | null = null
   let stopReconnect: (() => void) | null = null
+  /** The user's own channel (`channel.added`): for which connection and user, and its unsubscribe. */
+  let personal: { realtime: Realtime; userId: number; unsubscribe: () => void } | null = null
+  let addedTimer: ReturnType<typeof setTimeout> | undefined
 
   const meId = () => me.peek()?.id ?? null
   /** A check that turns false once stop() ran (whatever started now must then not touch the stores). */
@@ -168,6 +175,44 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
         }),
       )
     }
+  }
+
+  /**
+   * The user's own channel: someone else put them in a conversation or a private room. The
+   * payload (a channel id) is not needed: the list is refetched, a burst of events once. A
+   * refused subscription is dropped and tried again after the next reconnection (pusher-js
+   * itself subscribes again the ones it holds); the minute's poll covers the meantime.
+   */
+  function subscribePersonal(): void {
+    const userId = meId()
+    if (!realtime || userId === null || (personal?.realtime === realtime && personal.userId === userId)) return
+    dropPersonal()
+    const still = alive()
+    const unsubscribe = realtime.subscribe(
+      `private-App.Models.User.${userId}`,
+      {
+        'channel.added': () => {
+          if (still()) onChannelAdded()
+        },
+      },
+      () => {
+        if (still() && personal?.unsubscribe === unsubscribe) dropPersonal()
+      },
+    )
+    personal = { realtime, userId, unsubscribe }
+  }
+
+  function dropPersonal(): void {
+    personal?.unsubscribe()
+    personal = null
+  }
+
+  function onChannelAdded(): void {
+    if (addedTimer !== undefined) return
+    addedTimer = setTimeout(() => {
+      addedTimer = undefined
+      void refreshChannels().catch(() => undefined)
+    }, CHANNEL_ADDED_DEBOUNCE_MS)
   }
 
   function onMessageEvent(channelId: number, event: (typeof MESSAGE_EVENTS)[number], payload: unknown): void {
@@ -605,6 +650,10 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   /** After the socket came back: see the module comment. */
   async function reconnect(): Promise<void> {
     refusals.clear()
+    // The list is refetched below: a pending channel.added refresh would only repeat it.
+    clearTimeout(addedTimer)
+    addedTimer = undefined
+    subscribePersonal()
     for (const key of timelineKeys()) {
       if (key === (current === null ? '' : channelKey(current)) || threads.isOpen(key)) continue
       updateTimeline(key, (t) => (t.status === 'idle' ? t : { ...t, stale: true }))
@@ -670,6 +719,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     stopReconnect?.()
     realtime = next
     stopReconnect = next.onReconnect(() => void reconnect())
+    subscribePersonal()
     syncSubscriptions()
   }
 
@@ -677,6 +727,9 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     generation += 1
     stopReconnect?.()
     stopReconnect = null
+    dropPersonal()
+    clearTimeout(addedTimer)
+    addedTimer = undefined
     for (const unsubscribe of subscriptions.values()) unsubscribe()
     subscriptions.clear()
     refusals.clear()

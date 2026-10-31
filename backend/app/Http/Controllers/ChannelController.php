@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ChannelAdded;
 use App\Events\MemberRemoved;
 use App\Http\Resources\ChannelResource;
 use App\Models\Channel;
@@ -172,7 +173,15 @@ class ChannelController extends Controller
         $data = $request->validate(['user_id' => ['required', 'integer', Rule::exists('users', 'id')->whereNull('banned_at')]]);
 
         $user = User::findOrFail($data['user_id']);
-        $created = $channel->addMember($user);
+        $created = DB::transaction(function () use ($channel, $user) {
+            $created = $channel->addMember($user);
+            // Told at once (after the commit), only when this really made them a member.
+            if ($created) {
+                ChannelAdded::dispatch($channel->id, $user->id);
+            }
+
+            return $created;
+        });
 
         return response()->json([
             'channel_id' => $channel->id,

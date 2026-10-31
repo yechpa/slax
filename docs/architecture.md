@@ -104,7 +104,10 @@ on 50 sockets, with nothing lost or doubled ([load-test-results.md](load-test-re
 1. The SPA opens `wss://<host>/app/<key>` (nginx → Reverb) and gets a socket id.
 2. For each channel it calls `POST /broadcasting/auth` with the session cookie and the
    XSRF token; Laravel checks membership **at that moment** and signs the subscription
-   (with the user id inside, for presence and whispers).
+   (with the user id inside, for presence and whispers). Besides one `private-channel.{id}`
+   per channel and `presence-workspace.{id}`, each client subscribes to its own
+   `private-App.Models.User.{id}`: `channel.added` (the channel id only) when someone else
+   makes the user a member, and the client refetches its channel list.
 3. When someone is removed from a private channel or banned, the server asks Reverb to
    close that user's connections (a custom broadcaster method); their client cannot
    subscribe again because the authorization is refused. Limits:
