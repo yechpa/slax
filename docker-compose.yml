@@ -33,7 +33,8 @@ services:
 
   queue:
     <<: *php
-    command: php artisan queue:listen --tries=3
+    # default first (broadcasts, revocations), then push (Web Push: SendPushNotification).
+    command: php artisan queue:listen --tries=3 --queue=default,push
 
   scheduler:
     <<: *php

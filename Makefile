@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots e2e load load-smoke chart-lint images web-check backup-test monitor-test proxy-test aws-test edge-guard-test
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots icons e2e load load-smoke chart-lint images web-check backup-test monitor-test proxy-test aws-test edge-guard-test
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
@@ -91,6 +91,12 @@ screenshots: env deps ## Capture the design-system kitchen sink (2 themes x 3 la
 		$(PLAYWRIGHT_IMAGE) sh -c 'npm install --silent --no-audit --no-fund --prefix /tmp/pw playwright-core@1.64.1 \
 		&& PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core/index.mjs node /scripts/design-screenshots.mjs'
 
+icons: ## Render the install icons (frontend/public/icons) from frontend/public/favicon.svg
+	docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) -e HOME=/tmp \
+		-v $(CURDIR)/frontend/public:/public -v $(CURDIR)/frontend/scripts:/scripts \
+		$(PLAYWRIGHT_IMAGE) sh -c 'npm install --silent --no-audit --no-fund --prefix /tmp/pw playwright-core@1.64.1 \
+		&& PLAYWRIGHT_CORE=/tmp/pw/node_modules/playwright-core/index.mjs node /scripts/icons.mjs'
+
 # The end-to-end stack: its own Compose project (fresh volumes, nothing published on the host),
 # configured from e2e/stack.env alone, APP_ENV=e2e. See docker-compose.e2e.yml.
 DCE := $(DC) -p slax-e2e --env-file e2e/stack.env -f docker-compose.yml -f docker-compose.e2e.yml
@@ -160,6 +166,11 @@ chart-lint: ## Lint, render and validate the Helm chart (dev and prod values)
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml > /dev/null 2>&1 || { echo 'rendered without image.tag'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.APP_ENV=local > /dev/null 2>&1 || { echo 'rendered APP_ENV=local'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.APP_KEY=x > /dev/null 2>&1 || { echo 'rendered a secret in the ConfigMap'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.VAPID_PRIVATE_KEY=x > /dev/null 2>&1 || { echo 'rendered the VAPID private key in the ConfigMap'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set push.subject=http://slax.example > /dev/null 2>&1 || { echo 'rendered a VAPID subject that is neither mailto: nor https:'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set session.lifetimeMinutes=0 > /dev/null 2>&1 || { echo 'rendered a session lifetime of 0 minutes'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set session.lifetimeMinutes=two-weeks > /dev/null 2>&1 || { echo 'rendered a session lifetime that is not a number'; exit 1; }; \
+	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set config.extraEnv.SESSION_LIFETIME=5 > /dev/null 2>&1 || { echo 'rendered SESSION_LIFETIME from extraEnv'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.disk.recoverPercent=80 > /dev/null 2>&1 || { echo 'rendered a monitor without disk hysteresis'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.activeDeadlineSeconds=60 > /dev/null 2>&1 || { echo 'rendered monitor runs that can overlap'; exit 1; }; \
 	! $(HELM) template slax $(CHART) -f $(CHART)/values-dev.yaml --set image.tag=x --set monitor.budgetSeconds=45 > /dev/null 2>&1 || { echo 'rendered a monitor budget past its deadline'; exit 1; }; \

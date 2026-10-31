@@ -20,7 +20,7 @@ import { api } from '../api/endpoints.ts'
 import { t } from '../i18n/index.ts'
 import { useLocale } from '../i18n/useLocale.ts'
 import { pollWhileVisible } from '../lib/poll.ts'
-import { readPref } from '../lib/prefs.ts'
+import { LAST_CHANNEL_KEY, readPref } from '../lib/prefs.ts'
 import type { Realtime } from '../realtime/echo.ts'
 import { channelPath, navigate, route } from '../router.ts'
 import { channelById, channels, channelsLoaded, rooms } from '../store/channels.ts'
@@ -31,14 +31,13 @@ import { Button } from './ui/Button.tsx'
 import { EmptyState } from './ui/EmptyState.tsx'
 import { Admin } from './Admin.tsx'
 import { BrowseChannelsDialog } from './BrowseChannelsDialog.tsx'
-import { ChannelView, LAST_CHANNEL_KEY } from './ChannelView.tsx'
+import { ChannelView } from './ChannelView.tsx'
 import { ChatContext } from './chatContext.ts'
 import { CreateChannelDialog } from './CreateChannelDialog.tsx'
 import { NewMessageDialog } from './NewMessageDialog.tsx'
 import { Skeleton } from './MessageList.tsx'
 import { NavToggle } from './NavToggle.tsx'
 import { Sidebar } from './Sidebar.tsx'
-import { ConnectionBanner, Toasts } from './Toasts.tsx'
 
 /** How long the socket may be down before the banner says so: a blip is not news. */
 const BANNER_DELAY_MS = 2000
@@ -129,8 +128,6 @@ export function Workspace({ connect, chat: given }: Props) {
     <ChatContext.Provider value={chat}>
       <Shell loadFailed={loadFailed} onRetryLoad={retryLoad} />
       <Dialogs />
-      <ConnectionBanner />
-      <Toasts />
     </ChatContext.Provider>
   )
 }

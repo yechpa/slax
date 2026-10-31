@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ME, channel, live } from '../test/fixtures.ts'
 import type { FakeHandler } from '../test/fakes.ts'
 import { key, mountApp, plain, settle, typeInto, type Mounted } from '../test/mountApp.tsx'
@@ -41,7 +41,7 @@ async function chooseFromMenu(host: HTMLElement, index: number, label: string): 
 describe('message actions', () => {
   it('offers edit and delete on my messages only, from a menu reachable without hover', async () => {
     app = await setup()
-    expect(await openMenu(app.host, 0)).toEqual(['Reply in thread', 'Add reaction', 'Edit', 'Delete'])
+    expect(await openMenu(app.host, 0)).toEqual(['Reply in thread', 'Add reaction', 'Copy text', 'Edit', 'Delete'])
     // The menu takes focus; Escape gives it back to its button.
     expect(document.activeElement?.textContent).toBe('Reply in thread')
     key(document.activeElement!, { key: 'ArrowDown' })
@@ -51,7 +51,60 @@ describe('message actions', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull()
     expect(document.activeElement).toBe(item(app.host, 0).querySelector('.message-actions__more'))
 
-    expect(await openMenu(app.host, 1)).toEqual(['Reply in thread', 'Add reaction'])
+    expect(await openMenu(app.host, 1)).toEqual(['Reply in thread', 'Add reaction', 'Copy text'])
+  })
+
+  it('copies a message’s text (a phone selects no text in a message: this is the way)', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    const own = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    try {
+      app = await setup()
+      await chooseFromMenu(app.host, 1, 'Copy text')
+      expect(writeText).toHaveBeenCalledWith('their words')
+      expect(plain(app.host.querySelector('.toast--success')?.textContent)).toContain('Copied.')
+      // Refused (no permission, not a secure page): said so.
+      writeText.mockImplementationOnce(() => Promise.reject(new DOMException('denied', 'NotAllowedError')))
+      await chooseFromMenu(app.host, 0, 'Copy text')
+      expect(plain(app.host.querySelector('.toast--error')?.textContent)).toContain('The text could not be copied.')
+    } finally {
+      if (own) Object.defineProperty(navigator, 'clipboard', own)
+      else delete (navigator as { clipboard?: unknown }).clipboard
+    }
+  })
+
+  it('a message with files only has nothing to copy', async () => {
+    const files = live(3, { body: '', user: ME_USER, files: [{ id: 9, name: 'notes.txt', mime: 'text/plain', size: 12, kind: 'other', download_url: '/api/v1/files/9' }] })
+    app = await mountApp(
+      {
+        'GET /api/v1/channels': () => ({ body: [channel(7, { name: 'general' })] }),
+        'GET /api/v1/channels/7/messages': () => ({ body: { data: [files], has_more: false } }),
+      },
+      '/c/7',
+    )
+    expect(await openMenu(app.host, 0)).toEqual(['Reply in thread', 'Add reaction', 'Edit', 'Delete'])
+  })
+
+  it('a long press on a message opens its menu (touch), and the browser shows none of its own', async () => {
+    app = await setup()
+    const body = item(app.host, 1).querySelector<HTMLElement>('.message__body')!
+    body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', isPrimary: true, pointerId: 4 }))
+    // Android sends contextmenu for a long press (iOS: the timer, see lib/longPress.test.ts).
+    const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    body.dispatchEvent(menu)
+    await settle()
+    expect(menu.defaultPrevented).toBe(true)
+    expect([...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((m) => m.textContent)).toEqual(['Reply in thread', 'Add reaction', 'Copy text'])
+    expect(item(app.host, 1).querySelector('.message-actions__more')?.getAttribute('aria-expanded')).toBe('true')
+    // A mouse's right click stays the browser's.
+    key(document.activeElement!, { key: 'Escape' })
+    await settle()
+    body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', isPrimary: true, pointerId: 1 }))
+    const right = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    body.dispatchEvent(right)
+    await settle()
+    expect(right.defaultPrevented).toBe(false)
+    expect(document.querySelector('[role="menu"]')).toBeNull()
   })
 
   it('edit_message_inline_is_ime_safe', async () => {

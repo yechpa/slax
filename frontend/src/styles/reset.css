@@ -9,12 +9,14 @@
     margin: 0;
   }
 
+  /* 100%, not none: the phone keeps its own text size, and the reader's text zoom still works. */
   html {
-    -webkit-text-size-adjust: none;
-    text-size-adjust: none;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   body {
+    min-block-size: 100vh;
     min-block-size: 100dvh;
   }
 

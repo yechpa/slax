@@ -8,6 +8,7 @@ use App\Events\UserBanned;
 use App\Models\Channel;
 use App\Models\File;
 use App\Models\Message;
+use App\Models\PushSubscription;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -50,6 +51,8 @@ class Moderation
         if ($changed) {
             $this->audit->record(AuditLogger::USER_BANNED, $user);
         }
+        // No more notifications on any of their devices (SendPushNotification checks the ban too).
+        PushSubscription::where('user_id', $user->id)->delete();
 
         try {
             $this->sessions->destroyAll($user);
@@ -68,6 +71,24 @@ class Moderation
 
         if ($changed) {
             $this->audit->record(AuditLogger::USER_UNBANNED, $user);
+        }
+    }
+
+    /**
+     * `member` (a family account: the nightly demo reset keeps its content and never deletes
+     * it) or `demo` (a visitor's: content reset nightly, deleted after a week without
+     * activity). Administrators and the seed people are not the caller's to change.
+     */
+    public function setAccountType(User $user, string $type): void
+    {
+        $changed = User::whereKey($user->id)
+            ->whereIn('account_type', [User::ACCOUNT_MEMBER, User::ACCOUNT_DEMO])
+            ->where('account_type', '!=', $type)
+            ->update(['account_type' => $type]) > 0;
+        $user->refresh();
+
+        if ($changed) {
+            $this->audit->record($type === User::ACCOUNT_MEMBER ? AuditLogger::USER_MADE_MEMBER : AuditLogger::USER_MADE_DEMO, $user);
         }
     }
 

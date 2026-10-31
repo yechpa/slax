@@ -37,6 +37,32 @@ return [
         'max_age_hours' => (int) env('SLAX_BACKUP_MAX_AGE_HOURS', 30),
     ],
 
+    /*
+    | Web Push (VAPID). Off unless both keys and a subject are set (`php artisan slax:push-keys`
+    | prints a pair): the push endpoints then answer 404 and the app hides its toggle, so the
+    | local stack and the e2e stack need no keys. The subject identifies the sender to the push
+    | services (mailto: or https:); without VAPID_SUBJECT, APP_URL when it is https.
+    |
+    | allowed_hosts: the push services a subscription's endpoint may point at (the queue worker
+    | POSTs to that URL: anything else would let a user aim it at an internal address). A
+    | leading dot allows the subdomains. FCM (Chrome, Android, Edge on Android), Mozilla
+    | (Firefox), Apple (Safari, iOS) and WNS (Edge on Windows).
+    */
+    'push' => [
+        'public_key' => (string) env('VAPID_PUBLIC_KEY', ''),
+        'private_key' => (string) env('VAPID_PRIVATE_KEY', ''),
+        'subject' => (string) (env('VAPID_SUBJECT') ?: (str_starts_with((string) env('APP_URL', ''), 'https://') ? env('APP_URL') : '')),
+        'allowed_hosts' => [
+            'fcm.googleapis.com',
+            'android.googleapis.com',
+            '.push.services.mozilla.com',
+            '.push.apple.com',
+            '.notify.windows.com',
+        ],
+        // A notification waits this long at the push service for a device that is off.
+        'ttl_seconds' => 12 * 3600,
+    ],
+
     /* Audit log entries are kept this long (audit:prune, daily). */
     'audit' => [
         'retention_days' => (int) env('SLAX_AUDIT_RETENTION_DAYS', 180),

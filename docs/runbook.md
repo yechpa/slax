@@ -285,7 +285,8 @@ Hidden prompts: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TURNSTILE_SITE_KEY`
 `TURNSTILE_SECRET`, then optional `ADMIN_EMAILS` (administrators: personal data, so here and
 never in values), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (the same bot and chat as dev:
 production messages start with `[Prod]`). Generated: `APP_KEY`, `DB_PASSWORD`,
-`REDIS_PASSWORD`, `REVERB_APP_KEY`, `REVERB_APP_SECRET`. Check:
+`REDIS_PASSWORD`, `REVERB_APP_KEY`, `REVERB_APP_SECRET` and the Web Push pair
+`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (`PUSH_KEYS=none` to leave push off; see 4.11). Check:
 `sudo k3s kubectl -n slax get secret slax-secrets -o jsonpath='{.data}' | tr ',' '\n' | cut -d'"' -f2`
 lists the key names (no `AWS_*`).
 
@@ -472,6 +473,8 @@ Data written since that backup is lost: say so on the site first if anyone uses 
 - Telegram bot token: BotFather `/revoke`, then `set TELEGRAM_BOT_TOKEN` (prod and dev) and
   the GitHub secrets of both environments.
 - AWS: there is no static key to rotate; the instance role's credentials rotate by themselves.
+- Web Push (VAPID) pair: `sudo bash /tmp/create-secrets.sh vapid`, then restart. Every device
+  must turn notifications on again (4.11).
 
 ### 4.6 Ban, unban, moderate
 
@@ -479,11 +482,35 @@ In the app, as an administrator (`ADMIN_EMAILS`): Administration → a person �
 "Banned" list lifts a ban. Every action lands in the audit log (Administration → Audit), with
 the visitor's real address. An administrator listed in `ADMIN_EMAILS` cannot be banned.
 
+**Family accounts (members).** Everyone who signs up with Google is a `demo` account, like any
+visitor of the public demo: in production the nightly reset (4.7) deletes what they write, and
+the account after 7 days without activity. To keep a relative's messages: Administration →
+Accounts (most recently seen first; ask them to sign in once, then look at the top) → **Make
+member** → confirm. It is audited (`user.made_member`) and sent to Telegram; **Make demo
+account** undoes it (`user.made_demo`, a warning: their content goes at the next reset). An
+administrator (`ADMIN_EMAILS`) is always a member and has no button. Promote during the day,
+not around 03:00: the reset decides who is a demo account when it starts, so a promotion while
+it runs counts only the next night. No e-mail address is configured anywhere for this
+(decision: the click, not an allowlist in env). Do it the same day they sign up: whatever they
+wrote before the promotion and the next 03:00 reset is deleted with the demo content. In
+production the public channels are the demo's, readable by every visitor: create a **private**
+channel for the family (New channel → private) and add each member to it. The family guide for
+them: [family-guide.md](family-guide.md).
+
 ### 4.7 Demo reset
 
 Every night at 03:00 Asia/Jerusalem the scheduler resets the demo (`SLAX_DEMO_RESET_ENABLED=true`
 in production only): visitors' accounts and content go, the seed comes back; banned accounts
 are kept. By hand: `kubectl -n slax exec deploy/slax-scheduler -- php artisan slax:demo-reset`.
+
+Members (4.6) and administrators are kept with their content, **except** where it belongs to
+demo content (Ruling P, tested in `DemoResetTest`): a conversation or group conversation with
+a demo account in it is deleted whole, the members' messages included; so is a channel a demo
+account created, and a thread a demo account started (the members' replies go with it). The
+demo's sample messages get exactly their sample reactions back, so a member's reaction on one
+of them goes too. A conversation between members only, their own channels, threads and
+reactions on members' messages stay. Tell the family to talk in their own channels and
+conversations, not with the demo's visitors.
 
 ### 4.8 Logs and state
 
@@ -497,6 +524,57 @@ are kept. By hand: `kubectl -n slax exec deploy/slax-scheduler -- php artisan sl
 | Caddy (TLS, proxy errors) | `journalctl -u caddy --since -1h` (no access log by design) |
 | k3s, the node | `journalctl -u k3s --since -1h`; `free -m`; `df -h /`; `vmstat 5` |
 | First boot | `/var/log/slax-bootstrap.log`, `cloud-init status --long` |
+
+**Sessions** (Redis, `SESSION_DRIVER=redis-tiered`). A signed-in session lasts
+`SESSION_LIFETIME`, the chart's `session.lifetimeMinutes` (default 20160 = 14 days), rolling:
+every request starts the count again, so a tapped notification after a quiet week opens the
+conversation, not Google sign-in. A session nobody is signed in to (the app's first call from a
+visitor, a crawler, the CSRF cookie, a sign-in on its way to Google, the fresh session after a
+sign-out) is kept **2 hours at most** (`session.guest_lifetime`), so anonymous traffic cannot
+pile up for two weeks. Sign-out and a ban end a session at once whatever the lifetime (the id
+is tombstoned in Redis, so a late request cannot bring it back). To change the lifetime:
+`--set session.lifetimeMinutes=<minutes>` (a whole number, at least 1; `config.extraEnv`
+cannot set it); the pods restart on the config checksum.
+
+**Redis memory.** One Redis holds, in database 0, the sessions (keys
+`slax-database-slax-cache-<40 characters>`), presence, the session index and tombstones,
+and the **queue** (`slax-database-queues:*`); database 1 holds the cache and the rate limits.
+`maxmemory` is 96 MB in production with `--maxmemory-policy volatile-lru`: when full, Redis
+evicts the least recently used keys **that have an expiry** (all of the above but the queue)
+instead of refusing writes, so the app keeps working; the price is that some people are signed
+out (their session evicted: LRU does not tell a guest from a member, so the first to go are the sessions idle the longest, such as a family phone unused for days, before a fresh guest session) and presence or a rate-limit window may restart. A guest session is
+about 420 bytes: 96 MB holds roughly 200 000 of them, a sustained 30 new visitors a second for 2
+hours. Check:
+
+```sh
+kubectl -n slax exec statefulset/slax-redis -- redis-cli info memory | grep -E '^(used_memory_human|maxmemory_human|maxmemory_policy)'
+kubectl -n slax exec statefulset/slax-redis -- redis-cli info stats | grep -E '^(evicted_keys|rejected_connections)'
+kubectl -n slax exec statefulset/slax-redis -- redis-cli info keyspace
+kubectl -n slax exec statefulset/slax-redis -- redis-cli -n 0 llen slax-database-queues:default
+```
+
+What to expect and do:
+
+- **`evicted_keys` grows, the app works.** A burst of visitors or a crawler: their sessions
+  expire within 2 hours of the burst ending, and memory comes back by itself. Nothing to do,
+  unless signed-in people complain of being signed out: then find the source (Caddy has no
+  access log by design; `kubectl -n slax logs deploy/slax-app -c web` shows nginx's) and block
+  it upstream.
+- **Requests fail with 500 and the logs say `OOM command not allowed`.** Nothing evictable is
+  left: the queue itself has grown (a stopped or failing queue worker, `llen` above in the
+  thousands). Fix the worker first (`kubectl -n slax logs deploy/slax-queue`, `rollout restart
+  deployment/slax-queue`); the backlog drains.
+- **Free the sessions at once** (everyone is signed out and signs in again with Google; the
+  family keeps their notifications): delete the session keys of database 0, never the whole
+  database (it holds the queue):
+
+  ```sh
+  kubectl -n slax exec statefulset/slax-redis -- sh -c \
+    "redis-cli -n 0 --scan --pattern 'slax-database-slax-cache-*' | xargs -r -n 500 redis-cli -n 0 unlink"
+  ```
+
+  `redis-cli -n 1 flushdb` empties the cache database only: harmless (rate limits and alert
+  grouping start again) but it frees no session.
 
 ### 4.9 Scale
 
@@ -577,6 +655,54 @@ What it cannot see: the node itself dead or cut from the Internet (nothing runs 
 the Sunday "restore check OK" and Telegram's silence are then the signal. An external
 pinger (a free uptime service polling `/api/v1/health`) would cover that; none is set up
 (docs/known-limitations.md).
+
+### 4.11 Push notifications
+
+Web Push (VAPID) from the queue worker (queue `push`, drained after `default`: chart
+`queue:work --queue=default,push`) to the browsers' push services (FCM for Chrome and
+Android, Apple for Safari and iOS, Mozilla, Microsoft). **Real delivery to these services was
+NOT tested here** (no automated run reaches them; see docs/known-limitations.md, "Push
+notifications", for the checklist the family runs on real devices).
+
+- **Keys.** One P-256 pair per environment, in the Secret only: `VAPID_PUBLIC_KEY`,
+  `VAPID_PRIVATE_KEY` (both optional: without them push is off, the endpoints answer 404 and the
+  app hides its switch). `create-secrets.sh` generates the pair (3.8). Another way to get one:
+  `kubectl -n slax exec deploy/slax-app -c php -- php artisan slax:push-keys` prints two lines
+  and writes nothing; put each value in with `create-secrets.sh set VAPID_PUBLIC_KEY` and
+  `set VAPID_PRIVATE_KEY`, then restart. Never in values, `config.extraEnv` (refused) or the
+  repository. `VAPID_SUBJECT` (ConfigMap) is `push.subject` (a `mailto:` or `https:` URL),
+  else the public URL.
+- **Check it is on.** In the app, account menu: "Notifications on this device" appears (on an
+  iPhone, in the installed app only; in Safari the menu says to install first). Or
+  `curl -s https://slax.yechpa.com/api/v1/push/public-key` with a session (404
+  `push_disabled` means off).
+- **Test.** Turn the switch on, then "Send a test": every device of your account gets
+  "Notifications work on this device." within seconds. Nothing: see the queue's log
+  (`kubectl -n slax logs deploy/slax-queue | grep -i push`): "refused by the push service"
+  with a status (403: the keys or the subject; 400/413: the device's keys or the payload) or
+  "dropped after retries" (the push service unreachable).
+- **Who is notified.** DMs and group conversations, @mentions, replies in threads the person
+  started or replied in; never someone shown `online` (connected and active in Slax in the
+  last 5 minutes, on any device): `away` and `offline` people are. So to check real delivery,
+  close the app on every device (or leave it untouched 5 minutes) before someone writes to
+  you. The test button ignores presence.
+- **Rotate.** `sudo bash /tmp/create-secrets.sh vapid`, then
+  `kubectl -n slax rollout restart deployment`. Rotation invalidates every subscription: old
+  devices are deleted at their next push, the app shows the switch off, and everyone turns
+  notifications on again (tell the family first). Rotate only if the private key leaked.
+- **iPhone and iPad.** iOS 16.4 or later, Slax added to the Home Screen and opened from its
+  icon, then the switch, then "Allow". Notifications can be managed afterwards in iOS Settings →
+  Notifications → Slax.
+- **Dead subscriptions** clean themselves: a 404/410 from the push service deletes the device;
+  429, 5xx or no answer are retried after 30 s, 2 min and 10 min, then dropped (a warning in
+  the queue's log, no alert); a ban deletes all of the account's devices; an account keeps ten
+  devices at most. To see them: `kubectl -n slax exec deploy/slax-app -c php -- php artisan
+  tinker --execute 'echo App\Models\PushSubscription::count();'`. To turn push off
+  everywhere at once: delete both keys from the Secret and restart (the devices stay, unused,
+  until the keys come back or the accounts go).
+- **Privacy.** A notification carries the sender's and the channel's names and a generic line
+  ("New message", "You were mentioned", "New reply"), never the text, an e-mail address or a
+  file name; it is encrypted for the browser, the push service cannot read it.
 
 ## 5. Incident playbook
 

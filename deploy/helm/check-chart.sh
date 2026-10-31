@@ -30,7 +30,7 @@ empty() {
 # Every workload's pod: {name, spec}.
 PODS='select(.kind == "Deployment" or .kind == "StatefulSet" or .kind == "Job" or .kind == "CronJob") | {"name": .metadata.name, "spec": (.spec.jobTemplate.spec.template.spec // .spec.template.spec)}'
 
-SECRET_KEYS='["APP_KEY","DB_PASSWORD","REDIS_PASSWORD","REVERB_APP_KEY","REVERB_APP_SECRET","AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY","GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","TURNSTILE_SITE_KEY","TURNSTILE_SECRET","ADMIN_EMAILS","TELEGRAM_BOT_TOKEN","TELEGRAM_CHAT_ID","POSTGRES_PASSWORD","MINIO_ROOT_PASSWORD"]'
+SECRET_KEYS='["APP_KEY","DB_PASSWORD","REDIS_PASSWORD","REVERB_APP_KEY","REVERB_APP_SECRET","AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY","GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","TURNSTILE_SITE_KEY","TURNSTILE_SECRET","ADMIN_EMAILS","TELEGRAM_BOT_TOKEN","TELEGRAM_CHAT_ID","POSTGRES_PASSWORD","MINIO_ROOT_PASSWORD","VAPID_PUBLIC_KEY","VAPID_PRIVATE_KEY"]'
 
 for env in dev prod; do
     eval "file=\$$env"
@@ -52,6 +52,43 @@ for env in dev prod; do
         "$(yq ea -N "[.. | select(tag == \"!!map\" and has(\"name\") and has(\"value\")) | select(.name as \$n | $SECRET_KEYS | any_c(. == \$n)) | .name] | .[]" "$file")"
     empty "$env: no secret key in the ConfigMap" \
         "$(yq ea -N "select(.kind == \"ConfigMap\") | .data | keys | .[] | select(. as \$k | $SECRET_KEYS | any_c(. == \$k))" "$file")"
+
+    # Web Push: the VAPID pair from the Secret only, to the processes that use it; the subject in the ConfigMap.
+    empty "$env: the VAPID private key is never in a ConfigMap, nor a literal value anywhere" \
+        "$(yq e -N '(select(.kind == "ConfigMap") | .data | keys | .[] | select(test("VAPID_PRIVATE"))), (.. | select(tag == "!!map" and has("name") and has("value")) | select(.name | test("^VAPID_(PUBLIC|PRIVATE)_KEY$")) | .name)' "$file" | grep . || true)"
+    expect "$env: the app and the queue worker read the VAPID pair from the Secret (optional: push off without it)" \
+        "$(yq e -N 'select(.kind == "Deployment" and (.metadata.name == "slax-app" or .metadata.name == "slax-queue")) | .metadata.name + ":" + ([.spec.template.spec.containers[] | .env[]? | select(.name | test("^VAPID_")) | .valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key + "/" + (.valueFrom.secretKeyRef.optional | tostring)] | join(","))' "$file" | grep . | sort | tr '\n' ' ')" \
+        "slax-app:slax-secrets/VAPID_PUBLIC_KEY/true,slax-secrets/VAPID_PRIVATE_KEY/true slax-queue:slax-secrets/VAPID_PUBLIC_KEY/true,slax-secrets/VAPID_PRIVATE_KEY/true "
+    expect "$env: the queue worker drains default (broadcasts) before push (Web Push)" \
+        "$(yq e -N 'select(.kind == "Deployment" and .metadata.name == "slax-queue") | .spec.template.spec.containers[0].args | map(select(test("^--queue="))) | join(",")' "$file" | grep . || true)" \
+        "--queue=default,push"
+    empty "$env: Reverb and the monitor never get the VAPID pair" \
+        "$(yq e -N 'select((.kind == "Deployment" and .metadata.name == "slax-reverb") or (.kind == "CronJob" and .metadata.name == "slax-monitor")) | .. | select(tag == "!!map" and has("name")) | select(.name | test("^VAPID_")) | .name' "$file" | grep . || true)"
+    expect "$env: VAPID_SUBJECT is the public https URL unless push.subject says otherwise" \
+        "$(yq ea -N 'select(.kind == "ConfigMap") | .data.VAPID_SUBJECT' "$file")" \
+        "$(yq ea -N 'select(.kind == "ConfigMap") | .data.APP_URL' "$file")"
+
+    # Sessions: 14 days, rolling, from session.lifetimeMinutes (a tapped notification must not land on sign-in).
+    expect "$env: sessions in Redis, a guest's kept 2 hours at most (SESSION_DRIVER=redis-tiered)" \
+        "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SESSION_DRIVER' "$file")" \
+        "redis-tiered"
+    expect "$env: SESSION_ENCRYPT is not set (the redis-tiered driver reads the session payload and refuses encryption at the first request)" \
+        "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SESSION_ENCRYPT // "unset"' "$file")" \
+        "unset"
+    expect "$env: sessions last 14 days, rolling (SESSION_LIFETIME=20160 from session.lifetimeMinutes; never expire on close)" \
+        "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SESSION_LIFETIME + "/" + (.data.SESSION_EXPIRE_ON_CLOSE // "unset")' "$file")" \
+        "20160/unset"
+    expect "$env: the app, the queue worker and the scheduler read SESSION_LIFETIME from the ConfigMap" \
+        "$(yq e -N 'select(.kind == "Deployment" and (.metadata.name == "slax-app" or .metadata.name == "slax-queue" or .metadata.name == "slax-scheduler")) | .metadata.name + ":" + ([.spec.template.spec.containers[] | .envFrom[]? | .configMapRef.name // ""] | join(","))' "$file" | sort | tr '\n' ' ')" \
+        "slax-app:slax-config slax-queue:slax-config slax-scheduler:slax-config "
+    expect "$env: the migration job gets the same SESSION_LIFETIME" \
+        "$(yq e -N 'select(.kind == "Job") | .spec.template.spec.containers[].env[]? | select(.name == "SESSION_LIFETIME") | .value' "$file")" \
+        "20160"
+
+    # Redis evicts only keys with an expiry when full (sessions, cache), never the queue.
+    expect "$env: Redis is capped and evicts keys with an expiry only (volatile-lru: never the queue)" \
+        "$(yq e -N 'select(.kind == "StatefulSet" and .metadata.name == "slax-redis") | .spec.template.spec.containers[0].args[0] | capture("--maxmemory-policy (?P<p>[a-z-]+)") | .p' "$file")" \
+        "volatile-lru"
 
     # Pod specs of every workload: Deployments, StatefulSets, Jobs and CronJobs.
     empty "$env: every pod runs as non-root with the RuntimeDefault seccomp profile and no API token" \

@@ -1,9 +1,10 @@
 /**
- * What can be done to a message: react, reply in its thread, (its author) edit or
- * delete, and (an administrator, on someone else's) delete it or one of its files as a
+ * What can be done to a message: react, reply in its thread, copy its text, (its author) edit
+ * or delete, and (an administrator, on someone else's) delete it or one of its files as a
  * moderator. The quick buttons show on hover or keyboard focus; the "more" button opens a
  * menu with every action, and it stays visible on touch screens (no hover there), so
- * nothing depends on hovering. The server decides in the end; errors come back as toasts.
+ * nothing depends on hovering. A long press on the message opens the same menu (MessageItem).
+ * The server decides in the end; errors come back as toasts.
  */
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { t } from '../i18n/index.ts'
@@ -18,6 +19,8 @@ type Props = {
   /** Absent in a thread (replies have no thread of their own). */
   onReply?: () => void
   onReact: (emoji: string) => void
+  /** Absent when there is no text (files only). */
+  onCopy?: () => void
   onEdit: () => void
   onDelete: () => void
   /** An administrator, on someone else's message: moderation items (each confirmed first). */
@@ -28,11 +31,13 @@ type Props = {
   }
   /** A menu or the picker is open: the toolbar stays shown. */
   onOpenChange?: (open: boolean) => void
+  /** Each new value opens the menu (a long press on the message); 0 never does. */
+  menuRequest?: number
 }
 
 type Open = null | 'menu' | 'picker' | 'picker-from-menu'
 
-export function MessageActions({ canPost, mine, onReply, onReact, onEdit, onDelete, moderation, onOpenChange }: Props) {
+export function MessageActions({ canPost, mine, onReply, onReact, onCopy, onEdit, onDelete, moderation, onOpenChange, menuRequest = 0 }: Props) {
   const [open, setOpen] = useState<Open>(null)
   const reactButton = useRef<HTMLButtonElement>(null)
   const moreButton = useRef<HTMLButtonElement>(null)
@@ -41,10 +46,19 @@ export function MessageActions({ canPost, mine, onReply, onReact, onEdit, onDele
 
   useEffect(() => report.current?.(open !== null), [open])
 
+  // Only a request made while shown (not one counted before, e.g. during an edit).
+  const seenRequest = useRef(menuRequest)
+  useEffect(() => {
+    if (menuRequest === seenRequest.current) return
+    seenRequest.current = menuRequest
+    setOpen('menu')
+  }, [menuRequest])
+
   const items: Item[] = []
   if (canPost && onReply) items.push({ label: t('action.reply'), run: onReply })
   // The picker takes the menu's place, at the same spot.
   if (canPost) items.push({ label: t('action.react'), run: () => setOpen('picker-from-menu'), replacesMenu: true })
+  if (onCopy) items.push({ label: t('action.copy'), run: onCopy })
   if (mine && canPost) items.push({ label: t('action.edit'), run: onEdit })
   if (mine) items.push({ label: t('action.delete'), run: onDelete, danger: true })
   if (moderation && !mine) {

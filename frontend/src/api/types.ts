@@ -156,6 +156,16 @@ export interface ModeratedUser extends UserSummary {
   banned_at: string | null
 }
 
+/** GET /admin/users: the accounts people sign in with (names, never addresses). */
+export interface AdminAccount extends UserSummary {
+  /** `member`: a family account, kept by the nightly demo reset; `demo`: a visitor's. */
+  account_type: 'member' | 'demo'
+  /** An administrator is a member whatever account_type says, and is not changed here. */
+  administrator: boolean
+  banned: boolean
+  last_seen_at: string | null
+}
+
 /** GET /admin/channels: every public and private channel, members or not. */
 export interface AdminChannel {
   id: number

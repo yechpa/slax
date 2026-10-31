@@ -12,16 +12,22 @@ use App\Services\FakeScannerClient;
 use App\Services\FakeTurnstile;
 use App\Services\Identity\E2eIdentityProvider;
 use App\Services\Identity\GoogleIdentityProvider;
+use App\Services\Push\FakeWebPushSender;
+use App\Services\Push\VapidWebPushSender;
+use App\Services\Push\WebPushSender;
 use App\Services\ScannerClient;
 use App\Services\Turnstile;
+use App\Session\TieredSessionHandler;
 use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Session;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -37,12 +43,27 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(Turnstile::class, $this->app->environment(['testing', 'e2e']) ? FakeTurnstile::class : Turnstile::class);
         // The scanner runs in the compose stack, E2E runs included: only unit and feature tests fake it.
         $this->app->singleton(ScannerClient::class, $this->app->environment('testing') ? FakeScannerClient::class : ScannerClient::class);
+        // No automated run (tests, the e2e stack) ever reaches a real push service.
+        $this->app->singleton(WebPushSender::class, $this->app->environment(['testing', 'e2e']) ? FakeWebPushSender::class : VapidWebPushSender::class);
         // Telegram when configured (never in tests), nothing otherwise.
         $this->app->singleton(AdminNotifier::class, fn ($app) => NotifierFactory::make($app->environment()));
     }
 
     public function boot(): void
     {
+        // Redis sessions with a short lifetime for guests (TieredSessionHandler); the same Redis
+        // connection and cache store as Laravel's own `redis` driver.
+        Session::extend('redis-tiered', function (Application $app) {
+            $config = $app['config'];
+            if ($config->get('session.encrypt')) {
+                throw new \LogicException('SESSION_DRIVER=redis-tiered needs SESSION_ENCRYPT off: it reads who is signed in from the payload.');
+            }
+            $cache = clone $app['cache']->store($config->get('session.store') ?: 'redis');
+            $cache->getStore()->setConnection($config->get('session.connection'));
+
+            return new TieredSessionHandler($cache, (int) $config->get('session.lifetime'), (int) $config->get('session.guest_lifetime', 120));
+        });
+
         // The API returns bare resources and arrays, not {"data": ...} envelopes.
         JsonResource::withoutWrapping();
 
@@ -61,6 +82,9 @@ class AppServiceProvider extends ServiceProvider
         // Clients debounce typing (250 ms) and abort stale searches: about four a second at most.
         RateLimiter::for('user-search', fn (Request $request) => Limit::perMinute(60)->by('user:'.$request->user()->id));
         RateLimiter::for('uploads', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
+        // Turning notifications on or off on a device; the test button sends to every device.
+        RateLimiter::for('push-subscriptions', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
+        RateLimiter::for('push-test', fn (Request $request) => Limit::perMinute(3)->by('user:'.$request->user()->id));
         RateLimiter::for('admin-writes', fn (Request $request) => Limit::perMinute(30)->by('user:'.$request->user()->id));
 
         // Administrators are the ADMIN_EMAILS accounts (set at each sign-in); a banned one is not.

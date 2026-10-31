@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest'
 import { contrastRatio, relativeLuminance } from '../lib/contrast.ts'
 import { THEMES, type Theme } from '../theme.ts'
 
-const tokensCss = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'tokens.css'), 'utf8')
+const styles = dirname(fileURLToPath(import.meta.url))
+const tokensCss = readFileSync(join(styles, 'tokens.css'), 'utf8')
+const componentsCss = readFileSync(join(styles, 'components.css'), 'utf8')
 
 /** Reads the custom properties declared in the `[data-theme="…"]` block, resolving var() chains. */
 function themeTokens(theme: Theme): Record<string, string> {
@@ -70,6 +72,50 @@ describe.each([...THEMES])('theme %s', (theme) => {
       expect(tokens[bg], `${bg} missing`).toBeDefined()
       const ratio = contrastRatio(tokens[fg], tokens[bg])
       expect(ratio, `${theme}: ${fg} ${tokens[fg]} on ${bg} ${tokens[bg]} = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(min)
+    }
+  })
+})
+
+/** A colour laid at `alpha` over an opaque one (how a color-mix(… x%, transparent) background is painted). */
+function over(colour: string, alpha: number, base: string): string {
+  const parse = (hex: string) => [0, 2, 4].map((i) => parseInt(hex.slice(1 + i, 3 + i), 16))
+  const top = parse(colour)
+  const bottom = parse(base)
+  return `#${top.map((c, i) => Math.round(c * alpha + (bottom[i] ?? 0) * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** The accent tint a rule paints a message with, read from components.css (e.g. 5 for 5%). */
+function messageTint(selector: string): number {
+  const rule = new RegExp(String.raw`${selector.replace(/[.:]/g, '\\$&')}[^{]*\{[^}]*color-mix\(in srgb, var\(--color-accent\) (\d+)%, transparent\)`).exec(componentsCss)
+  if (!rule?.[1]) throw new Error(`no accent tint on ${selector}`)
+  return Number(rule[1]) / 100
+}
+
+/*
+ * Phone surfaces. A tap leaves a message hovered (a touch screen keeps :hover until the next
+ * tap) or focused, so its text, author, links and the always-visible "more" button sit on the
+ * accent tint; a mentioned message has its own tint. In the open message menu, a tapped item is
+ * the accent (or the danger colour) on the hover background.
+ */
+describe.each([...THEMES])('theme %s, phone surfaces', (theme) => {
+  const tokens = themeTokens(theme)
+  const tints = { hovered: messageTint('.message:hover'), mentioned: messageTint('.message--mentioned') }
+  const foregrounds = ['--color-text', '--color-text-dim', '--color-muted', '--color-link', '--color-danger', ...[1, 2, 3, 4, 5, 6].map((i) => `--user-${i}`)]
+
+  it.each(Object.entries(tints))('everything in a %s message stays readable on its tint', (_, alpha) => {
+    for (const base of ['--color-bg', '--color-band-a', '--color-band-b']) {
+      const background = over(tokens['--color-accent']!, alpha, tokens[base]!)
+      for (const fg of foregrounds) {
+        const ratio = contrastRatio(tokens[fg]!, background)
+        expect(ratio, `${theme}: ${fg} on ${base} + ${alpha * 100}% accent (${background}) = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
+
+  it('a tapped menu item stays readable', () => {
+    for (const fg of ['--color-accent', '--color-danger', '--color-text']) {
+      const ratio = contrastRatio(tokens[fg]!, tokens['--color-hover']!)
+      expect(ratio, `${theme}: ${fg} on --color-hover = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(4.5)
     }
   })
 })

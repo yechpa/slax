@@ -36,7 +36,7 @@ spec:
               umask 077
               printf 'requirepass "%s"\n' "$REDIS_PASSWORD" > /tmp/redis.conf
               exec redis-server /tmp/redis.conf --dir /data --appendonly yes --save "" \
-                --maxmemory {{ .Values.redis.maxmemory }} --maxmemory-policy noeviction
+                --maxmemory {{ .Values.redis.maxmemory }} --maxmemory-policy volatile-lru
           env:
             - name: REDIS_PASSWORD
               valueFrom:

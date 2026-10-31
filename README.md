@@ -29,7 +29,13 @@ address is the target, not a promise.
 - English, Hebrew and French, chosen per person; right to left done with CSS logical
   properties and per-message bidi isolation.
 - Sign-in with Google only (no password anywhere), behind Cloudflare Turnstile.
-- Administration: service status, audit log, ban, delete, lock; alerts to a Telegram bot.
+- Administration: service status, audit log, ban, delete, lock, making a relative a member
+  (kept by the nightly demo reset); alerts to a Telegram bot.
+- Installable as an app (PWA) on Android, iPhone and desktop: Install from the account menu
+  (or the Add to Home Screen steps on iOS), the app shell opens offline, a new version is
+  announced with a Reload button.
+- Push notifications (Web Push, VAPID) for direct messages, mentions and thread replies, while
+  the app is closed: sender and channel only, never the text. Off without keys (dev, e2e).
 
 ## How it is built
 
@@ -45,6 +51,7 @@ approval). Production is designed for one EC2 t4g.small behind Caddy, about $21 
 | [docs/runbook.md](docs/runbook.md) | production: setup, operations, backups, alerts, incidents, sizing, teardown |
 | [deploy/dev/BOOTSTRAP.md](deploy/dev/BOOTSTRAP.md) | setting up the development cluster |
 | [docs/recette.md](docs/recette.md) | the acceptance checklist, automated and manual |
+| [docs/family-guide.md](docs/family-guide.md) | for relatives testing Slax: install it, sign in, notifications, sign out, report a problem (English, Hebrew, French) |
 | [docs/known-limitations.md](docs/known-limitations.md) | what is deliberately left out or not yet proven |
 | [docs/design-system.md](docs/design-system.md) | the visual identity, themes, typography, RTL rules |
 | [docs/load-test-results.md](docs/load-test-results.md) | 50 WebSocket clients at 10 messages/s: latency, memory |
@@ -60,6 +67,7 @@ make test    # Pest (backend), Vitest (frontend), pytest (scanner)
 make lint    # Pint, ESLint, Ruff
 make e2e     # Playwright end to end, then a load smoke, on a fresh stack of its own (APP_ENV=e2e)
 make load    # the load test: 50 WebSocket clients, 10 messages/s for 2 minutes
+make icons   # re-render the install icons from frontend/public/favicon.svg (commit the PNGs)
 make help    # all targets
 ```
 
@@ -82,7 +90,11 @@ suite in the official Playwright image, then removes the whole stack. It can run
 `APP_ENV=e2e`; Turnstile uses Cloudflare's always-pass test keys. The HTML report and
 failure traces are left in `e2e/playwright-report/` and `e2e/test-results/`.
 `E2E_SCREENSHOTS=1 make e2e` also rewrites the RTL reference screenshots in
-`docs/design/e2e/`. It ends with a 10-second load smoke (5 WebSocket clients) that fails on
+`docs/design/e2e/`. The e2e build registers the service worker like production
+(`e2e/tests/pwa.spec.ts`). Besides desktop Chromium, two phone projects run
+`e2e/tests/mobile.spec.ts` only: `iphone` (WebKit, iPhone 14 emulation) and `pixel`
+(Chromium, Pixel 7 emulation); emulation, not devices (see `docs/known-limitations.md`,
+"Phones"). It ends with a 10-second load smoke (5 WebSocket clients) that fails on
 any lost or doubled message; `make load` runs the full load test on a stack of its own and
 writes `docs/load-test-results.md`.
 

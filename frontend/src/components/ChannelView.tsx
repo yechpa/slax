@@ -9,7 +9,7 @@ import { isApiError } from '../api/client.ts'
 import type { Channel } from '../api/types.ts'
 import { plural, t } from '../i18n/index.ts'
 import { useLocale } from '../i18n/useLocale.ts'
-import { writePref } from '../lib/prefs.ts'
+import { LAST_CHANNEL_KEY, writePref } from '../lib/prefs.ts'
 import { channelPath, navigate } from '../router.ts'
 import { canPostIn, isDirect, lockedFor } from '../store/channels.ts'
 import { channelKey, timeline } from '../store/messages.ts'
@@ -26,8 +26,6 @@ import { MessageList } from './MessageList.tsx'
 import { NavToggle } from './NavToggle.tsx'
 import { ThreadPanel } from './ThreadPanel.tsx'
 import { Typing } from './Typing.tsx'
-
-export const LAST_CHANNEL_KEY = 'slax.lastChannel'
 
 type Props = {
   channel: Channel

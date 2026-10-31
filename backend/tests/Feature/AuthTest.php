@@ -6,7 +6,10 @@ use App\Models\User;
 use App\Services\Identity\GoogleProfile;
 use App\Services\Identity\IdentityProviderException;
 use App\Services\Turnstile;
+use App\Services\UserSessions;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\FakeIdentityProvider;
 use Tests\TestCase;
@@ -289,4 +292,96 @@ test('logout ends the session', function () {
     spa()->actingAs($user)->postJson('/api/v1/auth/logout')->assertNoContent();
 
     test()->assertGuest('web');
+});
+
+test('a request still in flight during sign-out cannot bring the session back', function () {
+    // phpunit.xml points Redis at database 15; never flush anything else.
+    expect((int) config('database.redis.default.database'))->toBe(15);
+    Redis::connection()->flushdb();
+    $user = User::factory()->create();
+    $store = app('session')->driver();
+    $id = Str::random(40);
+    // The signed-in session, as the session store holds it.
+    $signedIn = function () use ($store, $id, $user) {
+        $store->setId($id);
+        $store->start();
+        $store->put(Auth::guard('web')->getName(), $user->id);
+        $store->save();
+    };
+    $call = function (string $method, string $uri) use ($id) {
+        app('auth')->forgetGuards();
+
+        // withCredentials: JSON calls send cookies only when asked to.
+        return spa()->withCredentials()->withCookie(config('session.cookie'), $id)->json($method, $uri);
+    };
+    $signedIn();
+    $call('GET', '/api/v1/me')->assertOk();
+
+    $call('POST', '/api/v1/auth/logout')->assertNoContent();
+    $call('GET', '/api/v1/me')->assertUnauthorized();
+
+    // A presence poll that read the session before the logout writes it back after (Laravel saves
+    // the session at the end of every request): the ended session stays ended.
+    $signedIn();
+    $call('GET', '/api/v1/me')->assertUnauthorized();
+    $call('POST', '/api/v1/presence/heartbeat')->assertUnauthorized();
+});
+
+/*
+ * Session lifetime: 14 days, rolling (SESSION_LIFETIME, the chart's session.lifetimeMinutes),
+ * so a tapped notification after a quiet week does not land on the sign-in screen. Sign-out and
+ * a ban end a session at once, whatever the lifetime.
+ */
+test('a session lasts 14 days by default, and every answer starts the count again (rolling)', function () {
+    expect(config('session.lifetime'))->toBe(20160)
+        ->and((bool) config('session.expire_on_close'))->toBeFalse();
+    $user = User::factory()->create();
+
+    $this->travelTo(now()->startOfSecond());
+    $first = spa()->actingAs($user)->getJson('/api/v1/me')->assertOk()->getCookie(config('session.cookie'), false);
+    expect($first->getExpiresTime())->toBe(now()->addMinutes(20160)->getTimestamp());
+
+    $this->travel(3)->days();
+    $later = spa()->actingAs($user)->getJson('/api/v1/me')->assertOk()->getCookie(config('session.cookie'), false);
+    expect($later->getExpiresTime())->toBe(now()->addMinutes(20160)->getTimestamp());
+});
+
+test('an ended session is remembered exactly as long as a session can live (the configured lifetime)', function () {
+    expect((int) config('database.redis.default.database'))->toBe(15);
+    Redis::connection()->flushdb();
+    $sessions = app(UserSessions::class);
+
+    foreach ([20160 => 'fourteen-days', 30 => 'half-an-hour'] as $minutes => $id) {
+        config(['session.lifetime' => $minutes]);
+        $sessions->end($id);
+        expect(Redis::connection()->ttl('session-ended:'.hash('sha256', $id)))->toBe($minutes * 60)
+            ->and($sessions->ended($id))->toBeTrue();
+    }
+
+    // Through the logout itself, with the default lifetime.
+    config(['session.lifetime' => 20160]);
+    $user = User::factory()->create();
+    spa()->actingAs($user)->postJson('/api/v1/auth/logout')->assertNoContent();
+    $keys = Redis::connection()->keys('*session-ended:*');
+    expect($keys)->toHaveCount(3);
+    $ttls = collect($keys)->map(fn (string $key) => Redis::connection()->ttl(Str::after($key, config('database.redis.options.prefix'))));
+    expect($ttls->filter(fn (int $ttl) => $ttl === 20160 * 60)->count())->toBe(2);
+});
+
+test('a ban ends every session of the account the way a sign-out does: a late write cannot bring one back', function () {
+    expect((int) config('database.redis.default.database'))->toBe(15);
+    Redis::connection()->flushdb();
+    fakeTerminations();
+    $user = User::factory()->create();
+    $sessions = app(UserSessions::class);
+    $handler = app('session')->driver()->getHandler();
+    foreach (['phone-session', 'laptop-session'] as $id) {
+        $handler->write($id, serialize(['login_web_x' => $user->id]));
+        $sessions->remember($user, $id);
+    }
+
+    expect($sessions->destroyAll($user))->toBe(2)
+        ->and($sessions->ended('phone-session'))->toBeTrue()
+        ->and($sessions->ended('laptop-session'))->toBeTrue()
+        ->and(Redis::connection()->ttl('session-ended:'.hash('sha256', 'phone-session')))->toBe(20160 * 60);
 });

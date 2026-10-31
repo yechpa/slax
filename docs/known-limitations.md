@@ -119,6 +119,198 @@ receives the channel's events until it disconnects.
   guessed from the broadcast.
 
 
+## Installable app (PWA)
+
+**Where:** `frontend/src/pwa/` (service worker, registration, update banner, install help),
+`frontend/plugins/service-worker.ts`, `frontend/public/manifest.webmanifest`, `docker/web/slax.conf.template`,
+`e2e/tests/pwa.spec.ts`.
+
+- **Offline is the shell only.** The service worker precaches the page, the bundle, the fonts and the favicon (12
+  files, about 420 KB, under 200 KB over the wire), so Slax opens offline and says "You're offline", then boots by
+  itself when the network is back. Nothing can be read or sent offline: messages, channels and files are never
+  cached (the API, sign-in, broadcasting auth, Reverb and every other origin, presigned S3 URLs included, are not
+  touched by the worker at all). Offline reading would mean caching private data on the device, which this version
+  refuses.
+- **Verified in emulation only.** Playwright runs desktop Chromium: registration, the offline shell (with the worker
+  itself offline), the update banner after a simulated deploy, the notices and toasts never covering each other or
+  the composer (1280x800 and 375x667, English and Hebrew), and sign-out's cleanup, (the CSP is injected by the test as a copy of the production one, `PRODUCTION_CSP` in `e2e/tests/pwa.spec.ts`, and the other PWA e2e tests run without a CSP; `make web-check` is what pins `worker-src 'self'` in nginx itself). The iOS
+  Add to Home Screen help and Chromium's Install button are covered by unit tests (user agents and a fake
+  `beforeinstallprompt`), not by a browser: headless Chromium does not offer installation, and the service worker is
+  tested in Chromium only (the WebKit phone project blocks it, see "Phones" below). **To try on real devices:** install from
+  Chrome on Android (account menu → Install Slax) and from Safari on an iPhone (the three steps), open from the icon,
+  check the status bar colour in both themes, go to airplane mode and reopen (offline notice, then automatic
+  recovery), deploy and check the banner appears when the app comes back to the foreground.
+- **Safe areas** (`viewport-fit=cover`): the notch, rounded corners and home indicator are padded by the styles; see
+  "Phones" below for what was checked and how.
+- **Where install is offered.** Chromium (Android, Windows, macOS, Linux) shows the Install button once the browser
+  fires `beforeinstallprompt`; iPhone and iPad (Safari and the other iOS browsers) get the steps. Firefox desktop
+  cannot install web apps, and Safari on macOS ("Add to Dock") is not detected: the menu says nothing there.
+- **The update banner cannot be dismissed**, by design: an old app must not run unnoticed against a newer API. It
+  shares one band above the screen with the connection notice (toasts hang just under it); the screen shrinks to make
+  room, so neither covers the other, the composer, its Send or the header. Reloading loses an unsent draft (drafts
+  live in memory). Until the person reloads, the old version keeps working (old worker, old cache); any reload, by
+  the banner or by hand, gets the newest page (navigations are network first). The browser checks for a new `sw.js`
+  on navigations; the app also asks when it returns to the foreground and every hour.
+- **The band layout relies on CSS `:has()`.** Firefox before 121 and Safari before 15.4 do not support it: there the
+  band stays in the page's flow but the screen keeps its full height, so the page scrolls and the composer is pushed
+  down by the band's height while a notice shows.
+- **Sign-out empties Cache Storage, not every trace.** All of the origin's caches are deleted at any session end
+  (sign-out, expiry, ban), then the public shell is fetched again; API responses carry `Cache-Control: no-store`
+  (nginx), so the HTTP cache keeps none either. The last open channel is forgotten at those and at a start-up that
+  finds no session; local storage keeps only the language and theme chosen on the device (not private) and, with
+  notifications on, the id of the account that turned them on (see "Push notifications"); the browser's own
+  history stays the browser's.
+- **A request in flight during sign-out cannot bring the session back.** Laravel saves the session at the end of
+  every request, so a presence poll that left the page during `POST /auth/logout` wrote the old, signed-in session
+  back after the logout destroyed it (seen in e2e runs). The logout now marks the session id as ended in Redis for
+  the session's lifetime, and every authenticated request (`not-banned` middleware) refuses an ended session with a
+  401. Other tabs' requests are covered the same way; a ban marks every session of the account the same way. On the
+  page itself, the sign-out first pauses presence and holds every other request (those already out are waited for,
+  3 s at most, then cut), so none even reaches the server after the logout. File uploads (XMLHttpRequest, for their
+  progress) are not held: one still running is stopped when the screen closes, and the server-side mark covers it.
+- **Signing out needs the server.** Offline, the logout cannot reach it: the person stays signed in, the app says
+  "Could not sign out. Please try again." and works on. Clearing only this device would be false comfort: the
+  session cookie (HttpOnly) is the server's to end, and the next start online would sign the previous person in
+  again.
+- **Sessions last 14 days without use, renewed by every request** (`session.lifetimeMinutes`, was 2 hours), so a
+  notification tapped after a quiet week opens the conversation, not Google sign-in. The cost: a lost or shared
+  device that nobody signs out of stays signed in that long after its last use (indefinitely while used); sign-out
+  there, or a ban by an administrator, ends it at once. Only a signed-in session gets the 14 days: a session
+  nobody signed in to (a visitor, a crawler, the CSRF cookie, a sign-in on its way) is kept 2 hours at most
+  (`SESSION_DRIVER=redis-tiered`), and Redis evicts sessions and cache before it refuses writes (`volatile-lru`,
+  never the queue; runbook 4.8). A flood of new visitors can therefore sign some people out, not stop the app.
+  **No rate limit per address on session creation** (`GET /sanctum/csrf-cookie`, the app's first call): nginx's
+  a `limit_req_zone $binary_remote_addr` on `/sanctum/csrf-cookie` and `/api/v1/auth` would work today (nginx already takes the visitor's address from the trusted `X-Forwarded-For` of Caddy, see `docker/web/entrypoint.sh`); it is simply not added yet. There is no "sign out everywhere" for oneself yet; an administrator's
+  ban, then lifting it, does it (and also removes the account's notification devices).
+- **After a deploy, a sign-out can leave no offline shell for a while.** The refill after a sign-out is all or
+  nothing: the old worker still in control refills its own list, whose hashed files the deploy removed, so it gets
+  404s and stores nothing (never a mixed cache). A new version already waiting refills its own cache at once; one not
+  yet found fills it when it installs. Until that version takes over (the reload the banner offers, or every tab
+  closed), the app works online only.
+- **The icons are rendered from `favicon.svg`** (the `> _` prompt in the console's green on its background). Changing
+  the favicon means running `make icons` (a test fails while the icons are out of date); how the mark looks once a
+  launcher masks it is to be checked on the real phones.
+- **The manifest is in English** (`lang: en`, name "Slax", the same in every language); the app itself follows the
+  person's language once opened.
+
+## Phones (iPhone and Android)
+
+**Where:** `frontend/src/styles/` (`tokens.css` safe areas, `app.css`, `chat.css`, `utilities.css`),
+`frontend/src/lib/viewport.ts` (on-screen keyboard), `frontend/src/lib/longPress.ts`, `frontend/index.html`,
+`e2e/tests/mobile.spec.ts`, `e2e/support/mobile.ts`.
+
+- **Emulation, not phones.** `make e2e` runs `mobile.spec.ts` in two more Playwright projects: `iphone` (WebKit with
+  an iPhone 14's size, touch, user agent and scale) and `pixel` (Chromium as a Pixel 7). Neither is Safari on iOS nor
+  Chrome on Android: same engines, none of their browser chrome, keyboards or gestures. Checked there: the viewport
+  meta; the app exactly as tall as the window and the page never scrolling; fields of 16 px or more (iOS zooms on a
+  smaller one); 44 x 44 px for the drawer toggle, channel details, attach, send, a message's "more" button, the menu
+  items, the thread's buttons, the channels and the account menu; no sideways scroll at 375 and 360 px in English,
+  Hebrew and French, both themes, with long words and a long link, drawer, menu and thread open; the drawer from the
+  inline start (the right in Hebrew) and closed by a tap beside it; a message's menu by a tap on "more" or a long
+  press; dialogs inside the screen, scrolling inside with their buttons in view; and the journey by touch (sign in,
+  post, thread reply, reaction, conversation) in English on both and in Hebrew on the iPhone. The phones run that
+  spec only, not the whole desktop suite (time).
+- **The keyboard is emulated.** No headless browser has an on-screen keyboard: the test replaces
+  `window.visualViewport` with one that shrinks by a keyboard's height (and pans, as Safari does) and checks that the
+  composer, Send, the header, a thread's composer and a dialog stay inside what is left. That proves the app follows
+  the visual viewport, not that iOS reports it the way the emulation does. Chrome on Android is asked to resize the
+  page instead (`interactive-widget=resizes-content`, Chrome 108+), which the emulation does not exercise either.
+- **The notch is emulated.** `env(safe-area-inset-*)` is 0 in every emulator: the tests set the app's own variables
+  (`--safe-top`, `--safe-bottom`, `--safe-inline-start`, `--safe-inline-end`) to a notched phone's values and check
+  the header, composer, drawer, thread and notice band keep clear. Whether iOS gives the values expected (portrait in
+  Safari: none at the top, the home indicator at the bottom; landscape: the sides) is for a real device.
+- **No service worker in the WebKit project.** Once a worker controls the page, Playwright's WebKit stops routing
+  the page's requests (the real Turnstile script was fetched), so the `iphone` project blocks workers; the worker is
+  tested in Chromium (`pwa.spec.ts`).
+- **A message's text cannot be selected on a touch screen.** A long press opens the message's menu instead, which
+  has "Copy text" (the whole text). Links and images keep the browser's own long press; part of a message cannot be
+  copied on a phone. *Intended fix if it matters:* a "Select text" item that makes the message selectable once.
+- **Enter sends, on a phone too.** The keyboard's Enter key says "Send" (`enterkeyhint`); a phone keyboard has no
+  Shift+Enter, so a message typed on a phone is one paragraph (pasted line breaks are kept). *Intended fix if the
+  family wants it:* Enter as a new line on touch screens, with Send as the only way to send.
+- **The page itself never overscrolls vertically** (`overscroll-behavior-y: none` on the page, `contain` on the
+  lists, the sidebar and the dialogs): no pull-to-refresh, so a stuck page is reloaded from the browser's menu
+  (Safari's reload button, Chrome's ⟳), or by closing and reopening the installed app.
+- **Popovers and the keyboard.** The emoji picker and the message menu stay open when only the window's height
+  changes (Chrome on Android resizing the page as its keyboard opens or closes): they follow their anchor, and close
+  on a change of width (rotation) or once the anchor is out of sight (unit-tested). On iOS, where the keyboard does
+  not resize the window, they are placed in the window, not in what the keyboard leaves.
+- **On a real iPhone (Safari, then installed from the Home Screen), please check:**
+  1. Tap the message field: the page does not zoom in; the keyboard opens and the field and Send sit right on top
+     of it, the channel header still visible; type, tap Send, the keyboard can stay open; close it: the app fills the
+     screen again, no gap at the bottom.
+  2. Open a thread and reply from its field: same as above. Open "New channel" and tap its Name: the dialog and its
+     Create button stay above the keyboard.
+  3. Long press a message: its menu opens (no text selection, no magnifier); Copy text, then paste it elsewhere.
+     Long press a link in a message: Safari's own link menu, not Slax's.
+  4. Rotate to landscape: nothing under the notch or the rounded corners; the composer clear of the home indicator
+     in both orientations; the channel list (drawer in portrait, sidebar in landscape) reachable.
+  5. In Hebrew: the drawer comes from the right, the menu and thread read right to left.
+  6. Scroll a long channel to the top and keep pulling: the list stops, the page does not bounce or reload.
+  7. Both themes: the status bar and the tapped-message tint look right.
+- **On a real Android phone (Chrome, then installed):** items 1 to 7 as above (on item 1 Chrome shrinks the page with
+  the keyboard; the composer must end right above it), a long press on a message must open Slax's menu, not
+  Chrome's text selection, and, with the keyboard up (the message field focused), open a message's menu and the
+  reaction picker: neither may close by itself as the keyboard goes away.
+
+## Push notifications (Web Push)
+
+**Where:** `backend/app/Services/Push/`, `backend/app/Jobs/SendPushNotification.php`,
+`backend/app/Http/Controllers/PushSubscriptionController.php`, `backend/lang/*/push.php`, `frontend/src/pwa/push.ts`,
+`PushSettings.tsx`, `sw-push.ts`, `e2e/tests/push.spec.ts`; operations in `docs/runbook.md` 4.11.
+
+- **Real delivery was NOT tested.** No automated run reaches Apple, Google (FCM), Mozilla or Microsoft: Pest uses a
+  fake sender, the real sender (encryption, VAPID signature, how each answer is treated) is tested against a mocked
+  HTTP client, and the e2e stack has no VAPID keys (push off; a second e2e test shows the switch with a stubbed key
+  and a stubbed browser push service). Whether a notification actually appears, how it looks, and what a tap does on
+  each platform must be tried on the family's real devices: turn notifications on (account menu), press "Send a
+  test", then close the app and have someone send a DM, an @mention and a reply in a thread you wrote in; tap each
+  notification (it must open that conversation, or that thread); sign out and check nothing arrives any more.
+- **iPhone and iPad: iOS 16.4 or later, installed app only.** Safari has no Web Push in a tab: outside the installed
+  app the menu explains to add Slax to the Home Screen first. Older iOS shows nothing. Safari on macOS 13+ supports
+  push in a tab (the switch shows); Firefox and Chromium browsers everywhere else.
+- **Only someone shown "online" is not notified.** The server cannot know whether a tab is visible, so it uses the
+  presence state: `online` (a heartbeat in the last 60 s and an interaction with Slax in the last 5 minutes, on any
+  device) gets no push; `away` (a tab still open, no interaction for 5 minutes, e.g. a desktop tab in the background)
+  and `offline` are notified. So for up to 5 minutes after last touching Slax on one device, the person's other
+  devices stay silent too; after closing the app (no heartbeat), pushes resume within a minute at most.
+- **What notifies:** a new message in a DM or group conversation; an @mention, in any channel (the first name,
+  "@dana", or the whole name without spaces, "@DanaCohen", case ignored: two people sharing a first name are both
+  notified); a reply in a thread the person started or replied in. One notification per person per message. Not:
+  ordinary room messages, reactions, edits, being added to a channel. Never the author, a banned account, a
+  non-member (membership is checked again when the job runs), or anyone online right now. A message deleted before
+  its job runs is not pushed.
+- **What a notification says:** the sender and the channel ("Dana in #family", "Dana (direct message)", also for a
+  group conversation) and a generic line ("New message", "You were mentioned", "New reply") in the language of the
+  device (the app's language when it subscribed or last opened). Never the text, an e-mail address or a file name: a
+  sender whose name is an e-mail address (a Google account without a name) shows as "Someone".
+  The payload is end-to-end encrypted to the browser (RFC 8291); the push service sees the endpoint, the time and the
+  size only.
+- **Key rotation invalidates every subscription.** A device subscribed with the old public key is deleted at its next
+  push instead of being retried, and the app shows the switch off at its next opening: everyone turns notifications
+  on again.
+- **Dead and failing subscriptions:** a 404 or 410 deletes the device; no answer, 429 or 5xx is tried three more times
+  (after 30 s, 2 min, 10 min), then dropped with a warning in the queue's log; any other refusal is dropped at once.
+  None of this alerts the administrators, and none of it can fail sending a message. There is no periodic cleanup:
+  a device that silently stopped working stays until something is pushed to it; an account keeps ten devices at
+  most, an eleventh replaces the one that went longest without a push.
+- **Sign-out removes this device** (DELETE, then the browser's unsubscribe once the server answered, three seconds
+  at most; offline neither happens: the sign-out fails too and notifications keep working). A ban
+  deletes all of the account's devices on the server and unsubscribes the browser. A session that merely **expired**
+  (14 days without any request, typically a phone left unused) keeps its notifications: the person
+  did not sign out, and losing them at every expiry would make them useless. The cost, on a shared device: until
+  someone signs in there again, the previous person's notifications (sender and channel names) keep arriving. The
+  browser remembers which account turned them on (`slax.pushOwner`, an account id, in local storage): when another
+  person signs in, that subscription is dropped, never taken over.
+- **The browser renewing a subscription by itself** (`pushsubscriptionchange`) is not handled in the service worker,
+  which cannot authenticate (no CSRF token there): the app sends the current subscription again each time it opens.
+- **One queue worker, two queues.** Push jobs go on the `push` queue; the worker (`--queue=default,push`) takes every
+  waiting broadcast before the next push, so a burst of notifications never queues ahead of realtime events. A
+  broadcast that arrives while a push is being sent still waits for it (5 s at most, the push timeout).
+- **Endpoints are restricted to the push services** (FCM, Mozilla, Apple, WNS; https, port 443): the queue worker
+  POSTs to them, so a user cannot aim it at an internal address. A new browser vendor's push service would need its
+  host added to `config/slax.php`.
+
 ## Administration, alerts and the demo reset
 
 **Where:** `backend/app/Services/Moderation.php`, `backend/app/Services/UserSessions.php`,
@@ -154,7 +346,16 @@ receives the channel's events until it disconnects.
 - **The nightly demo reset is not pushed either.** Clients open at 03:00 keep showing the deleted messages until
   they reload or reopen the channel.
 - **Conversations with a visitor are demo content.** The reset deletes every conversation that includes a demo
-  account, an administrator's messages in it included.
+  account, an administrator's or a member's messages in it included (Ruling P, pinned by `DemoResetTest`); so are a
+  channel a demo account created and a thread a demo account started, with the members' messages and replies in
+  them. The demo's sample messages get exactly their sample reactions back each night, anyone's others go.
+- **A promotion during the 03:00 reset can still lose content.** The reset lists the demo accounts first, then
+  deletes files from S3, then the rows: an account made a member while it runs (a few seconds, longer with many
+  files) is still treated as demo in that run. Promote people during the day, ideally before they write anything.
+- **Family accounts are promoted by hand.** A relative signs up as a demo account like any visitor and becomes a
+  `member` when an administrator clicks "Make member" (Administration → Accounts). Until then, what they write is
+  demo content: it goes at the next nightly reset on the public showcase. No e-mail allowlist exists (addresses
+  stay out of configuration). The accounts list shows the 200 most recently seen accounts, without search.
 - **Alerts lost on a fatal error.** During a request, an alert is sent after the response (deferred); a PHP fatal
   error (memory, timeout) before that point loses it, the local log keeps the error.
 - **Locked channels and administrators.** Administrators still post in a locked channel they are a member of, so

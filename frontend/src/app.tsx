@@ -7,10 +7,12 @@ import type { TurnstileClient } from './auth/turnstile.ts'
 import { Brand } from './components/ui/Brand.tsx'
 import { Button } from './components/ui/Button.tsx'
 import { SignedOut } from './components/SignedOut.tsx'
+import { ConnectionBanner, Toasts } from './components/Toasts.tsx'
 import { Workspace, type ConnectRealtime } from './components/Workspace.tsx'
 import { t } from './i18n/index.ts'
 import { useLocale } from './i18n/useLocale.ts'
 import { publicConfig } from './lib/publicConfig.ts'
+import { UpdateBanner } from './pwa/UpdateBanner.tsx'
 import { connectRealtime } from './realtime/echo.ts'
 import { interceptLinks } from './router.ts'
 import { boot } from './session.ts'
@@ -26,11 +28,40 @@ type Props = {
   turnstile?: TurnstileClient
 }
 
-export function App({ connect = defaultConnect, turnstile }: Props) {
+export function App(props: Props) {
+  const signedIn = session.value.status === 'signed-in'
+  return (
+    <>
+      {/*
+        The notices, in one band above the screen (app.css): the update (every screen: an old
+        app must not keep running unnoticed after a deploy, register.ts), the connection and,
+        anchored just under them, the toasts. In the page's flow, so they never cover each
+        other, the header or the composer.
+      */}
+      <div class="top-bands">
+        <UpdateBanner />
+        {signedIn && <ConnectionBanner />}
+        {signedIn && <Toasts />}
+      </div>
+      <Screen {...props} />
+    </>
+  )
+}
+
+function Screen({ connect = defaultConnect, turnstile }: Props) {
   // Every string and format follows the language; every colour the theme.
   useLocale()
   useTheme()
   const current = session.value
+
+  useEffect(() => {
+    // Offline at start-up (the shell came from the service worker): try again once the network is back.
+    const onOnline = () => {
+      if (session.peek().status === 'unreachable') void boot()
+    }
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
+  }, [])
 
   useEffect(() => {
     // In-app links (sidebar) navigate without reloading the page.
@@ -53,7 +84,7 @@ export function App({ connect = defaultConnect, turnstile }: Props) {
         <div class="splash">
           <Brand />
           <p class="splash__text" role="alert">
-            {t('app.unreachable')}
+            {globalThis.navigator?.onLine === false ? t('app.offline') : t('app.unreachable')}
           </p>
           <Button variant="secondary" onClick={() => void boot()}>
             {t('action.retry')}

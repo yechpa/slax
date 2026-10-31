@@ -60,6 +60,29 @@
     --duration: 200ms;
     --ease: cubic-bezier(0.2, 0, 0, 1);
     --blink-period: 1.06s;
+
+    /*
+     * Safe areas (notch, rounded corners, home indicator), with viewport-fit=cover (index.html).
+     * env() names them physically: the inline pair is swapped for right to left below. The app
+     * pads with these only (tests set them to emulate a notched phone).
+     */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-inline-start: env(safe-area-inset-left, 0px);
+    --safe-inline-end: env(safe-area-inset-right, 0px);
+    /* The header takes the top inset unless a notice band above it already does (app.css);
+       the footers take the bottom one unless the keyboard covers the home indicator. */
+    --header-safe-top: var(--safe-top);
+    --footer-safe-bottom: var(--safe-bottom);
+  }
+
+  :root[dir='rtl'] {
+    --safe-inline-start: env(safe-area-inset-right, 0px);
+    --safe-inline-end: env(safe-area-inset-left, 0px);
+  }
+
+  :root[data-keyboard] {
+    --footer-safe-bottom: 0px;
   }
 
   :root:not([data-theme]) {

@@ -118,6 +118,76 @@ describe('styles', () => {
     for (const css of good) expect(fourValueShorthands(css), css).toEqual([])
   })
 
+  it('every dynamic viewport height has a 100vh fallback just before it (older browsers drop the dvh line)', () => {
+    const missing: string[] = []
+    for (const file of files) {
+      const css = stripComments(readFileSync(file, 'utf8'))
+      for (const [, body] of css.matchAll(/\{([^{}]*)\}/g)) {
+        const declarations = body.split(';').map((d) => d.trim()).filter(Boolean)
+        declarations.forEach((declaration, i) => {
+          if (!/\bdvh\b|\ddvh/.test(declaration)) return
+          const [property] = declaration.split(':')
+          const fallback = declaration.replace(/(\d)dvh/g, '$1vh')
+          if (declarations[i - 1] !== fallback) missing.push(`${relative(SRC, file)}: ${declaration} (expected "${fallback}" before it, on ${property})`)
+        })
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  it('sets the page up for touch screens: text size kept, a themed tap highlight, no page overscroll', () => {
+    const css = files.map((file) => stripComments(readFileSync(file, 'utf8'))).join('\n')
+    const html = [...css.matchAll(/(?:^|[{}])\s*html\s*\{([^}]*)\}/g)].map((m) => m[1]).join(';')
+    // 100%, not none: none also disables the reader's own text zoom in some browsers.
+    expect(html).toMatch(/-webkit-text-size-adjust:\s*100%/)
+    expect(html).toMatch(/(?<!-)text-size-adjust:\s*100%/)
+    expect(css).not.toMatch(/text-size-adjust:\s*none/)
+    expect(html).toMatch(/-webkit-tap-highlight-color:\s*color-mix\([^;]*var\(--color-accent\)/)
+    // Vertical only: horizontal overscroll is the browser's back/forward swipe.
+    expect(html).toMatch(/overscroll-behavior-y:\s*none/)
+    for (const scroller of ['.message-list', '.thread__log', '.sidebar__scroll', '.dialog__body']) {
+      const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => selector.split(',').some((s) => s.trim() === scroller))
+      expect(rules.some(([, , body]) => /overscroll-behavior-y:\s*contain/.test(body)), scroller).toBe(true)
+    }
+  })
+
+  it('gives the account menu\'s controls a 44 px target on touch screens (Send a test, Sign out, language, theme)', () => {
+    const css = files.map((file) => stripComments(readFileSync(file, 'utf8'))).join('\n')
+    const coarse = [...css.matchAll(/@media\s*\(pointer:\s*coarse\)\s*\{((?:[^{}]*\{[^}]*\})*)\s*\}/g)].map((m) => m[1]).join('\n')
+    const rules = [...coarse.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    for (const control of ['.user-menu__panel .btn', '.user-menu__panel .segmented__option']) {
+      const covering = rules.filter(([, selector]) => selector.split(',').some((s) => s.trim() === control))
+      expect(covering.some(([, , body]) => /min-block-size:\s*2\.75rem/.test(body)), control).toBe(true)
+    }
+  })
+
+  it('gives the administration\'s tabs and buttons a 44 px target on touch screens, whatever the width', () => {
+    const css = files.map((file) => stripComments(readFileSync(file, 'utf8'))).join('\n')
+    const coarse = [...css.matchAll(/@media\s*\(pointer:\s*coarse\)\s*\{((?:[^{}]*\{[^}]*\})*)\s*\}/g)].map((m) => m[1]).join('\n')
+    const rules = [...coarse.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    for (const control of ['.admin__tab', '.admin .btn']) {
+      const covering = rules.filter(([, selector]) => selector.split(',').some((s) => s.trim() === control))
+      expect(covering.some(([, , body]) => /min-block-size:\s*2\.75rem/.test(body)), control).toBe(true)
+    }
+  })
+
+  it('reads the safe areas from env() once, the inline pair swapped for right to left', () => {
+    const tokens = stripComments(readFileSync(join(STYLES, 'tokens.css'), 'utf8'))
+    const block = (selector: string) => new RegExp(String.raw`${selector.replace(/[[\]]/g, '\\$&')}\s*\{([^}]*)\}`).exec(tokens)?.[1] ?? ''
+    const root = block(':root')
+    expect(root).toMatch(/--safe-top:\s*env\(safe-area-inset-top, 0px\)/)
+    expect(root).toMatch(/--safe-bottom:\s*env\(safe-area-inset-bottom, 0px\)/)
+    expect(root).toMatch(/--safe-inline-start:\s*env\(safe-area-inset-left, 0px\)/)
+    expect(root).toMatch(/--safe-inline-end:\s*env\(safe-area-inset-right, 0px\)/)
+    const rtl = block(":root[dir='rtl']")
+    expect(rtl).toMatch(/--safe-inline-start:\s*env\(safe-area-inset-right, 0px\)/)
+    expect(rtl).toMatch(/--safe-inline-end:\s*env\(safe-area-inset-left, 0px\)/)
+    // Everything else pads with the variables (the e2e suite emulates a notch through them).
+    for (const file of files.filter((f) => !f.endsWith('tokens.css'))) {
+      expect(stripComments(readFileSync(file, 'utf8')), relative(SRC, file)).not.toMatch(/safe-area-inset/)
+    }
+  })
+
   it('declares the cascade layer order first', () => {
     const index = stripComments(readFileSync(join(STYLES, 'index.css'), 'utf8')).trim()
     expect(index.startsWith('@layer reset, tokens, base, components, utilities;')).toBe(true)

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { THEMES, getTheme, initTheme, onThemeChange, preferredTheme, setTheme } from './theme.ts'
+import { THEMES, THEME_COLORS, getTheme, initTheme, onThemeChange, preferredTheme, setTheme } from './theme.ts'
 import { withBrokenStorage } from './test/storage.ts'
 
 const html = () => document.documentElement
@@ -117,5 +117,35 @@ describe('default theme', () => {
     fakeColorScheme('light')
     localStorage.setItem('slax.theme', 'solarized')
     expect(initTheme()).toBe('listing')
+  })
+})
+
+describe('theme-color', () => {
+  function metas() {
+    document.head.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.remove())
+    for (const scheme of ['dark', 'light']) {
+      const meta = document.createElement('meta')
+      meta.name = 'theme-color'
+      meta.media = `(prefers-color-scheme: ${scheme})`
+      document.head.append(meta)
+    }
+    return () => [...document.head.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map((meta) => meta.content)
+  }
+
+  it("follows the active theme, whatever the system's colour scheme (the browser chrome matches the page)", () => {
+    const contents = metas()
+    setTheme('listing')
+    expect(contents()).toEqual([THEME_COLORS.listing, THEME_COLORS.listing])
+    setTheme('console')
+    expect(contents()).toEqual([THEME_COLORS.console, THEME_COLORS.console])
+  })
+
+  it('follows the system while no theme was chosen', () => {
+    const contents = metas()
+    const scheme = fakeColorScheme('light')
+    initTheme()
+    expect(contents()).toEqual([THEME_COLORS.listing, THEME_COLORS.listing])
+    scheme.change('dark')
+    expect(contents()).toEqual([THEME_COLORS.console, THEME_COLORS.console])
   })
 })

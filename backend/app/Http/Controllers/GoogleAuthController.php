@@ -109,6 +109,7 @@ class GoogleAuthController extends Controller
     public function logout(Request $request): Response
     {
         $this->sessions->forget($request->user(), $request->session()->getId());
+        $this->sessions->end($request->session()->getId());
         Auth::guard('web')->logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();

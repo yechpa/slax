@@ -39,7 +39,7 @@ services:
     volumes: !override
       - ./backend:/var/www/html
       - /dev/null:/var/www/html/.env:ro
-    command: php artisan queue:work --tries=3 --sleep=0
+    command: php artisan queue:work --tries=3 --sleep=0 --queue=default,push
 
   # Not part of the e2e stack.
   scheduler:

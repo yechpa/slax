@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetClientState } from './api/client.ts'
 import { App } from './app.tsx'
 import type { TurnstileClient } from './auth/turnstile.ts'
-import { setLocale } from './i18n/index.ts'
+import { setLocale, t } from './i18n/index.ts'
 import { navigate, route, parseRoute } from './router.ts'
 import { boot, endSession, installClientEvents } from './session.ts'
 import { session } from './store/session.ts'
@@ -46,6 +46,7 @@ afterEach(() => {
   endSession(null)
   session.value = { status: 'loading' }
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 const signedInRoutes = (): Record<string, FakeHandler> => ({
@@ -63,6 +64,39 @@ describe('App', () => {
     await boot()
     await settle()
     expect(host.querySelector('.signin__google')?.textContent).toBe('Continue with Google')
+  })
+
+  it('offline at start-up (the shell came from the service worker): says so, and comes back by itself with the network', async () => {
+    let online = false
+    vi.spyOn(navigator, 'onLine', 'get').mockImplementation(() => online)
+    const routes = signedInRoutes()
+    const me = routes['GET /api/v1/me']
+    routes['GET /api/v1/me'] = (request) => (online ? me(request) : 'network-error')
+    mount(routes)
+    await boot()
+    await settle()
+    await vi.waitFor(() => expect(host.querySelector('.splash [role="alert"]')?.textContent).toBe(t('app.offline')))
+    expect(host.querySelector('.message-list')).toBeNull()
+
+    online = true
+    // The listener is installed by an effect (after paint): repeat the event until it is heard.
+    // Only an `unreachable` page boots on it, so a repeat is harmless.
+    await vi.waitFor(
+      () => {
+        window.dispatchEvent(new Event('online'))
+        expect(host.querySelector('[role="log"]')?.textContent).toContain('hello team')
+      },
+      { timeout: 5000, interval: 50 },
+    )
+    expect(host.querySelector('.splash')).toBeNull()
+  })
+
+  it('a server that cannot be reached while the network is up is not called offline', async () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true)
+    mount({ 'GET /api/v1/me': () => 'network-error' })
+    await boot()
+    await settle()
+    expect(host.querySelector('.splash [role="alert"]')?.textContent).toBe(t('app.unreachable'))
   })
 
   it('opens the first joined channel, sends from the composer and shows the reply once', async () => {

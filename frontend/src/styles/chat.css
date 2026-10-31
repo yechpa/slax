@@ -53,6 +53,30 @@
       margin-inline-end: calc(var(--space-2) * -1);
       color: var(--color-muted);
     }
+
+    /*
+     * A long press on a message opens its menu (MessageItem), which has "Copy text": the
+     * browser's own selection handles and callout would come up under it, so the message's
+     * text is not selectable here. Links and images keep their own long press (open, share,
+     * save); the inline editor stays an editor.
+     */
+    .message--menu .message__main,
+    .message--menu .message__main * {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    .message--menu .message__main :is(a[href], img) {
+      -webkit-touch-callout: default;
+    }
+
+    .message--menu .message-editor,
+    .message--menu .message-editor * {
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-touch-callout: default;
+    }
   }
 
   /* ── Popovers: menus and the emoji picker ────────────── */
@@ -403,7 +427,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    min-block-size: 3rem;
+    min-block-size: calc(3rem + var(--header-safe-top));
+    padding-block-start: var(--header-safe-top);
     padding-inline: var(--space-4) var(--space-2);
     background: var(--color-surface);
     border-block-end: var(--border-width) var(--rule-style) var(--color-border);
@@ -440,6 +465,7 @@
   .thread__log {
     min-block-size: 0;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
     padding-block: var(--space-2);
     background-color: var(--color-bg);
     background-image: var(--paper);
@@ -465,7 +491,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-1);
-    padding: var(--space-1) var(--space-3) var(--space-3);
+    padding: var(--space-1) var(--space-3) calc(var(--space-3) + var(--footer-safe-bottom));
     background: var(--color-bg);
   }
 
@@ -511,7 +537,8 @@
   /* ── Dialogs ─────────────────────────────────────────── */
   .dialog {
     inline-size: min(32rem, calc(100% - 2rem));
-    max-block-size: calc(100dvh - 2rem);
+    max-block-size: calc(100vh - 2rem - var(--safe-top) - var(--safe-bottom));
+    max-block-size: calc(100dvh - 2rem - var(--safe-top) - var(--safe-bottom));
     margin: auto;
     padding: 0;
     background: var(--color-surface);
@@ -529,10 +556,23 @@
     outline: none;
   }
 
+  /* A column whose body shrinks and scrolls: header and buttons stay in view however long the
+     body. Flex, not a grid with a 1fr row: WebKit does not shrink that row to a max-block-size. */
   .dialog__form {
-    display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
-    max-block-size: calc(100dvh - 2rem);
+    display: flex;
+    flex-direction: column;
+    max-block-size: calc(100vh - 2rem - var(--safe-top) - var(--safe-bottom));
+    max-block-size: calc(100dvh - 2rem - var(--safe-top) - var(--safe-bottom));
+  }
+
+  /* The on-screen keyboard is up (lib/viewport.ts): the dialog sits in what it leaves visible. */
+  :root[data-keyboard] .dialog {
+    inset-block: var(--visible-top) auto;
+    margin-block: var(--space-4) auto;
+  }
+
+  :root[data-keyboard] :is(.dialog, .dialog__form) {
+    max-block-size: calc(var(--visible-block-size) - 2rem);
   }
 
   .dialog__header {
@@ -569,13 +609,19 @@
     padding-block-start: 0;
   }
 
+  .dialog__form > :not(.dialog__body) {
+    flex: none;
+  }
+
   .dialog__body {
     display: grid;
+    flex: 1 1 auto;
     align-content: start;
     gap: var(--space-4);
     min-block-size: 0;
     padding: var(--space-4);
     overflow-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   .dialog__footer {

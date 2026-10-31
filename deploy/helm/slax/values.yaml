@@ -56,6 +56,23 @@ demo:
   # Only on the public showcase.
   resetEnabled: false
 
+session:
+  # SESSION_LIFETIME, in minutes: how long a session lasts without a request. Rolling: every
+  # request starts the count again. 14 days, so a notification tapped after a quiet week opens
+  # the conversation instead of the sign-in screen. Sign-out and a ban end a session at once
+  # whatever this says. Only a session with someone signed in is kept this long; any
+  # other session (a visitor's, a crawler's) is kept 2 hours at most (SESSION_DRIVER=redis-tiered).
+  # See docs/runbook.md 4.8 for Redis's memory.
+  lifetimeMinutes: 20160
+
+# Web Push (VAPID). The key pair lives in the Secret only (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY:
+# both optional; without them push is off and the app hides its switch). Generate it with
+# deploy/dev/create-secrets.sh (or `php artisan slax:push-keys`); see docs/runbook.md.
+push:
+  # VAPID_SUBJECT, how the push services can reach the operator: a mailto: or https: URL.
+  # Empty: the public URL (https://<publicHost>).
+  subject: ""
+
 s3:
   region: us-east-1
   bucket: slax-files
@@ -150,8 +167,13 @@ postgres:
 
 redis:
   image: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
-  # Sessions, cache and queue. noeviction: a full Redis refuses writes instead of dropping
-  # queued jobs.
+  # Sessions, cache, rate limits, presence and the queue. volatile-lru: when full, Redis evicts
+  # the least recently used keys that carry an expiry (sessions, cache, throttles, presence,
+  # tombstones: all of them do), never the queue's lists and sets (they have none), so a flood
+  # of sessions signs a few people out instead of failing every request. LRU does not tell a guest
+  # from a member: the first evicted are the sessions idle the longest, i.e. family phones unused
+  # for days, before a fresh guest session. A guest's session
+  # lives 2 hours at most (SESSION_DRIVER=redis-tiered).
   maxmemory: 128mb
   storage:
     size: 1Gi

@@ -370,6 +370,7 @@
     min-block-size: 0;
     padding: var(--space-4) var(--space-2) var(--space-4);
     overflow-y: auto;
+    overscroll-behavior-y: contain;
     background: var(--color-surface);
     border-inline-end: var(--border-width) var(--rule-style) var(--color-border);
   }
@@ -879,8 +880,8 @@
 
   .toast-region {
     position: fixed;
-    inset-block-end: var(--space-4);
-    inset-inline-end: var(--space-4);
+    inset-block-end: calc(var(--space-4) + var(--safe-bottom));
+    inset-inline-end: calc(var(--space-4) + var(--safe-inline-end));
     z-index: 100;
     display: grid;
     gap: var(--space-2);
@@ -1043,7 +1044,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    min-block-size: 3rem;
+    min-block-size: calc(3rem + var(--header-safe-top));
+    padding-block-start: var(--header-safe-top);
     padding-inline: var(--space-4);
     border-block-end: var(--border-width) var(--rule-style) var(--color-border);
     background: var(--color-surface);
@@ -1081,6 +1083,7 @@
   .message-list {
     min-block-size: 0;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
     padding-block: var(--space-2);
     background-color: var(--color-bg);
     background-image: var(--paper-holes), var(--paper-holes), var(--paper);
@@ -1109,7 +1112,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-1);
-    padding: var(--space-1) var(--space-4) var(--space-4);
+    padding: var(--space-1) var(--space-4) calc(var(--space-4) + var(--footer-safe-bottom));
   }
 
   @container shell (inline-size < 44rem) {
@@ -1117,13 +1120,15 @@
       display: none;
     }
 
+    /* From the very edge (its background under the notch), its content clear of the insets. */
     .shell--nav-open > .sidebar {
       position: absolute;
       inset-block: 0;
       inset-inline-start: 0;
       z-index: 2;
       display: flex;
-      inline-size: min(85%, var(--sidebar-size));
+      inline-size: min(85%, calc(var(--sidebar-size) + var(--safe-inline-start)));
+      padding-inline-start: calc(var(--space-2) + var(--safe-inline-start));
       box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--color-bg) 70%, transparent);
     }
 

@@ -8,6 +8,7 @@ use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\MeController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\PresenceController;
+use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Controllers\ReactionController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,12 @@ Route::prefix('v1')->group(function () {
 
         Route::post('/presence/heartbeat', [PresenceController::class, 'heartbeat'])->middleware('throttle:presence-heartbeat');
         Route::get('/presence', [PresenceController::class, 'index']);
+
+        // Web Push for this device (404 push_disabled without VAPID keys, except DELETE).
+        Route::get('/push/public-key', [PushSubscriptionController::class, 'publicKey']);
+        Route::post('/push/subscriptions', [PushSubscriptionController::class, 'store'])->middleware('throttle:push-subscriptions');
+        Route::delete('/push/subscriptions', [PushSubscriptionController::class, 'destroy'])->middleware('throttle:push-subscriptions');
+        Route::post('/push/test', [PushSubscriptionController::class, 'test'])->middleware('throttle:push-test');
 
         Route::get('/users', [UserController::class, 'index'])->middleware('throttle:user-search');
 
@@ -55,11 +62,13 @@ Route::prefix('v1')->group(function () {
         Route::prefix('admin')->middleware('can:admin')->group(function () {
             Route::get('/status', [AdminController::class, 'status']);
             Route::get('/audit', [AdminController::class, 'audit']);
+            Route::get('/users', [AdminController::class, 'users']);
             Route::get('/users/banned', [AdminController::class, 'bannedUsers']);
             Route::get('/channels', [AdminController::class, 'channels']);
 
             Route::middleware('throttle:admin-writes')->group(function () {
                 Route::post('/users/{id}/ban', [AdminController::class, 'ban'])->whereNumber('id');
+                Route::post('/users/{id}/account-type', [AdminController::class, 'accountType'])->whereNumber('id');
                 Route::delete('/messages/{id}', [AdminController::class, 'destroyMessage'])->whereNumber('id');
                 Route::delete('/files/{id}', [AdminController::class, 'destroyFile'])->whereNumber('id');
                 Route::post('/channels/{id}/lock', [AdminController::class, 'lock'])->whereNumber('id');

@@ -1,19 +1,24 @@
 /**
  * The account menu at the foot of the sidebar: who is signed in, language and theme
- * (applied at once, remembered on this device and saved to the account), administration
- * (administrators only), sign out.
+ * (applied at once, remembered on this device and saved to the account), installing the app
+ * (where the browser can, see pwa/install.ts), notifications on this device (pwa/push.ts),
+ * administration (administrators only), sign out (session.ts signOut: presence and every
+ * other request stop first, then this device's notifications go, then the logout).
  * A disclosure: the button toggles the panel above it; Escape or a click elsewhere
  * closes it and focus returns to the button.
  */
-import { useEffect, useId, useRef, useState } from 'preact/hooks'
-import { isApiError } from '../api/client.ts'
+import { useContext, useEffect, useId, useRef, useState } from 'preact/hooks'
 import { api } from '../api/endpoints.ts'
 import { t } from '../i18n/index.ts'
 import { useLocale } from '../i18n/useLocale.ts'
 import { ADMIN_PATH } from '../router.ts'
-import { endSession } from '../session.ts'
+import { signOut } from '../session.ts'
+import { InstallPrompt } from '../pwa/InstallPrompt.tsx'
+import { refreshPush } from '../pwa/push.ts'
+import { PushSettings } from '../pwa/PushSettings.tsx'
 import { me } from '../store/session.ts'
 import { navOpen, showToast } from '../store/ui.ts'
+import { ChatContext } from './chatContext.ts'
 import { Avatar } from './ui/Avatar.tsx'
 import { Button } from './ui/Button.tsx'
 import { userHue } from './ui/hue.ts'
@@ -31,6 +36,7 @@ export function UserMenu() {
   const user = me.value
   const [open, setOpen] = useState(false)
   const [leaving, setLeaving] = useState(false)
+  const chat = useContext(ChatContext)
   const panelId = useId()
   const root = useRef<HTMLDivElement>(null)
   const toggle = useRef<HTMLButtonElement>(null)
@@ -60,18 +66,13 @@ export function UserMenu() {
 
   if (!user) return null
 
-  const signOut = async () => {
+  const leave = async () => {
     setLeaving(true)
-    try {
-      await api.logout()
-    } catch (error) {
-      if (!isApiError(error, 'unauthenticated')) {
-        setLeaving(false)
-        showToast({ tone: 'error', text: t('error.signOutFailed'), key: 'sign-out' })
-        return
-      }
+    // Presence first, then every request, then this device's notifications, then the logout.
+    if (!(await signOut(chat?.presence))) {
+      setLeaving(false)
+      showToast({ tone: 'error', text: t('error.signOutFailed'), key: 'sign-out' })
     }
-    endSession(null)
   }
 
   return (
@@ -82,8 +83,15 @@ export function UserMenu() {
           {t('user.signedInAs', { name: user.name })}
           <bdi class="user-menu__email">{user.email}</bdi>
         </p>
-        <LocaleSwitcher onChange={(locale) => save({ locale })} />
+        <LocaleSwitcher
+          onChange={(locale) => {
+            save({ locale })
+            void refreshPush()
+          }}
+        />
         <ThemeSwitcher onChange={(theme) => save({ theme })} />
+        <InstallPrompt />
+        <PushSettings />
         {user.is_admin && (
           <a
             class="user-menu__admin"
@@ -97,7 +105,7 @@ export function UserMenu() {
             {t('admin.open')}
           </a>
         )}
-        <Button variant="secondary" size="sm" class="user-menu__signout" onClick={() => void signOut()} disabled={leaving}>
+        <Button variant="secondary" size="sm" class="user-menu__signout" onClick={() => void leave()} disabled={leaving}>
           {t('action.signOut')}
         </Button>
       </div>

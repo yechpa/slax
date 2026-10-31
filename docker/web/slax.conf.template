@@ -2,6 +2,7 @@
 # lists; nginx's own $variables are left alone). One origin for everything the browser uses:
 #   /api/ /auth/ /sanctum/ /broadcasting/  Laravel (PHP-FPM, same pod)
 #   /app/                                  Reverb's WebSocket (Pusher protocol)
+#   /sw.js /manifest.webmanifest /icons/   the PWA (service worker, manifest, install icons)
 #   everything else                        the SPA
 # Reverb's HTTP API (/apps/) is never served here: Laravel calls it inside the cluster.
 
@@ -20,6 +21,11 @@ server {
     include /tmp/nginx/security-headers.conf;
 
     location ~ ^/(api|auth|sanctum|broadcasting)/ {
+        # Nothing authenticated stays in the browser's HTTP cache on a shared device after a
+        # sign-out (Laravel's default, no-cache, allows storing): one header, no-store.
+        include /tmp/nginx/security-headers.conf;
+        fastcgi_hide_header Cache-Control;
+        add_header Cache-Control "no-store" always;
         fastcgi_pass ${SLAX_PHP_UPSTREAM};
         include /etc/nginx/fastcgi_params;
         fastcgi_param SCRIPT_FILENAME /var/www/html/public/index.php;
@@ -74,6 +80,30 @@ server {
     }
 
     location ^~ /fonts/ {
+        include /tmp/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=604800" always;
+        try_files $uri =404;
+    }
+
+    # The PWA (frontend/src/pwa). The service worker is always revalidated, so a deploy's new
+    # version is seen at the browser's next check; it may control the whole site.
+    location = /sw.js {
+        include /tmp/nginx/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        add_header Service-Worker-Allowed "/" always;
+        try_files $uri =404;
+    }
+
+    location = /manifest.webmanifest {
+        include /tmp/nginx/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        types { }
+        default_type application/manifest+json;
+        try_files $uri =404;
+    }
+
+    # Install icons (not content-hashed: `make icons` rewrites them in place).
+    location ^~ /icons/ {
         include /tmp/nginx/security-headers.conf;
         add_header Cache-Control "public, max-age=604800" always;
         try_files $uri =404;

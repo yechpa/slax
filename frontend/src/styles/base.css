@@ -12,6 +12,11 @@
     background: var(--color-bg, Canvas);
     color: var(--color-text, CanvasText);
     scrollbar-color: var(--color-border-strong) transparent;
+    /* A tap flashes in the theme's accent, not the browser's grey. */
+    -webkit-tap-highlight-color: color-mix(in srgb, var(--color-accent) 22%, transparent);
+    /* The app's own areas scroll, the page does not: no bounce, no pull-to-refresh reload of a
+       chat. Vertical only: a horizontal overscroll is the browser's back/forward swipe. */
+    overscroll-behavior-y: none;
   }
 
   body {
@@ -90,6 +95,19 @@
     font-size: 0.85em;
     line-height: 1.3;
     color: var(--color-text-dim);
+  }
+
+  /* A quick second tap on a control is a tap, never a double-tap zoom (and no click delay). */
+  a[href],
+  button,
+  input,
+  textarea,
+  select,
+  label,
+  summary,
+  [role='button'],
+  [role='menuitem'] {
+    touch-action: manipulation;
   }
 
   ::selection {

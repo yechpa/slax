@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AdminStatus, AuditPage, Me } from '../api/types.ts'
+import type { AdminAccount, AdminStatus, AuditPage, Me } from '../api/types.ts'
 import { setLocale } from '../i18n/index.ts'
 import { SEARCH_DELAY_MS } from '../lib/search.ts'
 import { route } from '../router.ts'
@@ -38,6 +38,12 @@ const AUDIT: AuditPage = {
   has_more: true,
 }
 
+const ACCOUNTS: AdminAccount[] = [
+  { id: 21, name: 'Rivka', avatar_url: null, account_type: 'demo', administrator: false, banned: false, last_seen_at: '2026-10-30T09:00:00.000Z' },
+  { id: ME.id, name: ME.name, avatar_url: null, account_type: 'member', administrator: true, banned: false, last_seen_at: '2026-10-30T08:00:00.000Z' },
+  { id: 22, name: 'Yossi', avatar_url: null, account_type: 'member', administrator: false, banned: false, last_seen_at: null },
+]
+
 const general = channel(7, { name: 'general' })
 const theirs = live(2, { body: 'spam spam', files: [{ id: 40, name: 'junk.pdf', mime: 'application/pdf', size: 10, kind: 'pdf', download_url: '/api/v1/files/40/download' }] })
 
@@ -49,6 +55,7 @@ function routes(me: Me, extra: Record<string, FakeHandler> = {}): Record<string,
     'GET /api/v1/admin/status': () => ({ body: STATUS }),
     'GET /api/v1/admin/audit': ({ query }) => ({ body: { ...AUDIT, page: Number(query.get('page')), has_more: query.get('page') === '1' } }),
     'GET /api/v1/admin/users/banned': () => ({ body: { data: [] } }),
+    'GET /api/v1/admin/users': () => ({ body: { data: ACCOUNTS } }),
     'GET /api/v1/admin/channels': () => ({
       body: {
         data: [
@@ -86,7 +93,7 @@ describe('administration', () => {
     expect(app.host.textContent).not.toContain('Administration')
 
     // Someone else's message: no moderation in its menu (there is no other item for a non-member either).
-    expect(await openMessageMenu(app.host)).toEqual(['Reply in thread', 'Add reaction'])
+    expect(await openMessageMenu(app.host)).toEqual(['Reply in thread', 'Add reaction', 'Copy text'])
     key(document.activeElement!, { key: 'Escape' })
     await settle()
 
@@ -199,6 +206,110 @@ describe('administration', () => {
     await settle()
     expect(bans).toEqual([{ banned: true }, { banned: false }])
     expect(plain(app.host.textContent)).toContain('dana can sign in again.')
+  })
+
+  it('makes a relative a member, and a member a demo account again, each after a confirmation that says what it means', async () => {
+    const changes: unknown[] = []
+    const promoting = deferred<FakeReply>()
+    app = await mountApp(
+      routes(ADMIN, {
+        'POST /api/v1/admin/users/21/account-type': ({ body }) => {
+          changes.push(body)
+          return promoting.promise
+        },
+        'POST /api/v1/admin/users/22/account-type': ({ body }) => {
+          changes.push(body)
+          return { body: { ...ACCOUNTS[2], account_type: 'demo' } }
+        },
+      }),
+      '/admin',
+    )
+    tab(app.host, 'Accounts').click()
+    await settle()
+    expect(adminCalls(app).map((c) => `${c.method} ${c.path}`)).toContain('GET /api/v1/admin/users')
+
+    const row = (name: string) => [...app!.host.querySelectorAll('.admin-list__row')].find((r) => r.querySelector('.admin-list__name')?.textContent === name)!
+    const button = (name: string) => row(name).querySelector<HTMLButtonElement>('button')
+    expect(plain(row('Rivka').textContent)).toContain('Demo account')
+    expect(button('Rivka')?.textContent).toBe('Make member')
+    expect(plain(row('Yossi').textContent)).toContain('Member')
+    expect(button('Yossi')?.textContent).toBe('Make demo account')
+    // An administrator is a member whatever the list says: nothing to change.
+    expect(plain(row('Alice').textContent)).toContain('Administrator')
+    expect(button('Alice')).toBeNull()
+
+    // Cancelled: nothing sent.
+    button('Rivka')!.click()
+    await settle()
+    let dialog = document.querySelector('dialog[open]')!
+    expect(dialog.getAttribute('role')).toBe('alertdialog')
+    expect(plain(dialog.querySelector('.dialog__title')?.textContent)).toBe('Make Rivka a member?')
+    const promise = plain(dialog.textContent)
+    expect(promise).toContain('messages')
+    expect(promise).toContain('kept')
+    expect(promise).toContain('no longer reset every night')
+    expect(promise).toContain('demo account')
+    ;[...dialog.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Cancel')!.click()
+    await settle()
+    expect(document.querySelector('dialog[open]')).toBeNull()
+    expect(changes).toEqual([])
+
+    // Confirmed: sent once (busy meanwhile), then the row says so.
+    button('Rivka')!.click()
+    await settle()
+    expect(document.querySelector('dialog[open]')).not.toBeNull()
+    const confirm = () => [...document.querySelectorAll<HTMLButtonElement>('dialog[open] button')].find((b) => b.textContent === 'Make member')!
+    confirm().click()
+    await settle()
+    expect(confirm().disabled).toBe(true)
+    promoting.resolve({ body: { ...ACCOUNTS[0], account_type: 'member' } })
+    await settle()
+    expect(changes).toEqual([{ account_type: 'member' }])
+    expect(document.querySelector('dialog[open]')).toBeNull()
+    expect(plain(app.host.querySelector('.toast--success .toast__text')?.textContent)).toBe('Rivka is a member now.')
+    expect(plain(row('Rivka').textContent)).toContain('Member')
+    expect(button('Rivka')?.textContent).toBe('Make demo account')
+
+    // Back to a demo account: the confirmation says the content goes.
+    button('Yossi')!.click()
+    await settle()
+    dialog = document.querySelector('dialog[open]')!
+    expect(plain(dialog.querySelector('.dialog__title')?.textContent)).toBe('Make Yossi a demo account?')
+    expect(plain(dialog.textContent)).toContain('deleted at the next nightly reset')
+    // A banned demo account is kept by the reset: the sentence must not promise its deletion.
+    expect(plain(dialog.textContent)).toContain('unless it is banned')
+    ;[...dialog.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Make demo account')!.click()
+    await settle()
+    expect(changes).toEqual([{ account_type: 'member' }, { account_type: 'demo' }])
+    expect(plain(row('Yossi').textContent)).toContain('Demo account')
+  })
+
+  it('the accounts tab in Hebrew, and a refusal in words', async () => {
+    app = await mountApp(
+      routes(ADMIN, {
+        'POST /api/v1/admin/users/21/account-type': () => ({ status: 422, body: { error: 'cannot_change_admin' } }),
+      }),
+      '/admin',
+    )
+    setLocale('he')
+    await settle()
+    const accounts = [...app.host.querySelectorAll<HTMLButtonElement>('[role="tab"]')][3]
+    expect(accounts.textContent).toMatch(/\p{Script=Hebrew}/u)
+    accounts.click()
+    await settle()
+    app.host.querySelector<HTMLButtonElement>('.admin-list__row button')!.click()
+    await settle()
+    const dialog = document.querySelector('dialog[open]')!
+    expect(plain(dialog.textContent)).toMatch(/\p{Script=Hebrew}/u)
+    // The name is isolated inside the Hebrew sentence.
+    expect(dialog.querySelector('.dialog__title')?.textContent).toContain('\u2068Rivka\u2069')
+    ;[...dialog.querySelectorAll<HTMLButtonElement>('.dialog__footer button')].at(-1)!.click()
+    await settle()
+    const error = plain(app.host.querySelector('.admin__section .admin__error')?.textContent)
+    expect(error).toMatch(/\p{Script=Hebrew}/u)
+    expect(app.host.textContent).not.toContain('cannot_change_admin')
+    // The list is asked for again: what the server holds now is shown, not a guess.
+    expect(adminCalls(app).filter((c) => c.method === 'GET' && c.path === '/api/v1/admin/users')).toHaveLength(2)
   })
 
   it('locks and unlocks any channel, private ones the administrator is not in included', async () => {

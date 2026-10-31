@@ -73,6 +73,8 @@ export function Composer(props: Props) {
             ref={inputRef}
             class="composer__input"
             rows={1}
+            // A phone's keyboard labels its Enter key "Send": Enter sends (Shift+Enter: a new line).
+            enterkeyhint="send"
             // Empty, it follows the page; typed into, it follows its first strong letter.
             dir={value ? 'auto' : undefined}
             value={value}

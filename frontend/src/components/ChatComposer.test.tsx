@@ -116,3 +116,15 @@ describe('files in the composer', () => {
     expect(send().disabled).toBe(true)
   })
 })
+
+describe('the composer on a phone', () => {
+  it('labels the keyboard’s Enter key for what Enter does: send (and save, in the editor)', async () => {
+    app = await mountApp({ ...routes(), 'GET /api/v1/channels/7/messages': () => ({ body: { data: [live(1, { body: 'mine', user: { id: ME.id, name: ME.name, avatar_url: null } })], has_more: false } }) }, '/c/7')
+    expect(app.host.querySelector('.shell__footer .composer__input')?.getAttribute('enterkeyhint')).toBe('send')
+    app.host.querySelector<HTMLButtonElement>('.message-actions__more')!.click()
+    await settle()
+    ;[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((m) => m.textContent === 'Edit')!.click()
+    await settle()
+    expect(app.host.querySelector('.message-editor__input')?.getAttribute('enterkeyhint')).toBe('done')
+  })
+})

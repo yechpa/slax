@@ -86,7 +86,8 @@ const scenes: Scene[] = [
   { path: '/', signedOut: true },
 ]
 
-describe('switching the language', () => {
+// Each case mounts the whole app four times: generous, so a busy CI runner cannot flake it.
+describe('switching the language', { timeout: 20_000 }, () => {
   for (const scene of scenes) {
     it(`re-renders every string (${JSON.stringify(scene)}), as a page opened in that language`, async () => {
       for (const [from, to] of [

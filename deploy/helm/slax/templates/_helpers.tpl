@@ -135,8 +135,9 @@ DB_USERNAME: {{ .Values.postgres.username | quote }}
 REDIS_CLIENT: phpredis
 REDIS_HOST: {{ include "slax.name" (dict "ctx" . "component" "redis") | quote }}
 REDIS_PORT: "6379"
-SESSION_DRIVER: redis
+SESSION_DRIVER: redis-tiered
 SESSION_SECURE_COOKIE: "true"
+SESSION_LIFETIME: {{ include "slax.sessionLifetime" . | quote }}
 CACHE_STORE: redis
 QUEUE_CONNECTION: redis
 BROADCAST_CONNECTION: reverb
@@ -167,6 +168,7 @@ SANCTUM_STATEFUL_DOMAINS: {{ $host | quote }}
 SLAX_ENV_LABEL: {{ required "envLabel is required (Dev or Prod)" .Values.envLabel | quote }}
 SLAX_DEMO_RESET_ENABLED: {{ ternary "true" "false" .Values.demo.resetEnabled | quote }}
 SLAX_AUDIT_RETENTION_DAYS: {{ .Values.config.auditRetentionDays | quote }}
+VAPID_SUBJECT: {{ include "slax.vapidSubject" . | quote }}
 {{- if .Values.backup.enabled }}
 SLAX_BACKUP_BUCKET: {{ .Values.backup.bucket | quote }}
 SLAX_BACKUP_PREFIX: {{ .Values.backup.prefix | quote }}
@@ -175,11 +177,27 @@ SLAX_BACKUP_PREFIX: {{ .Values.backup.prefix | quote }}
 {{- if has $key (list "APP_ENV" "APP_DEBUG" "APP_KEY") }}
 {{- fail (printf "config.extraEnv cannot set %s" $key) }}
 {{- end }}
+{{- if eq $key "SESSION_LIFETIME" }}
+{{- fail "config.extraEnv cannot set SESSION_LIFETIME: use session.lifetimeMinutes" }}
+{{- end }}
 {{- if has $key (concat (include "slax.secretKeys" $ | fromYamlArray) (include "slax.optionalSecretKeys" $ | fromYamlArray) (list "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SESSION_TOKEN" "TURNSTILE_SITE_KEY")) }}
 {{- fail (printf "config.extraEnv cannot set %s: it is a secret (%s)" $key $.Values.secretName) }}
 {{- end }}
 {{ $key }}: {{ $value | quote }}
 {{- end }}
+{{- end -}}
+
+{{/* SESSION_LIFETIME: session.lifetimeMinutes, a whole number of minutes, at least 1. */}}
+{{- define "slax.sessionLifetime" -}}
+{{- $minutes := required "session.lifetimeMinutes is required (minutes; 20160 = 14 days)" .Values.session.lifetimeMinutes -}}
+{{- $wrong := printf "session.lifetimeMinutes must be a whole number of minutes, at least 1 (got %v)" $minutes -}}
+{{- if not (or (kindIs "float64" $minutes) (kindIs "int64" $minutes) (kindIs "int" $minutes)) -}}
+{{- fail $wrong -}}
+{{- end -}}
+{{- if or (lt (float64 $minutes) 1.0) (ne (float64 $minutes) (float64 (int64 $minutes))) -}}
+{{- fail $wrong -}}
+{{- end -}}
+{{- int64 $minutes -}}
 {{- end -}}
 
 {{/*
@@ -201,11 +219,26 @@ The S3 keys only without the instance role (s3.useInstanceRole).
 - TURNSTILE_SECRET
 {{- end -}}
 
-{{/* Optional: alerts are off without the Telegram pair; no administrator without ADMIN_EMAILS. */}}
+{{/*
+Optional: alerts are off without the Telegram pair; no administrator without ADMIN_EMAILS;
+Web Push is off without the VAPID pair (the public key is not secret, but the pair is kept
+together, and rotated together).
+*/}}
 {{- define "slax.optionalSecretKeys" -}}
 - ADMIN_EMAILS
 - TELEGRAM_BOT_TOKEN
 - TELEGRAM_CHAT_ID
+- VAPID_PUBLIC_KEY
+- VAPID_PRIVATE_KEY
+{{- end -}}
+
+{{/* VAPID_SUBJECT: push.subject (mailto: or https:), else the public URL. */}}
+{{- define "slax.vapidSubject" -}}
+{{- $subject := .Values.push.subject | default (include "slax.publicUrl" .) -}}
+{{- if not (regexMatch "^(mailto:[^\\s@]+@[^\\s@]+|https://[^\\s]+)$" $subject) -}}
+{{- fail (printf "push.subject %q must be a mailto: address or an https:// URL" $subject) -}}
+{{- end -}}
+{{- $subject -}}
 {{- end -}}
 
 {{- define "slax.secretRef" -}}
