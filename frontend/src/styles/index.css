@@ -1,0 +1,17 @@
+@layer reset, tokens, base, components, utilities;
+
+/*
+ * Slax stylesheet entry. The statement above fixes the cascade order once:
+ * later layers win regardless of selector specificity, so components never
+ * fight the reset and utilities always win. Each file wraps itself in its layer.
+ * Rule of the house: logical properties only (inline/block, start/end); the
+ * test suite rejects any physical left/right property under src/.
+ */
+@import './fonts.css';
+@import './reset.css';
+@import './tokens.css';
+@import './base.css';
+@import './components.css';
+@import './app.css';
+@import './chat.css';
+@import './utilities.css';

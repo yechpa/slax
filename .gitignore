@@ -1,1 +1,22 @@
 .superpowers/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+vendor/
+node_modules/
+dist/
+build/
+coverage/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.phpunit.cache/
+.phpunit.result.cache
+
+# End-to-end runs (make e2e)
+e2e/test-results/
+e2e/playwright-report/

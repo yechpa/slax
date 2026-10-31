@@ -1,0 +1,78 @@
+# Slax production front proxy: Caddy on the EC2 host (systemd unit `caddy`, installed by
+# deploy/aws/cloud-init.yaml, which writes this file to /etc/caddy/Caddyfile).
+#
+#   Internet --443/80--> Caddy (host) --http--> 10.43.0.80:80 (Service slax-app, a fixed
+#   ClusterIP: values-prod.yaml app.service.clusterIP) --> nginx (slax-web) --> PHP-FPM / Reverb
+#
+# - TLS: Let's Encrypt, HTTP-01/TLS-ALPN-01 on 80/443 (the only ports the security group
+#   opens). Certificates live in /var/lib/caddy. Port 80 only redirects to HTTPS (and answers
+#   ACME challenges).
+# - HSTS here, and only here (nginx's config.hstsMaxAge stays 0): one year, subdomains
+#   included (dev.slax.yechpa.com is HTTPS too). Not `preload`: preloading is a commitment
+#   for the whole yechpa.com zone that is hard to undo.
+# - Client address: nothing is in front of Caddy, so it trusts no proxy (no
+#   `trusted_proxies`): whatever X-Forwarded-For a client sends is discarded and replaced by
+#   the TCP peer's address. nginx trusts X-Forwarded-For only from the k3s pod network
+#   (config.trustedProxies), and only the node reaches the web pod (network policy), so
+#   Laravel's REMOTE_ADDR is the visitor. Proven by deploy/aws/test/proxy-test.sh.
+# - WebSockets (/app/, Reverb) pass through: Caddy proxies upgrades natively with no idle
+#   timeout; nginx keeps them up to an hour (proxy_read_timeout). A Caddy reload keeps open
+#   ones for 5 minutes (stream_close_delay) instead of cutting every client at once.
+# - /apps/ (Reverb's HTTP API) is refused here already (nginx refuses it too).
+# - No access log: URLs carry OAuth codes; nginx in the pod logs requests without query
+#   strings.
+#
+# Environment overrides (only the local test uses them; production runs with the defaults):
+#   SLAX_SITE_ADDRESS  slax.yechpa.com
+#   SLAX_UPSTREAM      10.43.0.80:80
+#   SLAX_TLS           acme (Let's Encrypt) or internal (Caddy's own CA, for the test)
+{
+	# No e-mail address: Let's Encrypt does not require one.
+	admin localhost:2019
+	servers {
+		# HTTP/1.1 and HTTP/2 over TCP only: the security group opens TCP 80/443, not UDP 443,
+		# so no HTTP/3 is advertised (browsers would try QUIC first and wait for it to fail).
+		protocols h1 h2
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
+(tls-acme) {
+	# Automatic HTTPS with the public ACME issuers (the default).
+}
+
+(tls-internal) {
+	tls internal
+}
+
+{$SLAX_SITE_ADDRESS:slax.yechpa.com} {
+	import tls-{$SLAX_TLS:acme}
+
+	# Uploads are at most 10 MB (nginx allows 12m): stop anything bigger here.
+	request_body {
+		max_size 16MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+		defer
+	}
+
+	@reverbApi path /apps /apps/*
+	respond @reverbApi 404
+
+	reverse_proxy {$SLAX_UPSTREAM:10.43.0.80:80} {
+		# X-Forwarded-For, -Proto and -Host are set by Caddy from the connection itself.
+		header_up X-Real-IP {remote_host}
+		stream_close_delay 5m
+		transport http {
+			dial_timeout 5s
+			# PHP's own limit is 70 s (fastcgi_read_timeout in slax-web).
+			response_header_timeout 75s
+		}
+	}
+}

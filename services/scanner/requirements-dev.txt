@@ -1,0 +1,12 @@
+# Test and lint tooling (the python-tools container), on top of the runtime set.
+-r requirements.txt
+pytest==8.3.4
+ruff==0.8.6
+# HTTP client of Starlette's TestClient.
+httpx2==2.16.0
+
+httpcore2==2.16.0
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.7.0
+truststore==0.10.5

@@ -1,0 +1,84 @@
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  * {
+    margin: 0;
+  }
+
+  /* 100%, not none: the phone keeps its own text size, and the reader's text zoom still works. */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    min-block-size: 100vh;
+    min-block-size: 100dvh;
+  }
+
+  img,
+  picture,
+  svg,
+  video,
+  canvas {
+    display: block;
+    max-inline-size: 100%;
+  }
+
+  input,
+  button,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+  }
+
+  button {
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  fieldset {
+    border: 0;
+    padding: 0;
+    min-inline-size: 0;
+  }
+
+  legend {
+    padding: 0;
+  }
+
+  ol,
+  ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  p,
+  h1,
+  h2,
+  h3,
+  h4 {
+    overflow-wrap: break-word;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-size: inherit;
+    font-weight: inherit;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}

@@ -1,0 +1,35 @@
+{{- $component := "queue" -}}
+# The queue worker. One process: broadcasts and channel revocations keep their order. It drains
+# `default` before `push` (Web Push), so a slow push service never delays a broadcast.
+# Recycled every hour (--max-time); stops gracefully on SIGTERM (pcntl).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" $component) }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+        {{- include "slax.backendLabel" . | nindent 8 }}
+      annotations:
+        {{- include "slax.configChecksum" . | nindent 8 }}
+    spec:
+      {{- include "slax.podCommon" . | nindent 6 }}
+      securityContext:
+        {{- include "slax.podSecurityContext" 10001 | nindent 8 }}
+      # A job in progress may finish (Laravel's default job timeout is 60 s).
+      terminationGracePeriodSeconds: 75
+      containers:
+        {{- include "slax.phpContainer" (dict "ctx" . "name" "queue" "resources" .Values.queue.resources "args" (list "php" "artisan" "queue:work" "--queue=default,push" "--tries=3" "--max-time=3600" "--sleep=1" "--no-interaction")) | nindent 8 }}
+      volumes:
+        {{- include "slax.phpVolumes" . | nindent 8 }}

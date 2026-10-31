@@ -1,0 +1,94 @@
+{{- if .Values.ingress.enabled }}
+{{- $tls := .Values.ingress.tls.enabled }}
+# One route: everything to the web pod's nginx, which serves the SPA, the API and the
+# WebSocket path (/app/). Reverb's HTTP API (/apps/) is never routed here: nginx answers 404
+# and the Reverb Service has no ingress. With TLS, only Traefik's HTTPS entry point serves it
+# (nothing on port 80); the certificate comes from cert-manager (ACME DNS-01, no inbound
+# port needed).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "slax.fullname" . }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: {{ ternary "websecure" "web" $tls }}
+    {{- if $tls }}
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    cert-manager.io/cluster-issuer: {{ required "ingress.tls.clusterIssuer is required with TLS (deploy/dev/BOOTSTRAP.md)" .Values.ingress.tls.clusterIssuer | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if $tls }}
+  tls:
+    - hosts:
+        - {{ include "slax.publicHost" . | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ include "slax.publicHost" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "slax.name" (dict "ctx" . "component" "app") }}
+                port:
+                  name: http
+{{- if and .Values.minio.enabled .Values.minio.ingress.host }}
+{{- $minio := include "slax.name" (dict "ctx" . "component" "minio") }}
+---
+# Development files host: MinIO's S3 API, for presigned downloads (a host of its own, never
+# the app's origin). Every response gets nosniff and a sandboxing CSP, so an uploaded file
+# can never run as a page.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $minio }}-headers
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" "minio") | nindent 4 }}
+spec:
+  headers:
+    customResponseHeaders:
+      X-Content-Type-Options: nosniff
+      Content-Security-Policy: "default-src 'none'; sandbox"
+      Referrer-Policy: no-referrer
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $minio }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" "minio") | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: {{ ternary "websecure" "web" $tls }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s-headers@kubernetescrd" .Release.Namespace $minio }}
+    {{- if $tls }}
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if $tls }}
+  tls:
+    - hosts:
+        - {{ .Values.minio.ingress.host | quote }}
+      secretName: {{ .Values.minio.ingress.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.minio.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $minio }}
+                port:
+                  name: s3
+{{- end }}
+{{- end }}

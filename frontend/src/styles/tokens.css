@@ -1,0 +1,192 @@
+/*
+ * Design tokens. Theme-independent scales live on :root; colours and the few
+ * stylistic switches (rule style, glow, scanlines, paper bands) live in one
+ * block per theme, keyed off <html data-theme>. Every text/background pair is
+ * checked for WCAG AA contrast by src/styles/contrast.test.ts, which parses
+ * this file: keep text colours as opaque #rrggbb values.
+ */
+@layer tokens {
+  :root {
+    /* Type: one family everywhere. Two weights only (see fonts.css). */
+    --font-mono: 'Cascadia Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono',
+      monospace;
+    --weight-text: 300;
+    --weight-strong: 700;
+
+    --text-2xs: 0.6875rem; /* 11px: badges, keyboard hints */
+    --text-xs: 0.75rem; /* 12px: timestamps, captions, section labels */
+    --text-sm: 0.8125rem; /* 13px: sidebar, buttons, inputs */
+    --text-base: 0.875rem; /* 14px: message bodies, default */
+    --text-md: 1rem; /* 16px: channel title */
+    --text-lg: 1.25rem; /* 20px */
+    --text-xl: 1.625rem; /* 26px */
+    --text-2xl: 2.25rem; /* 36px: page titles only */
+
+    --leading-tight: 1.25;
+    --leading: 1.5;
+    --tracking-label: 0.04em;
+
+    /* Space: 4px base. */
+    --space-0-5: 0.125rem;
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.25rem;
+    --space-6: 1.5rem;
+    --space-8: 2rem;
+    --space-10: 2.5rem;
+    --space-12: 3rem;
+    --space-16: 4rem;
+
+    /* Shape: sharp. 1px rules, tiny radii. */
+    --radius-0: 0;
+    --radius-1: 2px;
+    --radius-2: 4px;
+    --border-width: 1px;
+    --focus-width: 2px;
+    --focus-offset: 2px;
+
+    /* Sizes */
+    --control-height: 2rem;
+    --control-height-sm: 1.5rem;
+    --avatar-size: 2rem;
+    --sidebar-size: 15.5rem;
+    /* Paper bands: two lines of body text (14px × 1.5 × 2 = 42px). */
+    --band-size: calc(var(--text-base) * var(--leading) * 2);
+
+    /* Motion: short, linear-ish, opt-in (see base.css). */
+    --duration-fast: 120ms;
+    --duration: 200ms;
+    --ease: cubic-bezier(0.2, 0, 0, 1);
+    --blink-period: 1.06s;
+
+    /*
+     * Safe areas (notch, rounded corners, home indicator), with viewport-fit=cover (index.html).
+     * env() names them physically: the inline pair is swapped for right to left below. The app
+     * pads with these only (tests set them to emulate a notched phone).
+     */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-inline-start: env(safe-area-inset-left, 0px);
+    --safe-inline-end: env(safe-area-inset-right, 0px);
+    /* The header takes the top inset unless a notice band above it already does (app.css);
+       the footers take the bottom one unless the keyboard covers the home indicator. */
+    --header-safe-top: var(--safe-top);
+    --footer-safe-bottom: var(--safe-bottom);
+  }
+
+  :root[dir='rtl'] {
+    --safe-inline-start: env(safe-area-inset-right, 0px);
+    --safe-inline-end: env(safe-area-inset-left, 0px);
+  }
+
+  :root[data-keyboard] {
+    --footer-safe-bottom: 0px;
+  }
+
+  :root:not([data-theme]) {
+    color-scheme: light dark;
+  }
+
+  /* La Console: phosphor green on near-black. */
+  :root[data-theme='console'] {
+    color-scheme: dark;
+
+    --color-bg: #0b0f0d;
+    --color-band-a: #0b0f0d;
+    --color-band-b: #0b0f0d;
+    --color-surface: #0e1411;
+    --color-raised: #111a15;
+    --color-hover: #0f1814;
+    --color-selected-bg: #12201a;
+    --color-selected-fg: #4ade80;
+
+    --color-text: #d7e3dc;
+    --color-text-dim: #8fa89a;
+    --color-muted: #6f8c7c;
+    --color-accent: #4ade80;
+    --color-accent-strong: #86efac;
+    --color-accent-ink: #04140a;
+    --color-link: #4ade80;
+    --color-warn: #facc15;
+    --color-danger: #f87171;
+    --color-danger-ink: #1a0505;
+    --color-mention-bg: #14281c;
+    --color-mention-fg: #86efac;
+
+    --color-border: #1b2a23;
+    --color-border-strong: #2a4034;
+    --color-control-border: #557565;
+    --color-focus: #4ade80;
+    --color-shadow: #000000;
+    --color-hole: #0b0f0d;
+
+    --user-1: #7dd3fc;
+    --user-2: #f0abfc;
+    --user-3: #fdba74;
+    --user-4: #a5b4fc;
+    --user-5: #5eead4;
+    --user-6: #fca5a5;
+
+    --rule-style: solid;
+    --glow: 0 0 0.6rem rgb(74 222 128 / 0.45);
+    --glow-soft: 0 0 0.9rem rgb(74 222 128 / 0.18);
+    --scanlines: repeating-linear-gradient(to bottom, transparent 0 2px, rgb(0 0 0 / 0.16) 2px 3px);
+    --paper: none;
+    --paper-holes: none;
+  }
+
+  /* Le papier listing: green-bar continuous-form printer paper, dark green ink. */
+  :root[data-theme='listing'] {
+    color-scheme: light;
+
+    --color-bg: #f6f9ef;
+    --color-band-a: #f6f9ef;
+    --color-band-b: #e3efd6;
+    --color-surface: #eef4e5;
+    --color-raised: #fbfdf7;
+    --color-hover: #e6efdb;
+    --color-selected-bg: #2d5a1b;
+    --color-selected-fg: #f6f9ef;
+
+    --color-text: #1a2a14;
+    --color-text-dim: #34502a;
+    --color-muted: #4d6a3b;
+    --color-accent: #2d5a1b;
+    --color-accent-strong: #1f4512;
+    --color-accent-ink: #f6f9ef;
+    --color-link: #2d5a1b;
+    --color-warn: #7a4f00;
+    --color-danger: #a3221a;
+    --color-danger-ink: #fff8f5;
+    --color-mention-bg: #d3e6c1;
+    --color-mention-fg: #1f4512;
+
+    --color-border: #6b8a55;
+    --color-border-strong: #4d6a3b;
+    --color-control-border: #5a7a45;
+    --color-focus: #2d5a1b;
+    --color-shadow: #b9c9a8;
+    --color-hole: #d9e2cd;
+
+    --user-1: #075985;
+    --user-2: #86198f;
+    --user-3: #9a3412;
+    --user-4: #3730a3;
+    --user-5: #115e59;
+    --user-6: #9f1239;
+
+    --rule-style: dashed;
+    --glow: none;
+    --glow-soft: none;
+    --scanlines: none;
+    --paper: repeating-linear-gradient(
+      to bottom,
+      var(--color-band-a) 0 var(--band-size),
+      var(--color-band-b) var(--band-size) calc(var(--band-size) * 2)
+    );
+    /* Tractor-feed sprocket holes, mirrored on both edges (so direction-agnostic). */
+    --paper-holes: radial-gradient(circle, var(--color-hole) 0.25rem, var(--color-border) 0.27rem, transparent 0.32rem);
+  }
+}

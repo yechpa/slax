@@ -58,6 +58,7 @@ Critères de réussite, par ordre d'importance :
 - **Thème sombre** : la « Console » (fond quasi noir, vert phosphore, monospace). **Thème clair** : le « papier listing » (bandes vert pâle des imprimantes à listing continu). Bascule en un clic. L'esprit général est celui des moniteurs d'antan.
 - **Langues** : anglais, hébreu, français.
 - **Appels en v2**.
+- **Alertes d'administration par un bot Telegram** (décision de yechpa, 2026-10-30) : pannes, erreurs, avertissements, échecs de sauvegarde, résultats de déploiement, événements de sécurité et de modération. Le jeton du bot et l'identifiant de discussion sont des secrets (jamais dans le dépôt public) ; dev et prod sont distingués dans chaque message ; les alertes ne contiennent jamais le contenu des messages des utilisateurs.
 - **Authentification : Google uniquement**, aucun mot de passe propre à Slax (décision de yechpa, 2026-10-30). Les autres modes de connexion sont hors v1.
 
 ## 5. Choix de l'auteur du document (à valider, pas décidés par yechpa)
@@ -119,7 +120,7 @@ Chaîne de livraison :
 5. Les manifestes sont les mêmes (Helm) avec des valeurs différentes par environnement. Les déploiements passent par Tailscale.
 6. Pas de GitOps lourd (Argo CD) en v1.
 
-Exploitation : sauvegardes automatiques de la base et vérification de restauration ; métriques et alertes légères (à définir par le bâtisseur dans le respect du budget) ; la documentation d'exploitation (runbook) fait partie des livrables.
+Exploitation : sauvegardes automatiques de la base et vérification de restauration ; métriques et alertes légères envoyées au bot Telegram (voir §4 ; format et seuils à définir par le bâtisseur dans le respect du budget) ; la documentation d'exploitation (runbook) fait partie des livrables.
 
 ## 8. Ce que l'architecture doit permettre plus tard (sans le construire)
 

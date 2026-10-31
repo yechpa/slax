@@ -1,0 +1,210 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $ctx := . }}
+{{- $ic := .Values.networkPolicy.ingressController }}
+# Nothing reaches a Slax pod unless a policy below lets it (k3s enforces network policies
+# with its embedded kube-router). Kubelet probes from the node are always allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" "default-deny") }}
+  labels:
+    {{- include "slax.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: slax
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: ["Ingress"]
+---
+{{- if .Values.ingress.enabled }}
+# The web pod: from the ingress controller{{ if .Values.monitor.enabled }} and the uptime monitor (GET /api/v1/health){{ end }} only.
+{{- else }}
+# The web pod: from no pod at all{{ if .Values.monitor.enabled }} but the uptime monitor (GET /api/v1/health){{ end }}. Otherwise
+# only its own node reaches it: the front proxy on the host (production's Caddy, through
+# app.service.clusterIP) and the kubelet's probes. k3s's network policy engine (kube-router)
+# always admits traffic from the pod's local node.
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" "app") }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" "app") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" "app") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  {{- if or .Values.ingress.enabled .Values.monitor.enabled }}
+  ingress:
+    - from:
+        {{- if .Values.ingress.enabled }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ic.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $ic.podLabels | nindent 14 }}
+        {{- end }}
+        {{- if .Values.monitor.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" . "component" "monitor") | nindent 14 }}
+        {{- end }}
+      ports:
+        - port: 8080
+          protocol: TCP
+  {{- else }}
+  ingress: []
+  {{- end }}
+---
+# Reverb: the WebSocket through the web pod's nginx, and its HTTP API (/apps/) from the
+# Laravel processes{{ if .Values.monitor.enabled }}; the uptime monitor for GET /up (the API itself needs the app's
+# secret){{ end }}. Nobody else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" "reverb") }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" "reverb") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" "reverb") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- range concat (list "app" "queue" "scheduler") (ternary (list "monitor") list .Values.monitor.enabled) }}
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" .) | nindent 14 }}
+        {{- end }}
+      ports:
+        - port: 8080
+          protocol: TCP
+{{- if .Values.networkPolicy.denyInstanceMetadata }}
+{{- range $component := concat (list "reverb" "postgres" "redis" "migrate") (ternary (list "monitor") list .Values.monitor.enabled) }}
+---
+# {{ $component }} needs no AWS credentials: everything but the EC2 instance metadata service,
+# so it can never borrow the instance role. (Pods that may: app, queue, scheduler, backup,
+# restore-check; the scanner has no egress at all.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slax.name" (dict "ctx" $ctx "component" (printf "%s-no-metadata" $component)) }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" $ctx "component" $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" $component) | nindent 6 }}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32
+{{- end }}
+{{- end }}
+---
+# Upload scanner: only the app and queue pods may call it, and it calls nothing (no egress,
+# not even DNS).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" "scanner") }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" "scanner") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" "scanner") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        {{- range list "app" "queue" }}
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" .) | nindent 14 }}
+        {{- end }}
+      ports:
+        - port: 8000
+          protocol: TCP
+  egress: []
+{{- range $component, $port := dict "postgres" 5432 "redis" 6379 }}
+---
+# {{ $component }}: from the Laravel processes (app, queue, scheduler, migrations){{ if eq $component "redis" }} and Reverb{{ end }}{{ if and (eq $component "postgres") $ctx.Values.backup.enabled }} and the backup{{ end }}{{ if $ctx.Values.monitor.enabled }};
+# the uptime monitor too (is it answering? no password: it never signs in){{ end }}.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slax.name" (dict "ctx" $ctx "component" $component) }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" $ctx "component" $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" $component) | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ $ctx.Release.Name }}
+              {{- include "slax.backendLabel" $ctx | nindent 14 }}
+        {{- if eq $component "redis" }}
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" "reverb") | nindent 14 }}
+        {{- end }}
+        {{- if and (eq $component "postgres") $ctx.Values.backup.enabled }}
+        # The daily backup (pg_dump).
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" "backup") | nindent 14 }}
+        {{- end }}
+        {{- if $ctx.Values.monitor.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" $ctx "component" "monitor") | nindent 14 }}
+        {{- end }}
+      ports:
+        - port: {{ $port }}
+          protocol: TCP
+{{- end }}
+{{- if .Values.minio.enabled }}
+---
+# MinIO (development): the Laravel processes, the bucket setup Job, and browsers through the
+# ingress controller (presigned downloads).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" "minio") }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" "minio") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" "minio") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              {{- include "slax.backendLabel" . | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "slax.selectorLabels" (dict "ctx" . "component" "minio-setup") | nindent 14 }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ic.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $ic.podLabels | nindent 14 }}
+      ports:
+        - port: 9000
+          protocol: TCP
+{{- end }}
+{{- end }}

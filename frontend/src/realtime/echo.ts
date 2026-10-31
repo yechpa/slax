@@ -1,0 +1,193 @@
+/**
+ * Realtime over Laravel Reverb, which speaks the Pusher protocol. The browser reaches it
+ * on the page's own origin at /app (nginx forwards /app and /apps to Reverb), so no host,
+ * port or TLS setting is configured: they follow the page.
+ *
+ * Private channels are authorized through the app's fetch wrapper (session cookie +
+ * X-XSRF-TOKEN), not pusher-js's own XHR. Reconnection and its exponential backoff are
+ * pusher-js's; this module exposes the connection state as a signal and an `onReconnect`
+ * hook, because events missed while disconnected are never replayed: the app refetches.
+ *
+ * The rest of the app depends on the `Realtime` interface only, so tests use a fake.
+ */
+import { signal, type ReadonlySignal } from '@preact/signals'
+import { isApiError, request } from '../api/client.ts'
+
+export type ConnectionState = 'connected' | 'connecting' | 'disconnected'
+
+/** What Reverb adds to a client event (whisper): the sender, from its signed subscription. */
+export interface EventMeta {
+  user_id?: string | number
+}
+
+export type EventHandlers = Record<string, (payload: unknown, meta?: EventMeta) => void>
+
+/** Someone connected to the workspace (the presence channel's member info: no e-mail). */
+export interface PresenceMember {
+  id: number
+  name: string
+  avatar_url: string | null
+}
+
+export interface PresenceListener {
+  /** Everybody connected, once subscribed (and again after a reconnection). */
+  members(members: PresenceMember[]): void
+  added(member: PresenceMember): void
+  removed(id: number): void
+}
+
+export interface Realtime {
+  readonly state: ReadonlySignal<ConnectionState>
+  /**
+   * Subscribes to a channel (`private-channel.12`) and binds its events. `onError` gets the
+   * HTTP status of a refused authorization (403/404 once membership is gone), or null.
+   * Returns the unsubscribe function.
+   */
+  subscribe(name: string, handlers: EventHandlers, onError?: (status: number | null) => void): () => void
+  /** A client event to the other subscribers of a channel this client is subscribed to (else nothing). */
+  whisper(name: string, event: string, data: unknown): void
+  /** The workspace presence channel (`presence-workspace.{id}`): who is connected. */
+  subscribePresence(name: string, listener: PresenceListener, onError?: (status: number | null) => void): () => void
+  /** Called each time the connection comes back after having been up (not on the first connect). */
+  onReconnect(listener: () => void): () => void
+  disconnect(): void
+}
+
+interface AuthData {
+  auth: string
+  channel_data?: string
+}
+
+/** POST /broadcasting/auth for the socket, through the API client (cookie + XSRF). */
+function authorize(socketId: string, channelName: string): Promise<AuthData> {
+  return request<AuthData>('/broadcasting/auth', {
+    method: 'POST',
+    body: { socket_id: socketId, channel_name: channelName },
+    // A refusal is a channel matter (handled per subscription), not a sign-out.
+    quiet: true,
+  })
+}
+
+/** Maps pusher-js's six connection states onto the three the UI cares about. */
+export function toConnectionState(pusherState: string): ConnectionState {
+  if (pusherState === 'connected') return 'connected'
+  if (pusherState === 'initialized' || pusherState === 'connecting') return 'connecting'
+  return 'disconnected' // unavailable, failed, disconnected
+}
+
+/** A presence member as pusher-js gives it ({id: "12", info: {...}}), or null when malformed. */
+export function toMember(value: unknown, needsInfo = true): PresenceMember | null {
+  const member = value as { id?: unknown; info?: { name?: unknown; avatar_url?: unknown } | null } | null
+  const id = Number(member?.id)
+  if (!Number.isSafeInteger(id) || id <= 0) return null
+  const info = member?.info
+  if (typeof info?.name !== 'string') return needsInfo ? null : { id, name: '', avatar_url: null }
+  return { id, name: info.name, avatar_url: typeof info.avatar_url === 'string' ? info.avatar_url : null }
+}
+
+export async function connectRealtime(appKey: string): Promise<Realtime> {
+  // Loaded on demand: the signed-out screen never needs it.
+  const { default: Pusher } = await import('pusher-js')
+  const secure = location.protocol === 'https:'
+  const port = Number(location.port) || (secure ? 443 : 80)
+  const authStatus = new Map<string, number | null>()
+
+  const pusher = new Pusher(appKey, {
+    cluster: '', // unused: the host is given
+    wsHost: location.hostname,
+    wsPort: port,
+    wssPort: port,
+    forceTLS: secure,
+    enabledTransports: ['ws', 'wss'],
+    disableStats: true,
+    channelAuthorization: {
+      customHandler: ({ socketId, channelName }, callback) => {
+        authorize(socketId, channelName).then(
+          (data) => {
+            authStatus.delete(channelName)
+            callback(null, data)
+          },
+          (error: unknown) => {
+            authStatus.set(channelName, isApiError(error) ? error.status : null)
+            callback(error instanceof Error ? error : new Error(String(error)), null)
+          },
+        )
+      },
+    },
+  })
+
+  const state = signal<ConnectionState>(toConnectionState(pusher.connection.state))
+  const reconnectListeners = new Set<() => void>()
+  let wasConnected = false
+  pusher.connection.bind('state_change', ({ current }: { current: string }) => {
+    const next = toConnectionState(current)
+    const reconnected = next === 'connected' && state.value !== 'connected' && wasConnected
+    state.value = next
+    if (next === 'connected') wasConnected = true
+    if (reconnected) for (const listener of [...reconnectListeners]) listener()
+  })
+
+  // Client events (whispers) are read from the raw incoming events: pusher-js passes the
+  // `user_id` Reverb tags them with to presence channels' handlers only, never to a private
+  // channel's (its metadata is always empty), so typing would never know who types.
+  const clientHandlers = new Map<string, EventHandlers>()
+  pusher.connection.bind('message', (event: { event?: unknown; channel?: unknown; data?: unknown; user_id?: string | number }) => {
+    if (typeof event?.event !== 'string' || !event.event.startsWith('client-') || typeof event.channel !== 'string') return
+    clientHandlers.get(event.channel)?.[event.event]?.(event.data, event.user_id === undefined ? {} : { user_id: event.user_id })
+  })
+
+  const subscribe: Realtime['subscribe'] = (name, handlers, onError) => {
+    const channel = pusher.subscribe(name)
+    const bound = Object.entries(handlers).filter(([event]) => !event.startsWith('client-'))
+    const whispers = Object.fromEntries(Object.entries(handlers).filter(([event]) => event.startsWith('client-')))
+    for (const [event, handler] of bound) channel.bind(event, handler)
+    if (Object.keys(whispers).length > 0) clientHandlers.set(name, whispers)
+    const failed = () => onError?.(authStatus.get(name) ?? null)
+    channel.bind('pusher:subscription_error', failed)
+    return () => {
+      for (const [event, handler] of bound) channel.unbind(event, handler)
+      if (clientHandlers.get(name) === whispers) clientHandlers.delete(name)
+      channel.unbind('pusher:subscription_error', failed)
+      pusher.unsubscribe(name)
+      authStatus.delete(name)
+    }
+  }
+
+  return {
+    state,
+    subscribe,
+    whisper(name, event, data) {
+      const channel = pusher.channel(name)
+      if (channel?.subscribed) channel.trigger(event, data)
+    },
+    subscribePresence(name, listener, onError) {
+      const handlers: EventHandlers = {
+        'pusher:subscription_succeeded': (members) => {
+          const list: PresenceMember[] = []
+          ;(members as { each?: (fn: (member: unknown) => void) => void })?.each?.((member) => {
+            const person = toMember(member)
+            if (person) list.push(person)
+          })
+          listener.members(list)
+        },
+        'pusher:member_added': (member) => {
+          const person = toMember(member)
+          if (person) listener.added(person)
+        },
+        'pusher:member_removed': (member) => {
+          const person = toMember(member, false)
+          if (person) listener.removed(person.id)
+        },
+      }
+      return subscribe(name, handlers, onError)
+    },
+    onReconnect(listener) {
+      reconnectListeners.add(listener)
+      return () => reconnectListeners.delete(listener)
+    },
+    disconnect() {
+      reconnectListeners.clear()
+      pusher.disconnect()
+    },
+  }
+}

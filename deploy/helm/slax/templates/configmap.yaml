@@ -1,0 +1,9 @@
+# Non-secret configuration of the Laravel processes (secrets: the hand-made Secret).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "slax.name" (dict "ctx" . "component" "config") }}
+  labels:
+    {{- include "slax.labels" . | nindent 4 }}
+data:
+  {{- include "slax.config" . | nindent 2 }}

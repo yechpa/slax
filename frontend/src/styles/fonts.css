@@ -1,0 +1,69 @@
+/*
+ * Cascadia Mono (SIL OFL 1.1, Microsoft), self-hosted: no third-party request.
+ * True monospace Hebrew: Hebrew letters sit on the same 1200-unit grid as Latin.
+ * Two weights (300 text, 700 strong) × three subsets. unicode-range means a
+ * browser only downloads the subsets a page actually uses: Latin-Ext is fetched
+ * only for characters beyond Latin-1, Hebrew only when Hebrew text is on screen.
+ * Licence: /fonts/OFL.txt. Choice and reasons: docs/design-system.md.
+ */
+
+/* latin */
+@font-face {
+  font-family: 'Cascadia Mono';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('/fonts/cascadia-mono-latin-300.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Cascadia Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/cascadia-mono-latin-700.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* latin-ext */
+@font-face {
+  font-family: 'Cascadia Mono';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('/fonts/cascadia-mono-latin-ext-300.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Cascadia Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/cascadia-mono-latin-ext-700.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* hebrew */
+@font-face {
+  font-family: 'Cascadia Mono';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('/fonts/cascadia-mono-hebrew-300.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+
+@font-face {
+  font-family: 'Cascadia Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/cascadia-mono-hebrew-700.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}

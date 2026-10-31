@@ -1,0 +1,302 @@
+# Slax Helm chart: defaults. Safe and environment-neutral; values-dev.yaml and
+# values-prod.yaml complete them:
+#   helm upgrade --install slax deploy/helm/slax -n slax \
+#     -f deploy/helm/slax/values-dev.yaml --set image.tag=<git commit SHA>
+#
+# No secret ever goes in these files. Every secret value lives in one Secret created by
+# hand in the namespace (secretName below; keys listed in deploy/dev/BOOTSTRAP.md, created by
+# deploy/dev/create-secrets.sh). The chart only refers to it by name.
+
+image:
+  registry: ghcr.io
+  owner: yechpa
+  # The three images (slax-app, slax-web, slax-scanner) share one tag: the Git commit SHA
+  # they were built from (.github/workflows/images.yml). Required, given with --set.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# The GHCR images are public: no pull secret needed.
+imagePullSecrets: []
+
+# Public host name. The app is served at https://<publicHost> (TLS on the ingress, or in
+# front of it). Required.
+publicHost: ""
+
+# Every Telegram alert starts with "[<envLabel>]" (SLAX_ENV_LABEL): Dev or Prod.
+envLabel: ""
+
+# The hand-made Secret holding every secret value (never created by this chart).
+secretName: slax-secrets
+
+config:
+  logLevel: info
+  # Days the audit log keeps its entries (audit:prune).
+  auditRetentionDays: 180
+  # Proxies whose X-Forwarded-For header nginx believes, so rate limits, Turnstile and the
+  # audit log see the visitor's address, not the proxy's (Laravel itself trusts no proxy and
+  # reads nginx's REMOTE_ADDR). Default: k3s's pod network (10.42.0.0/16): in dev the
+  # ingress controller (Traefik) runs there; in production Caddy on the host reaches the
+  # web pod from the node's own pod-network address. Nothing else can send to nginx with a
+  # forged header: the web pod's network policy admits only the ingress controller (dev) or
+  # the node itself (prod).
+  trustedProxies:
+    - 10.42.0.0/16
+  # Strict-Transport-Security from nginx, in seconds. 0: none from here; the TLS terminator
+  # in front sets it (Caddy in production: deploy/aws/Caddyfile). Set it only if nothing in
+  # front does.
+  hstsMaxAge: 0
+  # More non-secret environment variables for the Laravel processes (never APP_ENV,
+  # APP_DEBUG or a secret key: the chart refuses them).
+  extraEnv: {}
+
+demo:
+  # Run DemoSeeder (fictional people and messages, idempotent) after the migrations.
+  seed: false
+  # SLAX_DEMO_RESET_ENABLED: the nightly reset that deletes visitors' accounts and content.
+  # Only on the public showcase.
+  resetEnabled: false
+
+session:
+  # SESSION_LIFETIME, in minutes: how long a session lasts without a request. Rolling: every
+  # request starts the count again. 14 days, so a notification tapped after a quiet week opens
+  # the conversation instead of the sign-in screen. Sign-out and a ban end a session at once
+  # whatever this says. Only a session with someone signed in is kept this long; any
+  # other session (a visitor's, a crawler's) is kept 2 hours at most (SESSION_DRIVER=redis-tiered).
+  # See docs/runbook.md 4.8 for Redis's memory.
+  lifetimeMinutes: 20160
+
+# Web Push (VAPID). The key pair lives in the Secret only (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY:
+# both optional; without them push is off and the app hides its switch). Generate it with
+# deploy/dev/create-secrets.sh (or `php artisan slax:push-keys`); see docs/runbook.md.
+push:
+  # VAPID_SUBJECT, how the push services can reach the operator: a mailto: or https: URL.
+  # Empty: the public URL (https://<publicHost>).
+  subject: ""
+
+s3:
+  region: us-east-1
+  bucket: slax-files
+  # S3 API the app talks to. Empty: AWS for the region. Ignored with minio.enabled (the
+  # in-cluster MinIO is used).
+  endpoint: ""
+  # Endpoint written into presigned download URLs (what browsers reach). Empty: the same
+  # as the API's; https://<minio.ingress.host> with MinIO.
+  publicEndpoint: ""
+  usePathStyle: false
+  # Origin file previews are loaded from (Content-Security-Policy img-src). Empty: the
+  # origin of publicEndpoint; on AWS without one, the bucket's own virtual-hosted origin
+  # https://<bucket>.s3.<region>.amazonaws.com (what the SDK writes into presigned URLs).
+  filesOrigin: ""
+  # false: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY come from the Secret (dev's MinIO, or
+  # static keys). true (production): no key at all; the AWS SDK's default chain takes the
+  # EC2 instance role's short-lived credentials from the instance metadata service (IMDSv2,
+  # hop limit 2: deploy/aws/provision.sh). The two keys are then not even referenced, so a
+  # stale pair left in the Secret can never take precedence over the role.
+  useInstanceRole: false
+
+# The web pod: nginx (slax-web) and PHP-FPM (slax-app) side by side. One pod so FastCGI
+# stays on the pod's loopback (never on the network) and the SPA and the API it talks to
+# always ship together.
+app:
+  replicas: 1
+  service:
+    # A fixed address in k3s's service network (10.43.0.0/16) for a proxy outside the
+    # cluster: production's Caddy, on the host, proxies to http://<clusterIP>:80. Empty: any.
+    # Pick it in the static band (10.43.0.0-10.43.0.255 for a /16), which Kubernetes never
+    # hands out automatically; k3s itself uses .1 (kubernetes) and .10 (kube-dns) there.
+    clusterIP: ""
+  php:
+    resources:
+      requests: { cpu: 50m, memory: 160Mi }
+      limits: { cpu: "1", memory: 768Mi }
+  web:
+    resources:
+      requests: { cpu: 10m, memory: 24Mi }
+      limits: { cpu: 500m, memory: 128Mi }
+
+# Laravel Reverb (WebSocket). One replica: without Reverb's Redis scaling, a second one
+# would not see the first one's connections.
+reverb:
+  # Public identifier of the Reverb app (the key and secret are in the Secret).
+  appId: slax
+  # No cap on sockets (REVERB_APP_MAX_CONNECTIONS unset), deliberately: anyone may subscribe a
+  # socket to a public channel name without authorization and fill a cap, and pusher-js never
+  # retries a refused socket. The memory limit below is the bound (docs/known-limitations.md).
+  # Per socket, every frame counts (subscriptions, pings, typing whispers): at most maxAttempts
+  # per decaySeconds; beyond, each frame is refused (pusher error 4301) and dropped, the socket
+  # stays (terminateOnLimit false). A reconnection re-subscribing 30 channels and the presence
+  # channel, then a minute of typing, uses about a sixth of it (reverb-e2e test, PresenceTest.php).
+  rateLimit:
+    maxAttempts: 300
+    decaySeconds: 60
+    terminateOnLimit: false
+  resources:
+    requests: { cpu: 20m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# One queue worker: broadcasts and channel revocations keep their order.
+queue:
+  resources:
+    requests: { cpu: 20m, memory: 112Mi }
+    limits: { cpu: 500m, memory: 384Mi }
+
+# One scheduler (schedule:work): never two at once (Recreate).
+scheduler:
+  resources:
+    requests: { cpu: 10m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# Upload validation (services/scanner). Reachable only from the app and queue pods.
+scanner:
+  resources:
+    requests: { cpu: 20m, memory: 80Mi }
+    limits: { cpu: 500m, memory: 320Mi }
+
+postgres:
+  image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+  database: slax
+  username: slax
+  maxConnections: 50
+  sharedBuffers: 128MB
+  storage:
+    size: 5Gi
+    storageClassName: local-path
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+redis:
+  image: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+  # Sessions, cache, rate limits, presence and the queue. volatile-lru: when full, Redis evicts
+  # the least recently used keys that carry an expiry (sessions, cache, throttles, presence,
+  # tombstones: all of them do), never the queue's lists and sets (they have none), so a flood
+  # of sessions signs a few people out instead of failing every request. LRU does not tell a guest
+  # from a member: the first evicted are the sessions idle the longest, i.e. family phones unused
+  # for days, before a fresh guest session. A guest's session
+  # lives 2 hours at most (SESSION_DRIVER=redis-tiered).
+  maxmemory: 128mb
+  storage:
+    size: 1Gi
+    storageClassName: local-path
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 500m, memory: 192Mi }
+
+# S3-compatible storage inside the cluster: development only. Production uses real S3
+# (values-prod.yaml keeps this off).
+minio:
+  enabled: false
+  image: cgr.dev/chainguard/minio:latest@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82
+  clientImage: cgr.dev/chainguard/minio-client:latest@sha256:5b759d9e248ad9f1ab8455f8168b86a47acb1e08207d38603b504bdc5a555d7a
+  storage:
+    size: 10Gi
+    storageClassName: local-path
+  resources:
+    requests: { cpu: 20m, memory: 160Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  # Browsers download files (presigned URLs) from this host, on a name of its own: never
+  # the app's origin.
+  ingress:
+    host: ""
+    tlsSecretName: slax-files-tls
+
+# The cluster's ingress (Traefik, bundled with k3s): dev. Production has no ingress
+# controller: Caddy on the host terminates TLS and proxies to app.service.clusterIP.
+ingress:
+  enabled: true
+  className: traefik
+  tls:
+    enabled: true
+    # cert-manager ClusterIssuer (ACME DNS-01), created by hand: deploy/dev/BOOTSTRAP.md.
+    clusterIssuer: ""
+    secretName: slax-tls
+  annotations: {}
+
+# Daily PostgreSQL backup to S3 and a weekly restore check (deploy/backup/*.sh, image
+# slax-backup). For a cluster with real S3 and AWS credentials from the instance role: the
+# production values turn it on.
+backup:
+  enabled: false
+  # The backups bucket (deploy/aws/provision.sh prints its name). Required when enabled.
+  bucket: ""
+  # Dumps go to s3://<bucket>/<prefix>/YYYY/MM/DD/slax-<UTC time>.dump.
+  prefix: pg
+  timeZone: Asia/Jerusalem
+  # Every day at 02:30, before the 03:00 demo reset.
+  schedule: "30 2 * * *"
+  activeDeadlineSeconds: 1800
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  restoreCheck:
+    # Every Sunday at 03:30: the latest dump restored into a throwaway PostgreSQL inside the
+    # check's own pod (never the production server), checked, then thrown away.
+    schedule: "30 3 * * 0"
+    # The latest dump must be younger than this, or the check fails (a backup that silently
+    # stopped running).
+    maxAgeHours: 36
+    activeDeadlineSeconds: 1800
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { cpu: 500m, memory: 256Mi }
+    postgresResources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { cpu: "1", memory: 384Mi }
+
+# Uptime and disk watch from outside the app, every minute (deploy/monitoring/uptime.sh in
+# the slax-backup image; templates/monitor-cronjob.yaml): the web pod's health, Reverb,
+# PostgreSQL, Redis and, optionally, the public URL; the node's disks. Telegram alerts
+# "[<envLabel>] ..." with the Secret's TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID (none: logged only).
+monitor:
+  enabled: true
+  schedule: "* * * * *"
+  # Also GET https://<publicHost>/api/v1/health from the cluster: DNS, the edge proxy and its
+  # certificate. Needs the public name to resolve and route from inside the cluster.
+  checkPublicUrl: false
+  # A DOWN alert after this many failed checks in a row (one a minute).
+  failThreshold: 3
+  # Time, per run: the checks run in parallel, each given timeoutSeconds; a Telegram call
+  # is given telegramTimeoutSeconds; no alert is started that could end after budgetSeconds
+  # (it waits for the next run). The chart requires timeoutSeconds + telegramTimeoutSeconds
+  # + 5 <= budgetSeconds and budgetSeconds + 15 <= activeDeadlineSeconds (pod start-up).
+  timeoutSeconds: 10
+  telegramTimeoutSeconds: 5
+  budgetSeconds: 35
+  disk:
+    # Alert above this usage, again every realertHours while above; all clear below
+    # recoverPercent (nothing in between).
+    alertPercent: 80
+    recoverPercent: 75
+    realertHours: 6
+  activeDeadlineSeconds: 50
+  # Its state file (a few hundred bytes) and the probe of the volumes' disk. Fixed once
+  # created: local-path volumes cannot be resized (an upgrade changing the size fails).
+  storage:
+    size: 16Mi
+    storageClassName: local-path
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { cpu: 200m, memory: 64Mi }
+
+networkPolicy:
+  enabled: true
+  # Where the ingress controller runs (k3s: Traefik in kube-system). Used with
+  # ingress.enabled; without it only the node itself (the front proxy on the host) reaches
+  # the web pod.
+  ingressController:
+    namespace: kube-system
+    podLabels:
+      app.kubernetes.io/name: traefik
+  # Pods that need no AWS credentials cannot reach the instance metadata service
+  # (169.254.169.254), so a compromised one cannot borrow the instance role: Reverb,
+  # PostgreSQL, Redis, the migrations and the uptime monitor (the scanner has no egress at
+  # all). For clusters on EC2 (production).
+  denyInstanceMetadata: false
+
+migrations:
+  # The migration Job (post-install, pre-upgrade hook) must finish within this.
+  activeDeadlineSeconds: 600
+  backoffLimit: 2
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }

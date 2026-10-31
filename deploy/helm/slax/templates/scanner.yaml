@@ -1,0 +1,69 @@
+{{- $component := "scanner" -}}
+{{- $name := include "slax.name" (dict "ctx" . "component" $component) -}}
+# Upload validation (services/scanner). ClusterIP only; the network policy lets only the app
+# and queue pods in, and nothing out.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- include "slax.podCommon" . | nindent 6 }}
+      securityContext:
+        {{- include "slax.podSecurityContext" 10001 | nindent 8 }}
+      containers:
+        - name: scanner
+          image: {{ include "slax.image" (dict "ctx" . "name" "scanner") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          securityContext:
+            {{- include "slax.containerSecurityContext" 10001 | nindent 12 }}
+          resources:
+            {{- toYaml .Values.scanner.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

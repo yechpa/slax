@@ -1,0 +1,76 @@
+@layer utilities {
+  /* Hidden on screen, still read by assistive technology. */
+  .sr-only {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .muted {
+    color: var(--color-muted);
+  }
+
+  .dim {
+    color: var(--color-text-dim);
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stack {
+    display: grid;
+    align-content: start;
+    gap: var(--stack-gap, var(--space-3));
+  }
+
+  .cluster {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cluster-gap, var(--space-2));
+  }
+
+  /* Skip link: visible only when focused. */
+  .skip-link {
+    position: absolute;
+    inset-block-start: var(--space-2);
+    inset-inline-start: var(--space-2);
+    z-index: 1000;
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-accent);
+    color: var(--color-accent-ink);
+    translate: 0 -200%;
+  }
+
+  .skip-link:focus-visible {
+    translate: 0 0;
+  }
+
+  /*
+   * Touch screens: no field under 16 px, or iOS Safari zooms the page in when one is focused
+   * (and leaves it zoomed). In this last layer, so it wins over every component's size; the
+   * composer's whole line follows, for its prompt and placeholder to stay level with the text.
+   * Zooming itself is never disabled (no maximum-scale in the viewport meta).
+   */
+  @media (pointer: coarse) {
+    input:not([type='checkbox'], [type='radio'], [type='file'], [type='range'], [type='color'], [type='hidden']),
+    textarea,
+    select,
+    .composer__line {
+      font-size: max(16px, 1rem);
+    }
+  }
+}

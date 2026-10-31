@@ -1,0 +1,105 @@
+{{- $component := "redis" -}}
+{{- $name := include "slax.name" (dict "ctx" . "component" $component) -}}
+# Redis 7: sessions, cache and the queue. Password from the Secret (REDIS_PASSWORD), written
+# to a config file at start so it never shows on a command line. Append-only file on a
+# local-path volume so queued jobs survive a restart.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      # Selector labels only: no image tag or chart version, so a deployment of new app
+      # images does not restart the database.
+      labels:
+        {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- include "slax.podCommon" . | nindent 6 }}
+      securityContext:
+        {{- include "slax.podSecurityContext" 999 | nindent 8 }}
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              umask 077
+              printf 'requirepass "%s"\n' "$REDIS_PASSWORD" > /tmp/redis.conf
+              exec redis-server /tmp/redis.conf --dir /data --appendonly yes --save "" \
+                --maxmemory {{ .Values.redis.maxmemory }} --maxmemory-policy volatile-lru
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: REDIS_PASSWORD
+            # redis-cli (probes) reads the password from here.
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: REDIS_PASSWORD
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            {{- include "slax.containerSecurityContext" 999 | nindent 12 }}
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -h 127.0.0.1 ping | grep -q PONG"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -h 127.0.0.1 ping | grep -q PONG"]
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.redis.storage.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.redis.storage.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

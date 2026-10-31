@@ -1,0 +1,23 @@
+# Build context: the repository root. Only what docker/app/Dockerfile copies goes in.
+*
+!backend/
+!docker/app/
+
+backend/vendor/
+backend/tests/
+backend/phpunit.xml
+backend/.env
+backend/.env.*
+backend/bootstrap/cache/*.php
+backend/storage/logs/*
+backend/storage/framework/cache/data/*
+backend/storage/framework/sessions/*
+backend/storage/framework/testing/
+backend/storage/framework/views/*
+backend/storage/app/private/*
+backend/storage/app/public/*
+backend/storage/pail/
+backend/node_modules/
+backend/.phpunit.cache/
+backend/.phpunit.result.cache
+**/.DS_Store

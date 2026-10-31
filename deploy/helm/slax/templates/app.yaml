@@ -1,0 +1,115 @@
+{{- $component := "app" -}}
+{{- $name := include "slax.name" (dict "ctx" . "component" $component) -}}
+# The web pod: nginx (slax-web) in front, PHP-FPM (slax-app) beside it on the pod's
+# loopback. The only thing the ingress talks to.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicas }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+        {{- include "slax.backendLabel" . | nindent 8 }}
+      annotations:
+        {{- include "slax.configChecksum" . | nindent 8 }}
+    spec:
+      {{- include "slax.podCommon" . | nindent 6 }}
+      securityContext:
+        {{- include "slax.podSecurityContext" 10001 | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        {{- include "slax.phpContainer" (dict "ctx" . "name" "php" "resources" .Values.app.php.resources) | nindent 8 }}
+          # PHP-FPM's own ping (FastCGI on 127.0.0.1:9000, not reachable by an HTTP probe).
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - SCRIPT_NAME=/fpm-ping SCRIPT_FILENAME=/fpm-ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q pong
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+        - name: web
+          image: {{ include "slax.image" (dict "ctx" . "name" "web") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SLAX_PUBLIC_URL
+              value: {{ include "slax.publicUrl" . | quote }}
+            - name: SLAX_FILES_ORIGIN
+              value: {{ include "slax.filesOrigin" . | quote }}
+            - name: SLAX_REVERB_UPSTREAM
+              value: {{ printf "%s:8080" (include "slax.name" (dict "ctx" . "component" "reverb")) | quote }}
+            - name: SLAX_PHP_UPSTREAM
+              value: "127.0.0.1:9000"
+            - name: SLAX_TRUSTED_PROXIES
+              value: {{ join "," .Values.config.trustedProxies | quote }}
+            - name: SLAX_HSTS_MAX_AGE
+              value: {{ .Values.config.hstsMaxAge | quote }}
+            # Public values written into index.html for the browser.
+            {{- include "slax.secretRef" (dict "ctx" . "key" "TURNSTILE_SITE_KEY") | nindent 12 }}
+            {{- include "slax.secretRef" (dict "ctx" . "key" "REVERB_APP_KEY") | nindent 12 }}
+          securityContext:
+            {{- include "slax.containerSecurityContext" 101 | nindent 12 }}
+          resources:
+            {{- toYaml .Values.app.web.resources | nindent 12 }}
+          # Ready when the API answers (through PHP-FPM); alive while nginx answers.
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: web-tmp
+              mountPath: /tmp
+      volumes:
+        {{- include "slax.phpVolumes" . | nindent 8 }}
+        - name: web-tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  {{- with .Values.app.service.clusterIP }}
+  # Fixed: the front proxy on the host (production's Caddy) proxies to this address.
+  clusterIP: {{ . }}
+  {{- end }}
+  selector:
+    {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: slax
+description: Slax (a Slack clone) on a small single-node k3s cluster — web, API, WebSocket, queue, scheduler, upload scanner, PostgreSQL, Redis and, in development, MinIO.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/yechpa/slax
+sources:
+  - https://github.com/yechpa/slax

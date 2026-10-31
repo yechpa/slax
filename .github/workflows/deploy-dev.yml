@@ -1,0 +1,178 @@
+# Continuous deployment to the development cluster (k3s on slax-dev, tailnet only).
+#
+# Runs when the Images workflow has succeeded for a push to main: by then the
+# multi-architecture images ghcr.io/yechpa/slax-*:<sha> exist, so Helm never deploys a tag
+# that is not there yet. (A plain `push: main` trigger would race the image builds.)
+# workflow_run always runs this file from the default branch with the repository's secrets,
+# so the `if` below accepts only runs of a push to main in this repository: never a pull
+# request (a fork's branch may be called main too).
+#
+# The runner joins the tailnet with an ephemeral node tagged tag:ci (Tailscale OAuth client),
+# which the tailnet policy lets reach slax-dev on 6443 (Kubernetes API) and 443 only, and
+# deploys with a kubeconfig limited to the slax namespace (deploy/dev/deployer-rbac.yaml).
+# Whatever happens, the result goes to the administrators' Telegram chat; when Images did not
+# succeed (failed or timed out) for a push to main, the `skipped` job says that nothing was
+# deployed. A Telegram failure only warns: it never turns a deployment red.
+#
+# Secrets (repository or `dev` environment; deploy/dev/BOOTSTRAP.md): TS_OAUTH_CLIENT_ID,
+# TS_OAUTH_SECRET, DEV_KUBECONFIG (base64), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+name: Deploy dev
+
+on:
+  workflow_run:
+    workflows: [Images]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One deployment at a time; a newer one waits rather than cancelling a rollout midway.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  HELM_VERSION: v3.22.1
+  HELM_SHA256: 896cf63684a42a723d61c980369d6e588330927deb13676ca0d85006dd6da0ea # helm-v3.22.1-linux-amd64.tar.gz
+  DEV_URL: https://dev.slax.yechpa.com
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: dev
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Install Helm ${{ env.HELM_VERSION }} (checksum verified)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o helm.tgz "https://get.helm.sh/helm-$HELM_VERSION-linux-amd64.tar.gz"
+          echo "$HELM_SHA256  helm.tgz" | sha256sum -c -
+          tar -xzf helm.tgz linux-amd64/helm
+          sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+          helm version --short
+
+      - name: Join the tailnet (ephemeral, tag:ci)
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Kubeconfig (namespace-scoped deployer)
+        env:
+          DEV_KUBECONFIG: ${{ secrets.DEV_KUBECONFIG }}
+        run: |
+          set +x -euo pipefail
+          umask 077
+          printf '%s' "$DEV_KUBECONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: helm upgrade --install (image tag ${{ github.event.workflow_run.head_sha }})
+        run: |
+          helm upgrade --install slax deploy/helm/slax \
+            --namespace slax \
+            -f deploy/helm/slax/values-dev.yaml \
+            --set image.tag="$SHA" \
+            --atomic --wait --timeout 12m
+
+      - name: Health check
+        run: |
+          curl --fail --silent --show-error --retry 30 --retry-delay 5 --retry-all-errors \
+            --max-time 10 "$DEV_URL/api/v1/health"
+
+      - name: Remove the kubeconfig
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kubeconfig"
+
+      # Success or failure, with the short SHA and a link to this run: never a secret or any
+      # user data. The token never reaches a command line or the log: masked, passed through
+      # the environment, and handed to curl in a config read from stdin.
+      - name: Telegram deploy alert
+        if: always()
+        # A Telegram problem never turns a good deployment red (the step only warns).
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OUTCOME: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set +x -eu
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram is not configured: no deploy alert."
+            exit 0
+          fi
+          echo "::add-mask::$TELEGRAM_BOT_TOKEN"
+          echo "::add-mask::$TELEGRAM_CHAT_ID"
+          short="${SHA:0:7}"
+          if [ "$OUTCOME" = success ]; then
+            text="[Dev] Deploy OK: ${short} is live on dev."
+          else
+            text="[Dev] Deploy FAILED (${OUTCOME}): ${short}. Helm rolled back if it got that far."
+          fi
+          if printf '%s\n' \
+            "url = \"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage\"" \
+            "data-urlencode = \"chat_id=${TELEGRAM_CHAT_ID}\"" |
+            curl --silent --fail --max-time 15 --output /dev/null --config - \
+              --data-urlencode "text=${text}"$'\n'"${RUN_URL}" \
+              --data-urlencode "disable_web_page_preview=true"; then
+            echo "Deploy alert sent (${OUTCOME})."
+          else
+            echo "::warning::The Telegram deploy alert could not be sent (curl exit $?)."
+            exit 1
+          fi
+
+  # Images failed (or timed out) for a push to main: nothing was deployed. Say so. A
+  # cancelled run (superseded by a newer push) is not worth an alert.
+  skipped:
+    if: >-
+      (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out')
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: dev
+    steps:
+      - name: Telegram alert (deploy skipped)
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          IMAGES_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set +x -eu
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram is not configured: no alert."
+            exit 0
+          fi
+          echo "::add-mask::$TELEGRAM_BOT_TOKEN"
+          echo "::add-mask::$TELEGRAM_CHAT_ID"
+          text="[Dev] Deploy skipped: Images ${CONCLUSION} for ${SHA:0:7}."
+          if printf '%s\n' \
+            "url = \"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage\"" \
+            "data-urlencode = \"chat_id=${TELEGRAM_CHAT_ID}\"" |
+            curl --silent --fail --max-time 15 --output /dev/null --config - \
+              --data-urlencode "text=${text}"$'\n'"${IMAGES_URL}" \
+              --data-urlencode "disable_web_page_preview=true"; then
+            echo "Alert sent."
+          else
+            echo "::warning::The Telegram alert could not be sent (curl exit $?)."
+            exit 1
+          fi

@@ -1,0 +1,109 @@
+{{- $component := "postgres" -}}
+{{- $name := include "slax.name" (dict "ctx" . "component" $component) -}}
+# PostgreSQL 16, one instance, data on a local-path volume (kept when the release is
+# uninstalled: StatefulSet volume claims are never deleted by Helm).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      # Selector labels only: no image tag or chart version, so a deployment of new app
+      # images does not restart the database.
+      labels:
+        {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- include "slax.podCommon" . | nindent 6 }}
+      securityContext:
+        {{- include "slax.podSecurityContext" 70 | nindent 8 }}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - -c
+            - max_connections={{ .Values.postgres.maxConnections }}
+            - -c
+            - shared_buffers={{ .Values.postgres.sharedBuffers }}
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: DB_PASSWORD
+            # A subdirectory: the volume's root may hold lost+found.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          securityContext:
+            {{- include "slax.containerSecurityContext" 70 | nindent 12 }}
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", 'pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.postgres.storage.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "slax.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "slax.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

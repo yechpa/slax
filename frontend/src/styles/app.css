@@ -1,0 +1,1096 @@
+/*
+ * The application's own screens (sign-in, workspace shell, channel view), built on the
+ * design-system components in components.css. Same rules: tokens only, logical
+ * properties only, motion opt-in.
+ */
+@layer components {
+  /* ── Splash (start-up, server unreachable) ───────────── */
+  .splash {
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: var(--space-4);
+    min-block-size: 100vh;
+    min-block-size: 100dvh;
+    padding-block: calc(var(--space-6) + var(--safe-top)) calc(var(--space-6) + var(--safe-bottom));
+    padding-inline: calc(var(--space-4) + var(--safe-inline-start)) calc(var(--space-4) + var(--safe-inline-end));
+    font-size: var(--text-xl);
+    text-align: center;
+  }
+
+  .splash__text {
+    max-inline-size: 32rem;
+    font-size: var(--text-sm);
+    color: var(--color-text-dim);
+  }
+
+  /* ── Sign-in ─────────────────────────────────────────── */
+  .signin {
+    position: relative;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-block-size: 100vh;
+    min-block-size: 100dvh;
+    background-color: var(--color-bg);
+    background-image: var(--paper);
+  }
+
+  /* The console's scanlines, as over the application frame. */
+  .signin::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: var(--scanlines);
+    pointer-events: none;
+  }
+
+  .signin__prefs {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2) var(--space-6);
+    padding-block: calc(var(--space-3) + var(--safe-top)) var(--space-3);
+    padding-inline: calc(var(--space-4) + var(--safe-inline-start)) calc(var(--space-4) + var(--safe-inline-end));
+  }
+
+  .signin__main {
+    display: grid;
+    place-items: center;
+    padding-block: var(--space-6) calc(var(--space-16) + var(--safe-bottom));
+    padding-inline: calc(var(--space-4) + var(--safe-inline-start)) calc(var(--space-4) + var(--safe-inline-end));
+  }
+
+  .signin__card {
+    display: grid;
+    gap: var(--space-4);
+    inline-size: min(100%, 28rem);
+    padding: var(--space-8) var(--space-6);
+    background: var(--color-surface);
+    border: var(--border-width) var(--rule-style) var(--color-border-strong);
+    border-radius: var(--radius-1);
+  }
+
+  .signin__brand {
+    font-size: var(--text-2xl);
+    line-height: var(--leading-tight);
+  }
+
+  .signin__tagline {
+    color: var(--color-text-dim);
+    font-size: var(--text-sm);
+  }
+
+  .signin__title {
+    margin-block-start: var(--space-4);
+    padding-block-start: var(--space-4);
+    border-block-start: var(--border-width) var(--rule-style) var(--color-border);
+    font-size: var(--text-md);
+    font-weight: var(--weight-strong);
+  }
+
+  .signin__title::before {
+    content: '$ ';
+    color: var(--color-accent);
+    text-shadow: var(--glow);
+  }
+
+  .signin__alert:empty {
+    display: none;
+  }
+
+  .signin__error {
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-border-strong);
+    border-inline-start: 3px solid var(--color-danger);
+    border-radius: var(--radius-1);
+    font-size: var(--text-sm);
+  }
+
+  .signin__error::before {
+    content: '[!!] ';
+    color: var(--color-danger);
+    font-weight: var(--weight-strong);
+  }
+
+  .signin__google {
+    inline-size: 100%;
+    min-block-size: 2.75rem;
+    font-size: var(--text-sm);
+  }
+
+  /* Turnstile stays invisible unless Cloudflare needs a click. */
+  .signin__turnstile:empty {
+    display: none;
+  }
+
+  .signin__note {
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+  }
+
+  @media (pointer: coarse) {
+    .signin .segmented__option {
+      min-block-size: 2.75rem;
+    }
+  }
+
+  /* ── Application shell ───────────────────────────────── */
+  /*
+   * The notch: the shell keeps its content clear of the side insets (landscape); the header, the
+   * footers and the sidebar take the top and bottom ones themselves, so their backgrounds still
+   * reach the screen's edges. The drawer and the thread, positioned, pad themselves.
+   */
+  .shell--app {
+    block-size: 100vh;
+    block-size: 100dvh;
+    padding-inline: var(--safe-inline-start) var(--safe-inline-end);
+    border: 0;
+  }
+
+  .shell--app > .sidebar {
+    overflow: hidden;
+    padding-block: calc(var(--space-4) + var(--header-safe-top)) calc(var(--space-2) + var(--footer-safe-bottom));
+  }
+
+  .sidebar:focus-visible {
+    outline-offset: calc(var(--focus-width) * -1);
+  }
+
+  .sidebar__scroll {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-block-size: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
+  .sidebar__scroll > .sidebar__heading:first-child {
+    margin-block-start: 0;
+  }
+
+  /* One column no wider than the sidebar: a long name is cut with an ellipsis (an auto column
+     would grow to the longest name and scroll the list sideways). */
+  .sidebar__list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+
+  .sidebar__empty {
+    padding-inline: var(--space-2);
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+  }
+
+  /* A private room: a padlock (shackle over body), centred in the sigil column. */
+  .nav-item__sigil--private {
+    display: inline-grid;
+    justify-items: center;
+    align-content: center;
+    block-size: 1em;
+  }
+
+  .nav-item__sigil--private::before {
+    content: '';
+    inline-size: 0.4em;
+    block-size: 0.32em;
+    border: 1.5px solid currentColor;
+    border-block-end: 0;
+    border-start-start-radius: 0.2em;
+    border-start-end-radius: 0.2em;
+  }
+
+  .nav-item__sigil--private::after {
+    content: '';
+    inline-size: 0.62em;
+    block-size: 0.42em;
+    background: currentColor;
+    border-radius: 1px;
+  }
+
+  /* "not joined" on the current item: readable on the selection colour. */
+  .nav-item[aria-current='page'] .nav-item__tag {
+    color: inherit;
+    font-weight: var(--weight-text);
+  }
+
+  .nav-item__avatar {
+    display: inline-grid;
+    flex: none;
+  }
+
+  /* A group: a second square peeking out from behind the first, at the inline end. */
+  .nav-item__avatar--group {
+    position: relative;
+    padding-inline-end: 3px;
+    padding-block-end: 3px;
+  }
+
+  .nav-item__avatar--group::before {
+    content: '';
+    position: absolute;
+    inset-inline-end: 0;
+    inset-block-end: 0;
+    inline-size: calc(100% - 3px);
+    block-size: calc(100% - 3px);
+    border: var(--border-width) solid var(--color-border-strong);
+    border-radius: var(--radius-1);
+  }
+
+  .nav-item__avatar--group > .avatar {
+    z-index: 1;
+  }
+
+  .shell__scrim {
+    display: none;
+  }
+
+  /* ── Account menu ────────────────────────────────────── */
+  .user-menu {
+    flex: none;
+    display: grid;
+    gap: var(--space-2);
+    margin-block-start: var(--space-2);
+    padding-block-start: var(--space-2);
+    border-block-start: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .user-menu__panel {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-2);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-border-strong);
+    border-radius: var(--radius-1);
+  }
+
+  .user-menu__panel[hidden] {
+    display: none;
+  }
+
+  .user-menu__who {
+    display: grid;
+    gap: var(--space-0-5);
+    color: var(--color-text-dim);
+    font-size: var(--text-xs);
+  }
+
+  .user-menu__email {
+    color: var(--color-muted);
+    overflow-wrap: anywhere;
+  }
+
+  .user-menu__signout {
+    justify-self: start;
+  }
+
+  /* Installing the app (pwa/InstallPrompt.tsx), in the account menu. */
+  .install {
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+  }
+
+  .install__title {
+    color: var(--color-muted);
+  }
+
+  .install__hint {
+    color: var(--color-text-dim);
+  }
+
+  .install__action {
+    justify-self: start;
+  }
+
+  .install__steps {
+    display: grid;
+    gap: var(--space-1);
+    padding-inline-start: 1.5em;
+    color: var(--color-text-dim);
+    list-style: decimal;
+  }
+
+  /* Notifications on this device (pwa/PushSettings.tsx), in the account menu. */
+  .push {
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+  }
+
+  .push__title {
+    color: var(--color-muted);
+  }
+
+  .push__toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-block-size: var(--control-height);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .push__switch {
+    flex: none;
+    inline-size: 1.125rem;
+    block-size: 1.125rem;
+    margin: 0;
+    accent-color: var(--color-accent);
+    cursor: inherit;
+  }
+
+  /* Dimmed with a token that keeps 4.5:1 (no opacity: contrast.test.ts measures tokens). */
+  .push__toggle:has(.push__switch:disabled) {
+    color: var(--color-text-dim);
+    cursor: default;
+  }
+
+  .push__hint {
+    color: var(--color-text-dim);
+  }
+
+  .push__test {
+    justify-self: start;
+  }
+
+  /* A finger needs 44 px: the switch's whole line, and every button and option of the menu. */
+  @media (pointer: coarse) {
+    .push__toggle,
+    .user-menu__panel .btn,
+    .user-menu__panel .segmented__option {
+      min-block-size: 2.75rem;
+    }
+
+    .user-menu__panel .btn,
+    .user-menu__panel .segmented__option {
+      min-inline-size: 2.75rem;
+      justify-content: center;
+    }
+  }
+
+  .user-menu__toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    inline-size: 100%;
+    min-block-size: var(--control-height);
+    padding-inline: var(--space-2);
+    border-radius: var(--radius-1);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    text-align: start;
+  }
+
+  .user-menu__toggle:hover {
+    background: var(--color-hover);
+  }
+
+  .user-menu__name {
+    flex: 0 1 auto;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-menu__caret {
+    flex: none;
+    margin-inline-start: auto;
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+  }
+
+  /* ── Channel header ──────────────────────────────────── */
+  .shell--app .channel-header__title {
+    flex-wrap: nowrap;
+  }
+
+  .shell--app .channel-header__name {
+    flex: none;
+    max-inline-size: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .shell--app .channel-header__meta {
+    flex: none;
+  }
+
+  .channel-header__topic {
+    flex: 1 1 0;
+    min-inline-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    color: var(--color-text-dim);
+    font-size: var(--text-xs);
+    text-align: start;
+  }
+
+  /*
+   * One line of user text in its own direction (dir="auto"), placed at the interface's start
+   * by its parent, and clipped with an ellipsis at its own end: an English topic in a Hebrew
+   * header keeps its beginning (a clip done by the parent would cut it at the RTL end).
+   */
+  .clip-own {
+    display: inline-block;
+    max-inline-size: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+
+  /* ── Message pane ────────────────────────────────────── */
+  .message-pane {
+    position: relative;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    min-block-size: 0;
+  }
+
+  .message-pane--empty {
+    align-content: center;
+  }
+
+  /* Positioned (rows measure their offsets against it); no browser scroll anchoring:
+     the list keeps the reading position itself when older messages load. */
+  .message-list {
+    position: relative;
+    overflow-anchor: none;
+  }
+
+  .message-list:focus-visible {
+    outline-offset: calc(var(--focus-width) * -1);
+  }
+
+  /* Few messages sit at the bottom, next to the composer, as in any chat. */
+  .message-list__paper {
+    display: flex;
+    flex-direction: column;
+    min-block-size: 100%;
+  }
+
+  .message-list__paper > :first-child {
+    margin-block-start: auto;
+  }
+
+  .message-list__paper > .empty {
+    margin-block: auto;
+  }
+
+  .message-list__edge {
+    min-block-size: 2rem;
+    padding: var(--space-3) var(--space-4);
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+    text-align: center;
+  }
+
+  .message-list__edge--start {
+    padding-block-start: var(--space-6);
+    color: var(--color-text-dim);
+  }
+
+  /* A follow-up by the same author: tight, and its time in the avatar column on hover. */
+  .message--compact {
+    padding-block: var(--space-0-5);
+  }
+
+  .message__gutter {
+    justify-self: end;
+    align-self: start;
+    color: var(--color-muted);
+    font-size: var(--text-2xs);
+    font-variant-numeric: tabular-nums;
+    line-height: calc(var(--text-base) * var(--leading));
+    white-space: nowrap;
+    opacity: 0;
+  }
+
+  .message--compact:hover .message__gutter,
+  .message--compact:focus-within .message__gutter {
+    opacity: 1;
+  }
+
+  .message--compact .message__main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--space-2);
+  }
+
+  .message--compact .message__footer {
+    flex-basis: 100%;
+  }
+
+  .message--pending .message__body,
+  .message--failed .message__body {
+    color: var(--color-text-dim);
+  }
+
+  .message__error {
+    color: var(--color-danger);
+    font-size: var(--text-xs);
+  }
+
+  .message__error::before {
+    content: '! ';
+    font-weight: var(--weight-strong);
+  }
+
+  .message-list__edge--failed {
+    color: var(--color-danger);
+  }
+
+  /* Refreshing keeps failing: a quiet line over the top of the list, with a Retry. */
+  .refresh-notice-region {
+    position: absolute;
+    inset-block-start: var(--space-2);
+    inset-inline: 0;
+    z-index: 1;
+    display: flex;
+    justify-content: center;
+    padding-inline: var(--space-4);
+    pointer-events: none;
+  }
+
+  .refresh-notice {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding-block: var(--space-1);
+    padding-inline: var(--space-3) var(--space-1);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-warn);
+    border-radius: var(--radius-1);
+    box-shadow: 0 0.25rem 0 0 var(--color-shadow);
+    color: var(--color-text);
+    font-size: var(--text-xs);
+    pointer-events: auto;
+  }
+
+  .refresh-notice__tag {
+    color: var(--color-warn);
+    font-weight: var(--weight-strong);
+  }
+
+  /* "New messages below": over the bottom of the list, centred. */
+  .jump-pill {
+    position: absolute;
+    inset-block-end: var(--space-3);
+    inset-inline: 0;
+    z-index: 1;
+    inline-size: fit-content;
+    min-block-size: var(--control-height);
+    margin-inline: auto;
+    padding-inline: var(--space-3);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-accent);
+    border-radius: var(--radius-1);
+    box-shadow: 0 0.25rem 0 0 var(--color-shadow);
+    color: var(--color-accent);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-strong);
+  }
+
+  .jump-pill:hover {
+    background: var(--color-hover);
+  }
+
+  /* ── Loading placeholder ─────────────────────────────── */
+  .skeleton {
+    display: grid;
+    gap: var(--space-4);
+    padding: var(--space-4);
+  }
+
+  .skeleton__row {
+    display: grid;
+    grid-template-columns: var(--avatar-size) minmax(0, 1fr);
+    column-gap: var(--space-3);
+  }
+
+  .skeleton__avatar {
+    block-size: var(--avatar-size);
+    border: var(--border-width) dashed var(--color-border-strong);
+    border-radius: var(--radius-1);
+  }
+
+  .skeleton__lines {
+    display: grid;
+    align-content: start;
+    gap: var(--space-2);
+    padding-block-start: var(--space-1);
+  }
+
+  .skeleton__line {
+    block-size: 0.6rem;
+    background: color-mix(in srgb, var(--color-text) 9%, transparent);
+    border-radius: var(--radius-1);
+  }
+
+  .skeleton__line--name {
+    inline-size: 6rem;
+    background: color-mix(in srgb, var(--color-text) 14%, transparent);
+  }
+
+  .skeleton__line--w30 {
+    inline-size: 30%;
+  }
+
+  .skeleton__line--w40 {
+    inline-size: 40%;
+  }
+
+  .skeleton__line--w52 {
+    inline-size: 52%;
+  }
+
+  .skeleton__line--w62 {
+    inline-size: 62%;
+  }
+
+  .skeleton__line--w68 {
+    inline-size: 68%;
+  }
+
+  .skeleton__line--w75 {
+    inline-size: 75%;
+  }
+
+  /* ── Composer extras ─────────────────────────────────── */
+  .composer__counter {
+    flex: none;
+    color: var(--color-muted);
+    font-size: var(--text-2xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .composer__counter--over {
+    color: var(--color-danger);
+    font-weight: var(--weight-strong);
+  }
+
+  /* ── Not a member yet ────────────────────────────────── */
+  .join-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    background: var(--color-raised);
+    border: var(--border-width) dashed var(--color-control-border);
+    border-radius: var(--radius-1);
+  }
+
+  .join-bar__text {
+    flex: 1;
+    min-inline-size: 0;
+    color: var(--color-text-dim);
+    font-size: var(--text-sm);
+  }
+
+  /* A member of a locked channel: reading only. */
+  .join-bar--locked {
+    border-style: solid;
+    border-color: var(--color-warn);
+  }
+
+  .user-menu__admin {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    color: var(--color-link);
+    font-size: var(--text-sm);
+  }
+
+  /* ── Administration (/admin) ─────────────────────────── */
+  .admin {
+    display: grid;
+    align-content: start;
+    gap: var(--space-4);
+    min-block-size: 0;
+    overflow: auto;
+    overscroll-behavior-y: contain;
+    padding: var(--space-4) var(--space-4) calc(var(--space-4) + var(--footer-safe-bottom));
+  }
+
+  .admin__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .admin__tab {
+    min-block-size: var(--control-height);
+    padding-inline: var(--space-3);
+    color: var(--color-text-dim);
+    background: none;
+    border: var(--border-width) solid transparent;
+    border-block-end: none;
+    border-start-start-radius: var(--radius-1);
+    border-start-end-radius: var(--radius-1);
+    cursor: pointer;
+  }
+
+  .admin__tab:hover {
+    color: var(--color-text);
+    background: var(--color-hover);
+  }
+
+  .admin__tab[aria-selected='true'] {
+    color: var(--color-accent);
+    border-color: var(--color-border);
+    background: var(--color-surface);
+    font-weight: var(--weight-strong);
+  }
+
+  .admin__panel {
+    display: grid;
+    gap: var(--space-6);
+    min-inline-size: 0;
+  }
+
+  .admin__section {
+    display: grid;
+    gap: var(--space-3);
+    min-inline-size: 0;
+  }
+
+  .admin__bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  .admin__heading {
+    font-size: var(--text-md);
+    font-weight: var(--weight-strong);
+    color: var(--color-accent);
+  }
+
+  .admin__subheading {
+    font-size: var(--text-sm);
+    color: var(--color-text-dim);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-label);
+  }
+
+  .admin__note,
+  .admin__muted {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+  }
+
+  .admin__error {
+    color: var(--color-danger);
+    font-size: var(--text-sm);
+  }
+
+  .admin__pager {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .admin__ban {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .admin__ban > :first-child {
+    flex: 1 1 18rem;
+    min-inline-size: 0;
+  }
+
+  .admin__badge {
+    padding-inline: var(--space-1);
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-0);
+  }
+
+  .admin__badge--locked {
+    color: var(--color-warn);
+    border-color: var(--color-warn);
+  }
+
+  .admin__badge--member {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  /* A finger needs 44 px on any touch screen, a tablet's wide administration included. */
+  @media (pointer: coarse) {
+    .admin__tab,
+    .admin .btn {
+      min-block-size: 2.75rem;
+    }
+  }
+
+  .admin-status,
+  .admin-list {
+    display: grid;
+    gap: var(--space-1);
+    padding: 0;
+    list-style: none;
+  }
+
+  .admin-status__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 6rem;
+    align-items: baseline;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-1);
+  }
+
+  .admin-status__row--ok .admin-status__state {
+    color: var(--color-accent);
+  }
+
+  .admin-status__row--degraded {
+    border-color: var(--color-danger);
+  }
+
+  .admin-status__row--degraded .admin-status__state {
+    color: var(--color-danger);
+  }
+
+  .admin-status__latency {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+    text-align: end;
+  }
+
+  .admin-list__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+    padding-block: var(--space-1);
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .admin-list__row > :last-child {
+    margin-inline-start: auto;
+  }
+
+  .admin-list__name {
+    font-weight: var(--weight-strong);
+  }
+
+  .admin-table__scroll {
+    overflow-x: auto;
+  }
+
+  .admin-table {
+    inline-size: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+  }
+
+  .admin-table th,
+  .admin-table td {
+    padding: var(--space-1) var(--space-2);
+    text-align: start;
+    vertical-align: baseline;
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .admin-table th {
+    color: var(--color-text-dim);
+    font-weight: var(--weight-strong);
+    white-space: nowrap;
+  }
+
+  .admin-table__time {
+    white-space: nowrap;
+    color: var(--color-text-dim);
+  }
+
+  @container shell (width < 44rem) {
+    .admin {
+      padding: var(--space-3) var(--space-3) calc(var(--space-3) + var(--footer-safe-bottom));
+    }
+
+    .admin-status__row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .admin-status__latency {
+      grid-column: 1 / -1;
+      text-align: start;
+    }
+  }
+
+  .conn-banner {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-warn);
+    border-radius: var(--radius-1);
+    box-shadow: 0 0.25rem 0 0 var(--color-shadow);
+    color: var(--color-text);
+    font-size: var(--text-xs);
+  }
+
+  .conn-banner__tag {
+    color: var(--color-warn);
+    font-weight: var(--weight-strong);
+  }
+
+  /*
+   * The top bands (app.tsx): the update notice (pwa/UpdateBanner.tsx) and the connection notice
+   * (Toasts.tsx), stacked in the page's flow above the screen, never drawn over it or over each
+   * other. While one shows, #app becomes a column and the screen takes the height that remains,
+   * so nothing (the composer and its Send above all, the header's controls) is ever under them.
+   * Their live regions are always there (empty: no height), so a notice is announced.
+   */
+  .top-bands {
+    position: relative;
+  }
+
+  .top-bands:has(.update-banner, .conn-banner) {
+    display: flex;
+    flex-direction: column;
+    padding-block: calc(var(--space-2) + var(--safe-top)) var(--space-2);
+    padding-inline: calc(var(--space-4) + var(--safe-inline-start)) calc(var(--space-4) + var(--safe-inline-end));
+    background: var(--color-surface);
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .update-banner-region,
+  .conn-banner-region {
+    display: flex;
+    justify-content: center;
+  }
+
+  .update-banner-region:has(.update-banner) + .conn-banner-region:has(.conn-banner) {
+    margin-block-start: var(--space-2);
+  }
+
+  /*
+   * Toasts hang just under the bands and the header (3.5rem): never over a notice, the header or
+   * the composer and its Send. Anchored to the bands' box, they move down with them.
+   */
+  .top-bands > .toast-region--app {
+    position: absolute;
+    inset-block: calc(100% + 3.5rem + var(--header-safe-top)) auto;
+    inset-inline-end: calc(var(--space-4) + var(--safe-inline-end));
+  }
+
+  /* The band has taken the top inset: the screen under it (its header, the drawer) does not again. */
+  #app:has(> .top-bands :is(.update-banner, .conn-banner)) {
+    --header-safe-top: 0px;
+
+    display: flex;
+    flex-direction: column;
+    block-size: 100vh;
+    block-size: 100dvh;
+  }
+
+  #app:has(> .top-bands :is(.update-banner, .conn-banner)) > .top-bands {
+    flex: none;
+  }
+
+  #app:has(> .top-bands :is(.update-banner, .conn-banner)) > :is(.shell--app, .splash, .signin) {
+    flex: 1 1 auto;
+    block-size: auto;
+    min-block-size: 0;
+  }
+
+  #app:has(> .top-bands :is(.update-banner, .conn-banner)) > :is(.splash, .signin) {
+    overflow: auto;
+  }
+
+  /*
+   * The on-screen keyboard (lib/viewport.ts sets these while it is up): the app takes the height
+   * it leaves visible, where Safari has panned the page, so the composer sits right on the
+   * keyboard and the header stays in sight. (Chrome on Android resizes the page instead: the
+   * dynamic viewport shrinks, and these are not set.)
+   */
+  :root[data-keyboard] #app {
+    position: relative;
+    inset-block-start: var(--visible-page-top);
+  }
+
+  :root[data-keyboard] .shell--app,
+  :root[data-keyboard] #app:has(> .top-bands :is(.update-banner, .conn-banner)) {
+    block-size: var(--visible-block-size);
+  }
+
+  .update-banner {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-accent);
+    border-radius: var(--radius-1);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+  }
+
+  .update-banner__tag {
+    color: var(--color-accent);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-strong);
+  }
+
+  /* ── Small screens: drawer, touch targets ────────────── */
+  @container shell (inline-size < 44rem) {
+    .shell--nav-open > .shell__scrim {
+      display: block;
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+    }
+
+    .shell--app .nav-item,
+    .shell--app .user-menu__toggle,
+    .shell--app .channel-header__nav,
+    .shell--app .composer .btn,
+    .shell--app .join-bar .btn,
+    .shell--app .admin__tab,
+    .shell--app .admin .btn,
+    .shell--app .user-menu__admin,
+    .shell--app .segmented__option,
+    .shell--app .jump-pill {
+      min-block-size: 2.75rem;
+    }
+
+    .shell--app .composer .btn--icon {
+      inline-size: 2.75rem;
+    }
+
+    .channel-header__topic {
+      display: none;
+    }
+
+    .shell--app .channel-header__name {
+      max-inline-size: none;
+      flex: 0 1 auto;
+      min-inline-size: 0;
+    }
+
+    .join-bar {
+      flex-wrap: wrap;
+    }
+  }
+}

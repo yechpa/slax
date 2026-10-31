@@ -1,0 +1,6 @@
+# Build context: the repository root. Only what docker/backup/Dockerfile copies goes in.
+*
+!deploy/backup/pg-backup.sh
+!deploy/backup/restore-check.sh
+!deploy/backup/lib.sh
+!deploy/monitoring/uptime.sh

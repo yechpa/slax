@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+    <groups>
+        <!-- Needs the dev Reverb server: `make test-reverb`. -->
+        <exclude>
+            <group>reverb-e2e</group>
+        </exclude>
+    </groups>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <!-- The compose env_file puts dev settings in the process environment, which Laravel reads
+             from $_SERVER: override both so tests never touch the dev database or Redis. -->
+        <env name="APP_ENV" value="testing" force="true"/>
+        <server name="APP_ENV" value="testing" force="true"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="SLAX_BACKUP_BUCKET" value="" force="true"/>
+        <server name="SLAX_BACKUP_BUCKET" value="" force="true"/>
+        <env name="BROADCAST_CONNECTION" value="null" force="true"/>
+        <server name="BROADCAST_CONNECTION" value="null" force="true"/>
+        <env name="CACHE_STORE" value="array" force="true"/>
+        <server name="CACHE_STORE" value="array" force="true"/>
+        <!-- Real PostgreSQL (the compose service), on a database separate from dev data. -->
+        <env name="DB_CONNECTION" value="pgsql"/>
+        <env name="DB_DATABASE" value="slax_test" force="true"/>
+        <server name="DB_DATABASE" value="slax_test" force="true"/>
+        <env name="DB_URL" value=""/>
+        <env name="MAIL_MAILER" value="array" force="true"/>
+        <server name="MAIL_MAILER" value="array" force="true"/>
+        <env name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <server name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <env name="SESSION_DRIVER" value="array" force="true"/>
+        <server name="SESSION_DRIVER" value="array" force="true"/>
+        <env name="ADMIN_EMAILS" value="" force="true"/>
+        <server name="ADMIN_EMAILS" value="" force="true"/>
+        <!-- Redis holds presence: a database of its own (flushed by the presence tests), never the dev one. -->
+        <env name="REDIS_DB" value="15" force="true"/>
+        <server name="REDIS_DB" value="15" force="true"/>
+        <!-- Hermetic: CI starts from `cp .env.example .env`, a developer's .env may be older or
+             edited. Everything below that the suite relies on is pinned here, whatever .env says.
+             The SPA helpers send `Referer: http://localhost/`; Sanctum only starts a session for a
+             stateful origin, so that origin is pinned (.env.example's localhost:8080 would make
+             every session-based endpoint answer 400 session_unavailable). -->
+        <env name="APP_URL" value="http://localhost" force="true"/>
+        <server name="APP_URL" value="http://localhost" force="true"/>
+        <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost" force="true"/>
+        <server name="SANCTUM_STATEFUL_DOMAINS" value="localhost" force="true"/>
+        <env name="SESSION_DOMAIN" value="null" force="true"/>
+        <server name="SESSION_DOMAIN" value="null" force="true"/>
+        <env name="GOOGLE_CLIENT_ID" value="" force="true"/>
+        <server name="GOOGLE_CLIENT_ID" value="" force="true"/>
+        <env name="GOOGLE_CLIENT_SECRET" value="" force="true"/>
+        <server name="GOOGLE_CLIENT_SECRET" value="" force="true"/>
+        <env name="GOOGLE_REDIRECT_URI" value="http://localhost/auth/google/callback" force="true"/>
+        <server name="GOOGLE_REDIRECT_URI" value="http://localhost/auth/google/callback" force="true"/>
+        <env name="TURNSTILE_SECRET" value="" force="true"/>
+        <server name="TURNSTILE_SECRET" value="" force="true"/>
+        <!-- Never a real alert from a test run, whatever the developer's .env holds. -->
+        <env name="TELEGRAM_BOT_TOKEN" value="" force="true"/>
+        <server name="TELEGRAM_BOT_TOKEN" value="" force="true"/>
+        <env name="TELEGRAM_CHAT_ID" value="" force="true"/>
+        <server name="TELEGRAM_CHAT_ID" value="" force="true"/>
+        <env name="SLAX_ENV_LABEL" value="Dev" force="true"/>
+        <server name="SLAX_ENV_LABEL" value="Dev" force="true"/>
+        <env name="SLAX_DEMO_RESET_ENABLED" value="false" force="true"/>
+        <server name="SLAX_DEMO_RESET_ENABLED" value="false" force="true"/>
+        <!-- Push off unless a test turns it on with a pair generated for the run (enablePush()). -->
+        <env name="VAPID_PUBLIC_KEY" value="" force="true"/>
+        <server name="VAPID_PUBLIC_KEY" value="" force="true"/>
+        <env name="VAPID_PRIVATE_KEY" value="" force="true"/>
+        <server name="VAPID_PRIVATE_KEY" value="" force="true"/>
+        <env name="VAPID_SUBJECT" value="" force="true"/>
+        <server name="VAPID_SUBJECT" value="" force="true"/>
+        <env name="PULSE_ENABLED" value="false"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="NIGHTWATCH_ENABLED" value="false"/>
+    </php>
+</phpunit>

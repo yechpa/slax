@@ -1,0 +1,427 @@
+<?php
+
+use App\Contracts\AdminNotifier;
+use App\Contracts\IdentityProvider;
+use App\Models\AuditLog;
+use App\Models\Channel;
+use App\Models\File;
+use App\Models\Message;
+use App\Models\Reaction;
+use App\Models\User;
+use App\Services\Identity\GoogleProfile;
+use App\Services\UserSessions;
+use Database\Seeders\DefaultWorkspaceSeeder;
+use Database\Seeders\DemoSeeder;
+use Illuminate\Console\Scheduling\Event as ScheduledEvent;
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Storage;
+use Tests\Support\FakeIdentityProvider;
+use Tests\Support\RecordingNotifier;
+
+beforeEach(function () {
+    // Only the showcase environment turns the reset on (SLAX_DEMO_RESET_ENABLED).
+    config(['slax.demo.reset_enabled' => true]);
+    $this->seed(DemoSeeder::class);
+    expect((int) config('database.redis.default.database'))->toBe(15);
+    Redis::connection()->flushdb();
+    Storage::fake('s3');
+    $this->notifier = new RecordingNotifier;
+    app()->instance(AdminNotifier::class, $this->notifier);
+});
+
+function starter(string $name): Channel
+{
+    return Channel::where('name', $name)->whereIn('kind', ['public', 'private'])->sole();
+}
+
+function seedMessage(string $key): Message
+{
+    return Message::where('client_id', DemoSeeder::clientId($key))->sole();
+}
+
+/** A file of $user in $channel with its object in the (faked) bucket. */
+function fileWithObject(User $user, Channel $channel, ?Message $message = null): File
+{
+    $file = storedFile($user, $channel, ['message_id' => $message?->id]);
+    Storage::disk('s3')->put($file->storage_key, 'bytes');
+
+    return $file;
+}
+
+/** Everything a visitor can leave behind, in a starter channel, a channel of theirs and a conversation. */
+function visitorActivity(User $visitor, User $other): array
+{
+    $general = starter('general');
+    $general->addMember($visitor);
+    $post = Message::factory()->create(['channel_id' => $general->id, 'user_id' => $visitor->id]);
+    $reply = Message::factory()->create(['channel_id' => $general->id, 'user_id' => $visitor->id, 'parent_id' => seedMessage('general.welcome')->id]);
+    Reaction::create(['message_id' => seedMessage('general.shalom')->id, 'user_id' => $visitor->id, 'emoji' => '🔥']);
+    $file = fileWithObject($visitor, $general, $post);
+
+    $own = publicChannel($visitor, 'visitor-room-'.$visitor->id);
+    $own->forceFill(['created_by' => $visitor->id])->save();
+    $ownFile = fileWithObject($visitor, $own, Message::factory()->create(['channel_id' => $own->id, 'user_id' => $visitor->id]));
+
+    $dm = Channel::factory()->dm()->create();
+    $dm->members()->attach([$visitor->id, $other->id]);
+    Message::factory()->create(['channel_id' => $dm->id, 'user_id' => $other->id]);
+
+    return compact('post', 'reply', 'file', 'own', 'ownFile', 'dm');
+}
+
+test('the demo seed is multilingual, with a thread and reactions, by seed accounts only', function () {
+    $people = User::where('account_type', User::ACCOUNT_SEED)->get();
+    expect($people)->toHaveCount(count(DemoSeeder::PEOPLE))
+        ->and($people->every(fn (User $user) => str_ends_with($user->email, '@seed.slax.invalid') && ! $user->is_admin))->toBeTrue();
+
+    $bodies = Message::pluck('body')->implode("\n");
+    expect($bodies)->toMatch('/\p{Hebrew}/u')->toContain('Bonjour')->toContain('Welcome');
+    expect(seedMessage('general.welcome')->replies()->count())->toBe(3)
+        ->and(seedMessage('general.welcome')->reactions()->count())->toBe(3);
+
+    foreach (array_keys(DefaultWorkspaceSeeder::CHANNELS) as $name) {
+        expect(Message::where('channel_id', starter($name)->id)->count())->toBeGreaterThan(0);
+    }
+});
+
+test('demo_reset_keeps_accounts_active_within_7_days', function () {
+    fakeReverb();
+    fakeTerminations();
+    $active = User::factory()->demo(daysAgo: 6)->create();
+    $expired = User::factory()->demo(daysAgo: 8)->create();
+    $neverSeen = User::factory()->demo()->create(['last_seen_at' => null, 'created_at' => now()->subDays(9)]);
+    $newcomer = User::factory()->demo()->create(['last_seen_at' => null, 'created_at' => now()->subDay()]);
+    // Accounts that are not visitors' never expire, however quiet.
+    $member = User::factory()->create(['last_seen_at' => now()->subYear()]);
+
+    $expiredActivity = visitorActivity($expired, $active);
+    $activeActivity = visitorActivity($active, $member);
+
+    $handler = app('session')->driver()->getHandler();
+    $handler->write('expired-session', 'data');
+    app(UserSessions::class)->remember($expired, 'expired-session');
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    expect(User::find($expired->id))->toBeNull()
+        ->and(User::find($neverSeen->id))->toBeNull()
+        ->and(User::find($active->id))->not->toBeNull()
+        ->and(User::find($newcomer->id))->not->toBeNull()
+        ->and(User::find($member->id))->not->toBeNull()
+        ->and(User::where('account_type', User::ACCOUNT_SEED)->count())->toBe(count(DemoSeeder::PEOPLE));
+
+    // The expired account's objects went before its rows; nothing of either visitor is left.
+    foreach ([$expiredActivity, $activeActivity] as $activity) {
+        Storage::disk('s3')->assertMissing($activity['file']->storage_key);
+        Storage::disk('s3')->assertMissing($activity['ownFile']->storage_key);
+        expect(Channel::find($activity['own']->id))->toBeNull()
+            ->and(Channel::find($activity['dm']->id))->toBeNull()
+            ->and(Message::find($activity['post']->id))->toBeNull()
+            ->and(Message::find($activity['reply']->id))->toBeNull();
+    }
+    expect(File::count())->toBe(0)
+        // The active visitor is still a member of the starter channel.
+        ->and(starter('general')->hasMember($active))->toBeTrue();
+
+    // The deleted account's sessions and sockets are gone too.
+    expect($handler->read('expired-session'))->toBe('')
+        ->and(terminationPaths())->toContain("/apps/test-app/users/{$expired->id}/terminate_connections");
+
+    expect(AuditLog::where('action', 'demo.reset')->count())->toBe(1);
+    $summary = $this->notifier->withTitle('Demo reset');
+    expect($summary)->toHaveCount(1)
+        ->and($summary[0]['level'])->toBe('info')
+        ->and($summary[0]['context'])->toMatchArray(['deleted_users' => 2, 'failed_files' => 0]);
+});
+
+test('demo_reset_restores_seed_channels_and_messages', function () {
+    fakeTerminations();
+    $admin = User::factory()->admin()->create();
+    $visitor = User::factory()->demo()->create();
+    $activity = visitorActivity($visitor, User::factory()->demo()->create());
+
+    // The seed, tampered with: an edit, a moderated delete, a lost reaction, a new topic.
+    seedMessage('general.bonjour')->forceFill(['body' => 'vandalised', 'edited_at' => now()])->save();
+    seedMessage('random.coffee')->forceFill(['deleted_at' => now()])->save();
+    Reaction::where('message_id', seedMessage('general.welcome')->id)->delete();
+    starter('general')->forceFill(['topic' => 'changed'])->save();
+    // An administrator's own post is not demo content.
+    $announcement = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $admin->id, 'body' => 'Maintenance tonight']);
+    $adminRoom = publicChannel($admin, 'admin-room');
+    $adminRoom->forceFill(['created_by' => $admin->id])->save();
+
+    $before = fn () => [
+        'messages' => Message::orderBy('id')->get(['id', 'channel_id', 'user_id', 'parent_id', 'body', 'edited_at', 'deleted_at'])->toArray(),
+        'reactions' => Reaction::orderBy('message_id')->orderBy('emoji')->orderBy('user_id')->get(['message_id', 'user_id', 'emoji'])->toArray(),
+        'channels' => Channel::orderBy('id')->get(['id', 'name', 'topic'])->toArray(),
+    ];
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+    $afterFirst = $before();
+
+    expect(seedMessage('general.bonjour'))->body->toBe(collect(DemoSeeder::MESSAGES)->firstWhere('key', 'general.bonjour')['body'])
+        ->edited_at->toBeNull()
+        ->and(seedMessage('random.coffee')->deleted_at)->toBeNull()
+        ->and(starter('general')->topic)->toBe(DefaultWorkspaceSeeder::CHANNELS['general'])
+        ->and(seedMessage('general.welcome')->replies()->count())->toBe(3)
+        ->and(Message::find($activity['reply']->id))->toBeNull()
+        ->and(Message::find($announcement->id))->not->toBeNull()
+        ->and(Channel::find($adminRoom->id))->not->toBeNull()
+        ->and(Channel::find($activity['own']->id))->toBeNull();
+
+    // Exactly the seed reactions on seed messages: the visitor's is gone, the lost ones are back.
+    $reactions = Reaction::with('message', 'user')->get()
+        ->map(fn (Reaction $reaction) => $reaction->emoji.' '.$reaction->user->google_sub)->sort()->values()->all();
+    $expected = collect(DemoSeeder::REACTIONS)->map(fn (array $reaction) => $reaction['emoji'].' '.DemoSeeder::SUB_PREFIX.$reaction['by'])->sort()->values()->all();
+    expect($reactions)->toBe($expected);
+
+    // Seed messages only, plus the administrator's.
+    expect(Message::count())->toBe(count(DemoSeeder::MESSAGES) + 1);
+
+    // Safe to run twice: nothing changes the second time.
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+    expect($before())->toEqual($afterFirst);
+});
+
+test('demo_reset_never_deletes_admin', function () {
+    fakeTerminations();
+    config(['slax.admin_emails' => ['boss@example.com']]);
+    $admin = User::factory()->admin()->create(['last_seen_at' => now()->subYear(), 'created_at' => now()->subYear()]);
+    // Even marked as a demo account by mistake: an administrator flag or address protects it.
+    $flagged = User::factory()->admin()->demo(daysAgo: 60)->create();
+    $listed = User::factory()->demo(daysAgo: 60)->create(['email' => 'Boss@Example.com']);
+    $post = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $flagged->id]);
+    $file = fileWithObject($admin, starter('general'), $post);
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    expect(User::find($admin->id))->not->toBeNull()
+        ->and(User::find($flagged->id))->not->toBeNull()
+        ->and(User::find($listed->id))->not->toBeNull()
+        ->and(Message::find($post->id))->not->toBeNull()
+        ->and(File::find($file->id))->not->toBeNull();
+    Storage::disk('s3')->assertExists($file->storage_key);
+});
+
+test('when object storage refuses, the account and its rows wait for the next run', function () {
+    fakeTerminations();
+    $expired = User::factory()->demo(daysAgo: 30)->create();
+    $general = starter('general');
+    $file = fileWithObject($expired, $general, Message::factory()->create(['channel_id' => $general->id, 'user_id' => $expired->id]));
+
+    $disk = Mockery::mock(Storage::disk('s3'))->makePartial();
+    $disk->shouldReceive('delete')->andReturnFalse();
+    Storage::set('s3', $disk);
+
+    $this->artisan('slax:demo-reset')->assertFailed();
+
+    // Nothing points at a missing object, nothing in the bucket is forgotten.
+    expect(User::find($expired->id))->not->toBeNull()
+        ->and(File::find($file->id))->not->toBeNull()
+        ->and($this->notifier->withTitle('Demo reset'))->toHaveCount(1)
+        ->and($this->notifier->withTitle('Demo reset')[0])->level->toBe('warning');
+
+    Storage::set('s3', Storage::fake('s3'));
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+    expect(User::find($expired->id))->toBeNull()->and(File::find($file->id))->toBeNull();
+});
+
+test('the reset is scheduled daily at 03:00 Jerusalem time', function () {
+    $events = collect(app(Schedule::class)->events())
+        ->filter(fn (ScheduledEvent $event) => str_contains((string) $event->command, 'slax:demo-reset'));
+
+    expect($events)->toHaveCount(1);
+    $event = $events->first();
+    expect($event->expression)->toBe('0 3 * * *')
+        ->and((string) $event->timezone)->toBe('Asia/Jerusalem')
+        ->and($event->withoutOverlapping)->toBeTrue()
+        ->and($event->onOneServer)->toBeTrue();
+
+    // Off unless the environment turns it on.
+    config(['slax.demo.reset_enabled' => false]);
+    expect($event->filtersPass(app()))->toBeFalse();
+    config(['slax.demo.reset_enabled' => true]);
+    expect($event->filtersPass(app()))->toBeTrue();
+});
+
+test('a banned demo account is never deleted by the reset, so the ban is never undone', function () {
+    fakeTerminations();
+    $banned = User::factory()->demo(daysAgo: 30)->banned()->create(['google_sub' => 'sub-banned']);
+    $post = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $banned->id]);
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    // Its content goes like any visitor's; the account (and its ban) stays.
+    expect(User::find($banned->id))->not->toBeNull()
+        ->and(User::find($banned->id)->isBanned())->toBeTrue()
+        ->and(Message::find($post->id))->toBeNull();
+
+    // Signing in again with the same Google account is still refused.
+    app()->instance(IdentityProvider::class, (new FakeIdentityProvider)->returns(
+        new GoogleProfile(sub: 'sub-banned', email: 'banned@example.com', emailVerified: true, name: 'Banned', avatar: null),
+    ));
+    $oauth = ['state' => str_repeat('s', 40), 'nonce' => str_repeat('n', 40)];
+    test()->withSession(['google_oauth' => $oauth])
+        ->get('/auth/google/callback?'.http_build_query(['code' => 'c', 'state' => $oauth['state']]))
+        ->assertRedirect('/?auth_error=banned');
+    expect(User::where('google_sub', 'sub-banned')->count())->toBe(1);
+});
+
+test('the reset refuses to run unless the environment turns it on, or --force', function () {
+    fakeTerminations();
+    config(['slax.demo.reset_enabled' => false]);
+    $expired = User::factory()->demo(daysAgo: 30)->create();
+
+    $this->artisan('slax:demo-reset')
+        ->expectsOutputToContain('SLAX_DEMO_RESET_ENABLED')
+        ->assertFailed();
+    expect(User::find($expired->id))->not->toBeNull()
+        ->and(AuditLog::where('action', 'demo.reset')->count())->toBe(0);
+
+    $this->artisan('slax:demo-reset --force')->assertSuccessful();
+    expect(User::find($expired->id))->toBeNull();
+});
+
+test('an expired account whose channel must wait for the next run waits with it', function () {
+    fakeTerminations();
+    $expired = User::factory()->demo(daysAgo: 30)->create();
+    $active = User::factory()->demo()->create();
+    $room = publicChannel($expired, 'expired-room');
+    $room->forceFill(['created_by' => $expired->id])->save();
+    // Someone else's file in that channel cannot be deleted: the channel stays, so does its creator.
+    $file = fileWithObject($active, $room, Message::factory()->create(['channel_id' => $room->id, 'user_id' => $active->id]));
+
+    $disk = Mockery::mock(Storage::disk('s3'))->makePartial();
+    $disk->shouldReceive('delete')->andReturnFalse();
+    Storage::set('s3', $disk);
+    $this->artisan('slax:demo-reset')->assertFailed();
+
+    expect(Channel::find($room->id))->created_by->toBe($expired->id)
+        ->and(User::find($expired->id))->not->toBeNull();
+
+    // Storage back: channel, file and account all go in the same run.
+    Storage::set('s3', Storage::fake('s3'));
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+    expect(Channel::find($room->id))->toBeNull()
+        ->and(File::find($file->id))->toBeNull()
+        ->and(User::find($expired->id))->toBeNull();
+});
+
+/**
+ * Family accounts. A relative signs up as a demo account like any visitor; an administrator
+ * then makes them a member (POST /admin/users/{id}/account-type). From then on the nightly
+ * reset keeps what they write, except where Ruling P puts it: anything in a conversation with
+ * a demo account, in a channel a demo account created, or in a thread a demo account started
+ * goes with that conversation, channel or thread.
+ */
+test('a relative made a member keeps messages, conversations, reactions and channels through the reset; a demo account does not', function () {
+    fakeTerminations();
+    $admin = User::factory()->admin()->create();
+    $relative = User::factory()->demo(daysAgo: 30)->create(['name' => 'Relative']);
+    $cousin = User::factory()->create(['name' => 'Cousin', 'last_seen_at' => now()->subYear()]);
+    $visitor = User::factory()->demo(daysAgo: 30)->create(['name' => 'Visitor']);
+
+    asUser($admin)->postJson("/api/v1/admin/users/{$relative->id}/account-type", ['account_type' => 'member'])->assertOk();
+
+    // Everything the relative can leave behind (the same as a visitor's activity), and a member-only conversation.
+    $kept = visitorActivity($relative, $cousin);
+    $familyRoom = $kept['own'];
+    $familyRoomFile = $kept['ownFile'];
+    $toCousin = Message::factory()->create(['channel_id' => $kept['dm']->id, 'user_id' => $relative->id, 'body' => 'shalom cousin']);
+    $onSeed = Reaction::where('user_id', $relative->id)->sole();
+    $reaction = Reaction::create(['message_id' => $kept['post']->id, 'user_id' => $cousin->id, 'emoji' => '❤️']);
+    $ownReaction = Reaction::create(['message_id' => $toCousin->id, 'user_id' => $relative->id, 'emoji' => '👍']);
+
+    // The same for a visitor nobody promoted.
+    $gone = visitorActivity($visitor, User::factory()->demo()->create());
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    // The member: account, posts, reply, reaction, file, own channel and conversation with another member, all kept.
+    expect(User::find($relative->id))->not->toBeNull()
+        ->and(User::find($relative->id)->account_type)->toBe(User::ACCOUNT_MEMBER)
+        ->and(Message::find($kept['post']->id))->not->toBeNull()
+        ->and(Message::find($kept['reply']->id))->not->toBeNull()
+        ->and(Reaction::where('message_id', $reaction->message_id)->where('user_id', $cousin->id)->exists())->toBeTrue()
+        ->and(Reaction::where('message_id', $ownReaction->message_id)->where('user_id', $relative->id)->exists())->toBeTrue()
+        // The demo's sample messages get exactly their sample reactions back every night, anyone's others go.
+        ->and(Reaction::where('message_id', $onSeed->message_id)->where('user_id', $relative->id)->exists())->toBeFalse()
+        ->and(File::find($kept['file']->id))->not->toBeNull()
+        ->and(Channel::find($familyRoom->id))->not->toBeNull()
+        ->and(File::find($familyRoomFile->id))->not->toBeNull()
+        ->and(Channel::find($kept['dm']->id))->not->toBeNull()
+        ->and(Message::where('channel_id', $kept['dm']->id)->count())->toBe(2);
+    Storage::disk('s3')->assertExists($kept['file']->storage_key);
+    Storage::disk('s3')->assertExists($familyRoomFile->storage_key);
+
+    // The visitor: everything gone, account included (30 days without activity).
+    expect(User::find($visitor->id))->toBeNull()
+        ->and(Message::find($gone['post']->id))->toBeNull()
+        ->and(Message::find($gone['reply']->id))->toBeNull()
+        ->and(Channel::find($gone['own']->id))->toBeNull()
+        ->and(Channel::find($gone['dm']->id))->toBeNull()
+        ->and(Reaction::where('user_id', $visitor->id)->exists())->toBeFalse();
+});
+
+test('Ruling P: a conversation between a member and a demo account is deleted whole every night, the member\'s messages included', function () {
+    fakeTerminations();
+    $member = User::factory()->create(['name' => 'Member']);
+    $visitor = User::factory()->demo()->create(['name' => 'Visitor']);
+    $other = User::factory()->create(['name' => 'Other member']);
+
+    $mixed = Channel::factory()->dm()->create();
+    $mixed->members()->attach([$member->id, $visitor->id]);
+    $fromMember = Message::factory()->create(['channel_id' => $mixed->id, 'user_id' => $member->id]);
+    Message::factory()->create(['channel_id' => $mixed->id, 'user_id' => $visitor->id]);
+
+    // A group conversation with one demo account in it goes the same way.
+    $group = Channel::factory()->dm(Channel::KIND_GROUP_DM)->create();
+    $group->members()->attach([$member->id, $other->id, $visitor->id]);
+    $inGroup = Message::factory()->create(['channel_id' => $group->id, 'user_id' => $other->id]);
+
+    // A member's message in a channel a demo account created, and a member's reply in a demo account's thread, go too.
+    $visitorRoom = publicChannel($visitor, 'visitor-room');
+    $visitorRoom->forceFill(['created_by' => $visitor->id])->save();
+    $inVisitorRoom = Message::factory()->create(['channel_id' => $visitorRoom->id, 'user_id' => $member->id]);
+    $visitorPost = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $visitor->id]);
+    $memberReply = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $member->id, 'parent_id' => $visitorPost->id]);
+
+    // Between two members: kept.
+    $family = Channel::factory()->dm()->create();
+    $family->members()->attach([$member->id, $other->id]);
+    $familyMessage = Message::factory()->create(['channel_id' => $family->id, 'user_id' => $member->id]);
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    expect(Channel::find($mixed->id))->toBeNull()
+        ->and(Message::find($fromMember->id))->toBeNull()
+        ->and(Channel::find($group->id))->toBeNull()
+        ->and(Message::find($inGroup->id))->toBeNull()
+        ->and(Channel::find($visitorRoom->id))->toBeNull()
+        ->and(Message::find($inVisitorRoom->id))->toBeNull()
+        ->and(Message::find($memberReply->id))->toBeNull()
+        ->and(Channel::find($family->id))->not->toBeNull()
+        ->and(Message::find($familyMessage->id))->not->toBeNull()
+        // The accounts themselves stay (the visitor was active today).
+        ->and(User::find($member->id))->not->toBeNull()
+        ->and(User::find($visitor->id))->not->toBeNull();
+});
+
+test('made a demo account again, a former member\'s content goes at the next reset', function () {
+    fakeTerminations();
+    $admin = User::factory()->admin()->create();
+    $former = User::factory()->create(['last_seen_at' => now()]);
+    $post = Message::factory()->create(['channel_id' => starter('general')->id, 'user_id' => $former->id]);
+
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+    expect(Message::find($post->id))->not->toBeNull();
+
+    asUser($admin)->postJson("/api/v1/admin/users/{$former->id}/account-type", ['account_type' => 'demo'])->assertOk();
+    $this->artisan('slax:demo-reset')->assertSuccessful();
+
+    expect(Message::find($post->id))->toBeNull()
+        // Seen today: the account itself waits for 7 days without activity.
+        ->and(User::find($former->id))->not->toBeNull();
+});
