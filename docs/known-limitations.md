@@ -38,8 +38,9 @@ receives the channel's events until it disconnects.
 - Broadcast each channel on a versioned name, `channel.{id}.{epoch}`, with `epoch` stored on the channel and
   incremented on every removal or leave. A signature fetched for an older epoch then subscribes to a name nobody
   broadcasts on any more.
-- Tell the remaining members about the new epoch on their own private channel, `user.{id}` (the "rekey"
-  channel). Their clients then re-authorize and subscribe to the new name.
+- Tell the remaining members about the new epoch on their own private channel, `App.Models.User.{id}` (the
+  "rekey" event; the channel exists already, for `channel.added`). Their clients then re-authorize and subscribe
+  to the new name.
 - Authorization for `channel.{id}.{epoch}` requires current membership *and* the current epoch.
 - An alternative with the same shape is end-to-end encrypted channels (`private-encrypted-`) with a per-epoch
   shared secret.
@@ -78,13 +79,16 @@ receives the channel's events until it disconnects.
 
 ## Chat client: what is polled rather than pushed
 
-**Where:** `frontend/src/components/Workspace.tsx`, `frontend/src/store/threads.ts`, `frontend/src/store/presence.ts`.
+**Where:** `frontend/src/components/Workspace.tsx`, `frontend/src/store/chat.ts`, `frontend/src/store/threads.ts`,
+`frontend/src/store/presence.ts`.
 
-- **New conversations and invitations.** Nothing is pushed to a user who is added to a private room or a new
-  conversation (there is no per-user event channel yet), so the client refetches `GET /channels` every minute while
-  the tab is visible (never in a hidden tab), and once when the tab comes back after 15 s away. A conversation started by someone else therefore shows up within a
-  minute, and its messages from then on are live. *Intended fix:* a `user.{id}` private channel with
-  `channel.added`, which the "rekey" channel above would also need.
+- **New conversations and invitations: pushed, with the poll as a fallback.** A user whom someone else adds to a
+  room, or puts in a new conversation, gets `channel.added` (the channel id only) on their own private channel
+  `App.Models.User.{id}`, and the client refetches `GET /channels` at once. The event is not replayed: one missed
+  while the socket is down is covered by the refetch after the reconnection, and anything else (a refused
+  subscription, a queue delay) by the poll that stays: `GET /channels` every minute while the tab is visible (never
+  in a hidden tab), and once when the tab comes back after 15 s away. A conversation started by someone else
+  therefore shows up at once, at worst within a minute, and its messages from then on are live.
 - **Thread summaries.** The server does not push a parent's `reply_count`/`last_reply_at` when a reply comes or
   goes; the client recomputes them from the replies' own events (each reply counted once). Two gaps remain until
   the next refresh of the channel: deleting the *latest* reply of a thread that is not open keeps the old "last
