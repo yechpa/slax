@@ -185,7 +185,7 @@ test('a member removed from a private channel receives nothing from it any more'
 test('a conversation started by someone else shows up in the sidebar at once, without a reload', async ({ browser }) => {
   const a = await person(browser, 'Ori')
   const b = await person(browser, 'Pia')
-  // Bea's own channel subscribed (the list's poll is a minute: only the push can be this quick).
+  // Pia's own channel is subscribed (the list's poll is a minute: only the push can be this quick).
   const frames = recordFrames(b.page)
   await reload(b)
   const own = `private-App.Models.User.${b.id}`
