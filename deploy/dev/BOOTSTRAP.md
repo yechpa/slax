@@ -655,7 +655,7 @@ The Telegram keys go in a file only root can read. Type them at the hidden promp
 a command line or a repository file; it is the same bot and chat as the `[Dev]` alerts):
 
 ```sh
-sudo sh -c 'umask 077; read -rsp "Telegram bot token: " t; echo; read -rp "Chat id: " c
+sudo bash -c 'umask 077; read -rsp "Telegram bot token: " t; echo; read -rp "Chat id: " c
 printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n" "$t" "$c" > /etc/slax-dev-care.env'
 sudo chmod 0600 /etc/slax-dev-care.env
 sudo systemctl daemon-reload
