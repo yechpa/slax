@@ -160,6 +160,21 @@ run -e BACKUP_BUCKET=slax-no-such-bucket -- pg-backup.sh >/dev/null 2>&1 && stat
 check "pg-backup.sh fails when the upload fails" test "$status" != 0
 check "... with a [Prod] alert naming the upload and the error class" starts "$(last_alert)" '[Prod] Backup FAILED at step "upload (NoSuchBucket)"'
 
+echo "== PostgreSQL slow to answer (a new pod's first connections are refused or hang)"
+run -e PGHOST=10.255.255.1 -e BACKUP_DB_WAIT=4 -- pg-backup.sh >/dev/null 2>&1 && status=0 || status=$?
+check "pg-backup.sh gives up when the database never answers" test "$status" != 0
+check "... with a [Prod] alert naming the wait" starts "$(last_alert)" '[Prod] Backup FAILED at step "wait for the database"'
+before="$(alerts)"
+docker pause "$name-src" >/dev/null
+run -e BACKUP_DB_WAIT=40 -- pg-backup.sh > "$dir/late.out" 2>&1 &
+late=$!
+sleep 7
+docker unpause "$name-src" >/dev/null
+wait "$late" && status=0 || status=$?
+check "pg-backup.sh waits for a database that answers late, then succeeds" test "$status" = 0
+check "... and says it waited" has "$(cat "$dir/late.out")" 'accepted connections after about [0-9]+ s'
+check "... without any alert" test "$(alerts)" = "$before"
+
 echo "== listing errors are not \"no backup\""
 run -e BACKUP_BUCKET=slax-no-such-bucket -- restore-check.sh >/dev/null 2>&1 && status=0 || status=$?
 check "the restore check fails when the bucket cannot be listed" test "$status" != 0
@@ -181,10 +196,10 @@ terminate() {
     echo "$(docker wait "$cname") $(($(date +%s) - started))"
     docker rm "$cname" >/dev/null
 }
-# pg_dump stuck connecting to an address that never answers.
+# PostgreSQL at an address that never answers: the wait for the database hangs on it.
 read -r code seconds <<< "$(terminate dump -e PGHOST=10.255.255.1 -e PGCONNECT_TIMEOUT=60 "$image" pg-backup.sh)"
 check "pg-backup.sh exits 143 on SIGTERM, within seconds (not killed after the grace period)" test "$code $((seconds < 10))" = "143 1"
-check "... with a [Prod] alert saying it was terminated, and where" starts "$(last_alert)" '[Prod] Backup TERMINATED at step "pg_dump" (SIGTERM'
+check "... with a [Prod] alert saying it was terminated, and where" starts "$(last_alert)" '[Prod] Backup TERMINATED at step "wait for the database" (SIGTERM'
 # S3 at an address that never answers: the listing hangs.
 read -r code seconds <<< "$(terminate restore -e AWS_ENDPOINT_URL=http://10.255.255.1:9000 "$image" restore-check.sh)"
 check "restore-check.sh exits 143 on SIGTERM, within seconds" test "$code $((seconds < 10))" = "143 1"

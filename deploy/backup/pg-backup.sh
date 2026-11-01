@@ -2,7 +2,8 @@
 # Daily backup of the Slax PostgreSQL database to S3 (CronJob slax-backup, Helm chart
 # backup.enabled; image slax-backup, docker/backup/Dockerfile).
 #
-#   pg_dump (custom format, compressed) -> size > 0 -> pg_restore --list (the archive reads
+#   wait for PostgreSQL to answer (a new pod's first connections are refused for a few
+#   seconds: k3s's network policies are not in place yet) -> pg_dump (custom format, compressed) -> size > 0 -> pg_restore --list (the archive reads
 #   back, the users table is in it) -> upload with server-side encryption to
 #   s3://$BACKUP_BUCKET/$BACKUP_PREFIX/YYYY/MM/DD/slax-<UTC time>.dump -> the stored size
 #   matches.
@@ -17,6 +18,7 @@
 #   BACKUP_BUCKET                                required
 #   BACKUP_PREFIX                                pg
 #   BACKUP_SSE                                   AES256 (SSE-S3)
+#   BACKUP_DB_WAIT                               60 (seconds to wait for PostgreSQL to answer)
 #   AWS_REGION, AWS credentials                  default chain: the EC2 instance role
 #   SLAX_ENV_LABEL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID   alerts (lib.sh)
 set -euo pipefail
@@ -53,6 +55,20 @@ work="$(mktemp -d)"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 key="$prefix/$(date -u +%Y/%m/%d)/slax-$stamp.dump"
 dump="$work/slax-$stamp.dump"
+
+# A Job pod's first connections can be refused for a few seconds while the cluster's network
+# policy catches up with the new pod (seen on k3s: "Connection refused" at the pod's first
+# second, accepted three seconds later). Without this wait the 02:30 backup failed every night.
+step="wait for the database"
+db_wait="${BACKUP_DB_WAIT:-60}"
+[[ "$db_wait" =~ ^[0-9]+$ ]] || { log "BACKUP_DB_WAIT is not a number of seconds"; exit 2; }
+waited=0
+until run pg_isready -q -t 3; do
+    [ "$waited" -lt "$db_wait" ] || { log "$PGHOST did not accept connections within ${db_wait} s"; exit 1; }
+    run sleep 2
+    waited=$((waited + 2))
+done
+[ "$waited" -eq 0 ] || log "$PGHOST accepted connections after about ${waited} s"
 
 step="pg_dump"
 log "dumping $PGDATABASE from $PGHOST"
