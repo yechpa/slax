@@ -13,6 +13,8 @@
 # Environment: NAMESPACE (slax), SECRET_NAME (slax-secrets), KUBECTL ("k3s kubectl"),
 # S3_KEYS=generate (dev: keys for the in-cluster MinIO), none (production: the EC2 instance
 # role, no key at all; values-prod.yaml s3.useInstanceRole) or ask (static keys for real S3).
+# KUBECTL must not be the bare word "kubectl": the function below has that name and would call itself
+# until the shell crashes; use a full path such as /usr/local/bin/kubectl.
 #
 # Generated: APP_KEY, DB_PASSWORD, REDIS_PASSWORD, REVERB_APP_KEY, REVERB_APP_SECRET, the Web Push
 # pair VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY (PUSH_KEYS=none to leave push off) and, with
