@@ -178,6 +178,11 @@
   "channel.group": "groupe",
   "composer.files": "Fichiers à envoyer",
   "composer.dropHint": "Images, PDF, texte ou zip · 10 Mo max. chacun · 10 par message",
+  "mention.label": "Personnes à mentionner",
+  "mention.count": {
+    "one": "{count} personne correspond. Flèches haut et bas pour naviguer, Entrée pour choisir, Échap pour fermer.",
+    "other": "{count} personnes correspondent. Flèches haut et bas pour naviguer, Entrée pour choisir, Échap pour fermer."
+  },
   "file.failed": "échec",
   "file.uploading": "Envoi de {name}",
   "file.retry": "Réessayer l'envoi de {name}",

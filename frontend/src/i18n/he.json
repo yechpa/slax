@@ -178,6 +178,12 @@
   "channel.group": "קבוצה",
   "composer.files": "קבצים לשליחה",
   "composer.dropHint": "תמונות, PDF, טקסט או zip · עד 10 MB לקובץ · עד 10 בהודעה",
+  "mention.label": "אנשים שאפשר לתייג",
+  "mention.count": {
+    "one": "אדם אחד מתאים. חצים למעלה ולמטה לניווט, Enter לבחירה, Escape לסגירה.",
+    "two": "שני אנשים מתאימים. חצים למעלה ולמטה לניווט, Enter לבחירה, Escape לסגירה.",
+    "other": "{count} אנשים מתאימים. חצים למעלה ולמטה לניווט, Enter לבחירה, Escape לסגירה."
+  },
   "file.failed": "נכשל",
   "file.uploading": "מעלה את {name}",
   "file.retry": "ניסיון חוזר להעלות את {name}",

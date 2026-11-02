@@ -889,6 +889,7 @@
 
   /* ── Composer ────────────────────────────────────────── */
   .composer {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-2);
@@ -971,6 +972,68 @@
 
   .composer:focus-within .composer__placeholder .cursor {
     visibility: hidden;
+  }
+
+  /* The @mention menu: a list of people over the field it completes, above the composer so the
+     keyboard of a phone (below it) never hides it. It scrolls when it is taller than the room. */
+  .mention-menu {
+    position: absolute;
+    inset-inline: calc(-1 * var(--border-width));
+    inset-block-end: calc(100% + var(--space-1));
+    z-index: 5;
+    display: grid;
+    max-block-size: min(14rem, 40vh);
+    max-block-size: min(14rem, 40dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--space-1);
+    background: var(--color-raised);
+    border: var(--border-width) solid var(--color-border-strong);
+    border-radius: var(--radius-1);
+    box-shadow: var(--glow-soft);
+  }
+
+  .mention-menu__option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-block-size: var(--control-height);
+    padding-inline: var(--space-2);
+    border-radius: var(--radius-1);
+    color: var(--color-text-dim);
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .mention-menu__option:hover,
+  .mention-menu__option--active {
+    background: var(--color-hover);
+    color: var(--color-text);
+  }
+
+  .mention-menu__option--active {
+    box-shadow: inset 0 0 0 var(--border-width) var(--color-accent);
+  }
+
+  .mention-menu__name {
+    flex: 0 1 auto;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mention-menu__handle {
+    flex: none;
+    margin-inline-start: auto;
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+  }
+
+  @media (pointer: coarse) {
+    .mention-menu__option {
+      min-block-size: 2.75rem;
+    }
   }
 
   .composer__bar {

@@ -1,10 +1,12 @@
 import type { ComponentChildren, Ref } from 'preact'
-import { useId } from 'preact/hooks'
+import { useCallback, useId, useRef } from 'preact/hooks'
 import { plural, t } from '../../i18n/index.ts'
 import { charCount, trimBody } from '../../lib/text.ts'
 import { Button } from './Button.tsx'
 import { Cursor } from './Cursor.tsx'
+import { MentionMenu } from './MentionMenu.tsx'
 import { useIme } from './useIme.ts'
+import { useMentionMenu, type MentionSource } from './useMentionMenu.ts'
 
 type Props = {
   channel: string
@@ -26,6 +28,8 @@ type Props = {
   /** Characters allowed (counted as code points, as the server does). The count shows near the end. */
   maxLength?: number
   inputRef?: Ref<HTMLTextAreaElement>
+  /** Who `@` may complete to; without it, no menu (mentions stay plain text, typed by hand). */
+  mentions?: MentionSource
 }
 
 /** Remaining characters below which the counter appears. */
@@ -35,10 +39,23 @@ const COUNTER_FROM = 200
  * The message box, presentation only: "$" prompt, auto-growing textarea
  * (dir="auto", so Hebrew aligns itself), and a hand-drawn placeholder ending
  * in a blinking block cursor. Enter sends, Shift+Enter breaks the line; Enter
- * that confirms an IME composition (Japanese, Chinese, Korean input) does neither.
+ * that confirms an IME composition (Japanese, Chinese, Korean input) does neither. With
+ * `mentions`, typing `@` opens a menu of people (see useMentionMenu) that takes the arrows,
+ * Enter, Tab and Escape while it is open, and nothing otherwise.
  */
 export function Composer(props: Props) {
   const { channel, placeholder: given, value, onInput, onSend, onAttach, files, hasFiles = false, busy = false, maxLength, inputRef } = props
+  const field = useRef<HTMLTextAreaElement | null>(null)
+  // Both ours (the mention menu sets the caret) and the owner's (it focuses the field).
+  const setField = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      field.current = el
+      if (typeof inputRef === 'function') inputRef(el)
+      else if (inputRef) inputRef.current = el
+    },
+    [inputRef],
+  )
+  const mention = useMentionMenu({ value, source: props.mentions, onChange: onInput, input: field })
   const hintId = useId()
   const counterId = useId()
   const ime = useIme()
@@ -51,14 +68,16 @@ export function Composer(props: Props) {
   const sendable = (!blank || hasFiles) && remaining >= 0 && !busy
 
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== 'Enter' || event.shiftKey) return
     if (ime.composing(event)) return
+    if (mention.keyDown(event)) return
+    if (event.key !== 'Enter' || event.shiftKey) return
     event.preventDefault()
     // Same rule as the disabled Send button: nothing (or too much) to send.
     if (sendable) onSend?.()
   }
   return (
     <div class="composer">
+      {mention.open && <MentionMenu id={mention.listId} matches={mention.matches} active={mention.active} optionId={mention.optionId} onPick={mention.pick} />}
       {files && (
         <div class="composer__files" aria-label={t('composer.files')} role="group">
           {files}
@@ -70,7 +89,7 @@ export function Composer(props: Props) {
         </span>
         <div class="composer__field">
           <textarea
-            ref={inputRef}
+            ref={setField}
             class="composer__input"
             rows={1}
             // A phone's keyboard labels its Enter key "Send": Enter sends (Shift+Enter: a new line).
@@ -81,12 +100,21 @@ export function Composer(props: Props) {
             aria-label={`${t('composer.label')}: ${placeholder}`}
             aria-describedby={showCounter ? `${hintId} ${counterId}` : hintId}
             aria-invalid={remaining < 0 || undefined}
-            onInput={(event) => onInput(event.currentTarget.value)}
+            onInput={(event) => {
+              onInput(event.currentTarget.value)
+              mention.typed(event.currentTarget)
+            }}
             onKeyDown={onKeyDown}
             onPaste={props.onPaste}
             onBlur={props.onBlur}
+            {...mention.fieldProps}
             {...ime.handlers}
           />
+          {mention.open && (
+            <span class="sr-only" role="status">
+              {plural('mention.count', mention.matches.length)}
+            </span>
+          )}
           {value === '' && (
             <span class="composer__placeholder" aria-hidden="true">
               {placeholder}
