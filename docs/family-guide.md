@@ -52,7 +52,8 @@ blocked, allow them for Slax in the phone's or the browser's settings, then come
 ### 4. What to expect
 
 - A notification for **direct messages**, when someone **mentions you** (@yourname), and for
-  **replies in a thread** you are part of. Not for every message in a channel.
+  **replies in a thread** you are part of. Not for every message in a channel. To mention someone,
+  type `@` in the message box and pick them from the list that appears.
 - A notification shows **who and where**, never the text of the message.
 - While you are using Slax on one device, your other devices stay quiet. A computer left with
   Slax open but untouched for 5 minutes **no longer stops** your phone's notifications.
@@ -224,7 +225,8 @@ du navigateur, puis revenez.
 
 - Une notification pour les **messages directs**, quand quelqu'un **vous mentionne**
   (@votreprénom) et pour les **réponses dans un fil** auquel vous participez. Pas pour chaque
-  message d'un canal.
+  message d'un canal. Pour mentionner quelqu'un, tapez `@` dans la zone de message et choisissez
+  la personne dans la liste qui apparaît.
 - Une notification dit **qui et où**, jamais le texte du message.
 - Pendant que vous utilisez Slax sur un appareil, les autres restent silencieux. Un ordinateur
   resté avec Slax ouvert sans qu'on y touche depuis 5 minutes **n'empêche plus** les

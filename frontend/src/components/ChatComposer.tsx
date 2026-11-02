@@ -3,8 +3,9 @@
  * pasted or dropped: checked, then uploaded with their progress), typing whispers, and
  * the optimistic send. A message may be files only, as the server allows.
  */
-import { useEffect, useRef, useState } from 'preact/hooks'
-import type { Channel } from '../api/types.ts'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { api } from '../api/endpoints.ts'
+import type { Channel, UserSummary } from '../api/types.ts'
 import { t } from '../i18n/index.ts'
 import { useLocale } from '../i18n/useLocale.ts'
 import { ACCEPT } from '../lib/files.ts'
@@ -12,11 +13,14 @@ import { MAX_BODY, charCount, trimBody } from '../lib/text.ts'
 import type { Chat } from '../store/chat.ts'
 import { isDirect } from '../store/channels.ts'
 import { channelKey, threadKey } from '../store/messages.ts'
+import { me } from '../store/session.ts'
+import { rememberPeople } from '../store/people.ts'
 import { drafts, showToast } from '../store/ui.ts'
 import { Composer } from './ui/Composer.tsx'
 import { FileChip } from './ui/FileChip.tsx'
 import { uploadErrorText } from '../lib/files.ts'
 import { useChat } from './chatContext.ts'
+import type { MentionSource } from './ui/useMentionMenu.ts'
 
 /** The uploads tray of a composer: the channel's, or a thread's. */
 export const trayKey = (channelId: number, parentId: number | null) => (parentId ? threadKey(parentId) : channelKey(channelId))
@@ -26,6 +30,43 @@ export function addFiles(chat: Chat, channelId: number, parentId: number | null,
   if (files.length === 0) return
   const problems = chat.uploads.add(trayKey(channelId, parentId), channelId, files)
   if (problems.length > 0) showToast({ tone: 'error', text: problems.join(' '), key: 'upload-check' }, 9000)
+}
+
+/** How long the members of a channel, once asked for, serve the next mentions. */
+const MEMBERS_FRESH_MS = 60_000
+
+/**
+ * Who `@` can complete to in a composer: the place's members other than me (the server
+ * leaves out the author, and banned accounts are not listed). A conversation carries its
+ * members; a channel's are asked for, once a minute at most, when someone starts a mention.
+ */
+function useMentionSource(channel: Channel): MentionSource {
+  const meId = me.value?.id ?? null
+  const [room, setRoom] = useState<{ id: number; at: number; list: readonly UserSummary[] } | null>(null)
+  const loading = useRef<number | null>(null)
+  const direct = isDirect(channel)
+
+  const onStart = () => {
+    if (direct || loading.current === channel.id) return
+    if (room?.id === channel.id && Date.now() - room.at < MEMBERS_FRESH_MS) return
+    const id = channel.id
+    loading.current = id
+    api
+      .channelMembers(id)
+      .then((list) => {
+        rememberPeople(list)
+        setRoom({ id, at: Date.now(), list })
+      })
+      // No list, no menu: the mention can still be typed by hand.
+      .catch(() => undefined)
+      .finally(() => {
+        if (loading.current === id) loading.current = null
+      })
+  }
+
+  const members = direct ? channel.members : room?.id === channel.id ? room.list : undefined
+  const people = useMemo(() => (members ?? []).filter((m) => m.id !== meId && m.name.trim() !== '').map((m) => ({ id: m.id, name: m.name })), [members, meId])
+  return { people, onStart }
 }
 
 type Props = {
@@ -46,6 +87,7 @@ export function ChatComposer({ channel, label, parentId = null, onSent }: Props)
   const tray = chat.uploads.tray(key).value
   const input = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
+  const mentions = useMentionSource(channel)
   const busy = tray.some((item) => item.status === 'uploading' || item.status === 'scanning')
   const ready = tray.some((item) => item.status === 'done')
 
@@ -103,6 +145,7 @@ export function ChatComposer({ channel, label, parentId = null, onSent }: Props)
         onBlur={() => chat.typing.stopped(channel.id, parentId)}
         maxLength={MAX_BODY}
         inputRef={input}
+        mentions={mentions}
         files={
           tray.length > 0 &&
           tray.map((item) => (

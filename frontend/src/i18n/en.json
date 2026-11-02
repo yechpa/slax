@@ -178,6 +178,11 @@
   "channel.group": "group",
   "composer.files": "Files to send",
   "composer.dropHint": "Images, PDF, text or zip · up to 10 MB each · 10 per message",
+  "mention.label": "People you can mention",
+  "mention.count": {
+    "one": "{count} person matches. Up and Down arrows to move, Enter to choose, Escape to close.",
+    "other": "{count} people match. Up and Down arrows to move, Enter to choose, Escape to close."
+  },
   "file.failed": "failed",
   "file.uploading": "Uploading {name}",
   "file.retry": "Retry the upload of {name}",
