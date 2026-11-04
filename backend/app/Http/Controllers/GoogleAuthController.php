@@ -142,7 +142,10 @@ class GoogleAuthController extends Controller
             $user = new User($attributes);
             $user->google_sub = $profile->sub;
             $user->is_admin = $isAdmin;
-            $user->account_type = $isAdmin ? User::ACCOUNT_MEMBER : User::ACCOUNT_DEMO;
+            // Visitors are `demo` only where the nightly reset runs (the public showcase): elsewhere,
+            // or while people are being onboarded with it off, nothing would clean them up and
+            // a demo account is merely one that the reset would wipe the day it is switched on.
+            $user->account_type = $isAdmin || ! config('slax.demo.reset_enabled') ? User::ACCOUNT_MEMBER : User::ACCOUNT_DEMO;
             try {
                 $user->save();
             } catch (UniqueConstraintViolationException) {

@@ -18,9 +18,10 @@ envLabel: Prod
 
 demo:
   seed: true
-  # The production instance IS the public showcase: visitors' accounts and content are
-  # reset nightly (SLAX_DEMO_RESET_ENABLED, docs/known-limitations.md).
-  resetEnabled: true
+  # Off during onboarding: the nightly reset (SLAX_DEMO_RESET_ENABLED, docs/known-limitations.md)
+  # deletes the content of every conversation a `demo` account is in. Turn it on again once
+  # production is the public showcase; new sign-ups are `demo` accounts only while it is on.
+  resetEnabled: false
 
 # Administrators (ADMIN_EMAILS) are personal data: they are in the Secret (slax-secrets),
 # never in this file.

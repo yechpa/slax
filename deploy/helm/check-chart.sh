@@ -183,7 +183,7 @@ echo "== dev and prod differences"
 expect "dev: alerts say [Dev]" "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SLAX_ENV_LABEL' "$dev")" "Dev"
 expect "prod: alerts say [Prod]" "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SLAX_ENV_LABEL' "$prod")" "Prod"
 expect "dev: no nightly demo reset" "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SLAX_DEMO_RESET_ENABLED' "$dev")" "false"
-expect "prod (the public showcase): nightly demo reset" "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SLAX_DEMO_RESET_ENABLED' "$prod")" "true"
+expect "prod (onboarding): no nightly demo reset" "$(yq ea -N 'select(.kind == "ConfigMap") | .data.SLAX_DEMO_RESET_ENABLED' "$prod")" "false"
 expect "dev: MinIO is deployed" "$(yq ea -N 'select(.kind == "StatefulSet" and .metadata.name == "slax-minio") | .metadata.name' "$dev")" "slax-minio"
 empty "prod: no MinIO anywhere (real S3)" "$(grep -i minio "$prod" || true)"
 
