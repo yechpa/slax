@@ -84,8 +84,17 @@ test('a burst of failed sign-ins from one address alerts once per window', funct
     expect($this->notifier->withTitle('Burst of failed sign-ins'))->toHaveCount(2);
 });
 
+test('with the demo reset off, a visitor signs up as a member', function () {
+    config(['slax.demo.reset_enabled' => false]);
+
+    $this->identity->returns(new GoogleProfile(sub: 'sub-family', email: 'family@example.com', emailVerified: true, name: 'Family', avatar: null));
+    returnFromGoogle()->assertRedirect('/');
+
+    expect(User::where('google_sub', 'sub-family')->sole()->account_type)->toBe(User::ACCOUNT_MEMBER);
+});
+
 test('a visitor signs up as a demo account, an administrator never does, and the session is indexed', function () {
-    config(['slax.admin_emails' => ['boss@example.com']]);
+    config(['slax.admin_emails' => ['boss@example.com'], 'slax.demo.reset_enabled' => true]);
 
     $this->identity->returns(new GoogleProfile(sub: 'sub-visitor', email: 'visitor@example.com', emailVerified: true, name: 'Visitor', avatar: null));
     returnFromGoogle()->assertRedirect('/');
