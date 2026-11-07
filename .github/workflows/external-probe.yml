@@ -1,0 +1,138 @@
+# Outside watch of both environments, from GitHub's runners (neither cluster is involved).
+#
+# Why: the uptime monitor (deploy/monitoring/uptime.sh) is a CronJob inside each cluster, so a
+# dead, switched-off or unplugged machine sends nothing, and silence looked like "all is well"
+# (slax-dev was off for two days before anyone noticed). This workflow asks the sites for
+# /api/v1/health every 5 minutes and tells the administrators' Telegram chat, with the same
+# wording as the monitor:
+#   [Prod] DOWN: external failed 2 checks in a row (timeout), since 14:02 UTC.
+#   [Prod] RECOVERED: external is answering again (HTTP 200) after about 12 min down ...
+# (dev: the same with [Dev]). The logic is uptime.sh's, through deploy/monitoring/external-probe.sh;
+# the failure count travels between runs in the Actions cache (a key per run, the newest one is
+# restored), parsed and never executed.
+#
+# prod: the public URL, no secret but Telegram's. dev: tailnet only, so the runner joins it as
+# the same ephemeral tag:ci node the deployment uses, which the tailnet policy already lets reach
+# slax-dev on 443: no new secret, no policy change (deploy/dev/BOOTSTRAP.md §9 holds the secrets,
+# in the `dev` environment, which only jobs running from main can read).
+#
+# Limits (docs/known-limitations.md): GitHub starts a scheduled run a few minutes late, and
+# disables the schedule of a repository left without any activity for 60 days; a job that cannot
+# even start (the tailnet join fails) shows as a red run and GitHub's own failure e-mail, not as a
+# Telegram alert. Pause it while slax-dev is switched off on purpose:
+#   gh workflow disable external-probe.yml --repo yechpa/slax   (enable, afterwards)
+name: External probe
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROD_URL: https://slax.yechpa.com
+  DEV_URL: https://dev.slax.yechpa.com
+
+jobs:
+  prod:
+    # Not on forks (a fork has no secrets and nothing to watch).
+    if: github.repository == 'yechpa/slax'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # deployment: false = the environment's secrets without a "deployment" record every 5 minutes.
+    environment:
+      name: dev
+      deployment: false
+    # One run at a time per site: the state travels through the cache, two runs would race.
+    concurrency:
+      group: external-probe-prod
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            deploy/monitoring/uptime.sh
+            deploy/monitoring/external-probe.sh
+            deploy/backup/lib.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Restore the failure count
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/probe-state
+          key: probe-state-prod-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: probe-state-prod-
+
+      - name: Check production
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PROBE_STATE_DIR: ${{ runner.temp }}/probe-state
+        run: |
+          set +x -eu
+          [ -z "$TELEGRAM_BOT_TOKEN" ] || echo "::add-mask::$TELEGRAM_BOT_TOKEN"
+          [ -z "$TELEGRAM_CHAT_ID" ] || echo "::add-mask::$TELEGRAM_CHAT_ID"
+          deploy/monitoring/external-probe.sh Prod "$PROD_URL/api/v1/health"
+
+      - name: Save the failure count
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/probe-state
+          key: probe-state-prod-${{ github.run_id }}-${{ github.run_attempt }}
+
+  dev:
+    if: github.repository == 'yechpa/slax'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # deployment: false = the environment's secrets without a "deployment" record every 5 minutes.
+    environment:
+      name: dev
+      deployment: false
+    concurrency:
+      group: external-probe-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            deploy/monitoring/uptime.sh
+            deploy/monitoring/external-probe.sh
+            deploy/backup/lib.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Join the tailnet (ephemeral, tag:ci)
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Restore the failure count
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/probe-state
+          key: probe-state-dev-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: probe-state-dev-
+
+      - name: Check dev
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PROBE_STATE_DIR: ${{ runner.temp }}/probe-state
+        run: |
+          set +x -eu
+          [ -z "$TELEGRAM_BOT_TOKEN" ] || echo "::add-mask::$TELEGRAM_BOT_TOKEN"
+          [ -z "$TELEGRAM_CHAT_ID" ] || echo "::add-mask::$TELEGRAM_CHAT_ID"
+          deploy/monitoring/external-probe.sh Dev "$DEV_URL/api/v1/health"
+
+      - name: Save the failure count
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/probe-state
+          key: probe-state-dev-${{ github.run_id }}-${{ github.run_attempt }}

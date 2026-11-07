@@ -481,6 +481,9 @@ web UI).
    | `DEV_KUBECONFIG` | base64 of the deployer kubeconfig (step 7) |
    | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | deploy alerts (optional: without them, no alert) |
 
+   The outside probe (`.github/workflows/external-probe.yml`, every 5 minutes) reuses the
+   `TS_OAUTH_*` and `TELEGRAM_*` secrets and the existing `tag:ci` rule: nothing to add.
+
    The image workflow needs no secret: it pushes with the run's own `GITHUB_TOKEN`.
 
    Branch protection: the image checks are named `build app (amd64)`, `build web (arm64)`,
@@ -565,6 +568,11 @@ Once steps 1-10 are done, check the whole chain (Task 12, step 5). Tick each lin
         `kubectl -n slax scale deploy slax-reverb --replicas=0`, wait 3-4 minutes →
         `[Dev] DOWN: reverb failed 3 checks in a row (...)`; `--replicas=1` → one
         `[Dev] RECOVERED: reverb ...` within two minutes. (docs/runbook.md §4.10.)
+15a. [ ] The outside probe sees a dead server: Actions → External probe → Run workflow; the `dev`
+        job's log ends with `uptime: external=ok`. Then (the monitor above cannot show this)
+        stop the node's Tailscale for 15 minutes (`sudo tailscale down` on slax-dev, from the
+        console) → `[Dev] DOWN: external failed 2 checks in a row (timeout) ...`; `sudo tailscale up`
+        → `[Dev] RECOVERED: external ...`. (docs/runbook.md §4.10.)
 
 ## 12. Rollback
 

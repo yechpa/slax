@@ -684,10 +684,40 @@ Job unless its configuration is wrong (exit 2: `kubectl -n slax get jobs` shows 
 - Thresholds: `monitor.failThreshold` (3), `monitor.disk.alertPercent` (80),
   `recoverPercent` (75), `realertHours` (6) in the values; a release applies them.
 
-What it cannot see: the node itself dead or cut from the Internet (nothing runs to send);
-the Sunday "restore check OK" and Telegram's silence are then the signal. An external
-pinger (a free uptime service polling `/api/v1/health`) would cover that; none is set up
-(docs/known-limitations.md).
+What it cannot see: the node itself dead, switched off or cut from the Internet (nothing
+runs to send). The outside probe below covers that.
+
+#### Outside probe (a dead or switched-off node)
+
+`.github/workflows/external-probe.yml` runs on GitHub's runners every 5 minutes (neither
+cluster is involved) and asks `https://slax.yechpa.com/api/v1/health` (`[Prod]`) and
+`https://dev.slax.yechpa.com/api/v1/health` (`[Dev]`; tailnet only, so the runner joins as the
+ephemeral `tag:ci` node the deployment uses, which the tailnet policy already lets reach
+slax-dev on 443). It is `uptime.sh` with one check named `external`
+(`deploy/monitoring/external-probe.sh`), so the messages read the same:
+
+- `[Dev] DOWN: external failed 2 checks in a row (timeout), since 21:05 UTC.`: two runs in a
+  row, so 5 to 15 minutes after the node went silent (GitHub starts a scheduled run a few
+  minutes late). One message, however long it lasts.
+- `[Dev] RECOVERED: external is answering again (HTTP 200) after about 2 days down ...`
+
+Failure classes: `timeout` (a switched-off or unplugged node, or the tailnet cut: the usual
+case), `connection refused`, `TLS error`, `DNS failure`, `HTTP 502`...
+
+- **Secrets:** none to add. It reads `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`,
+  `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from the `dev` GitHub environment (BOOTSTRAP §9);
+  the production probe uses the same Telegram chat. Without the Telegram keys it only logs.
+- **Look at it:** Actions → External probe; each run's log ends with
+  `uptime: external=ok` or `external=FAIL(timeout)`. Run it now: `gh workflow run external-probe.yml --repo yechpa/slax`.
+- **Pause it while slax-dev is off on purpose** (otherwise one `DOWN`, then one
+  `RECOVERED`): `gh workflow disable external-probe.yml --repo yechpa/slax`, and `enable`
+  afterwards. The failure count lives in the Actions cache (`probe-state-dev-*`,
+  `probe-state-prod-*`, a few bytes each, evicted after 7 days unused).
+- **If the probe itself breaks:** a run that cannot start its job (the tailnet join fails,
+  an expired OAuth client) is a red run and GitHub's own failure e-mail, not a Telegram
+  alert. GitHub also disables a schedule in a repository with no activity for 60 days:
+  re-enable it in the Actions tab.
+- **Test it:** `make external-probe-test` (no container); the real path, once, is recette 10.9.
 
 ### 4.11 Push notifications
 
