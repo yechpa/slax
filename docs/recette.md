@@ -220,9 +220,10 @@ a secret or an address.
 | 10.6 | Disk above 80 %, then all clear | lower the threshold for one run instead of filling a disk: `kubectl -n slax set env cronjob/slax-monitor MONITOR_DISK_ALERT_PERCENT=1 MONITOR_DISK_RECOVER_PERCENT=0`; within a minute `DISK: node disk NN% full (alert above 1%)…`; then `kubectl -n slax set env cronjob/slax-monitor MONITOR_DISK_ALERT_PERCENT=80 MONITOR_DISK_RECOVER_PERCENT=75` → within a minute `DISK OK: node disk back to NN% (below 75%)` (a release would also restore the chart's values) | [ ] | [ ] |
 | 10.7 | Weekly restore check | 9.1 | – | [ ] |
 | 10.8 | Moderation / security events | the ban in 7.3 | [ ] | [ ] |
+| 10.9 | Outside probe: a dead node | Actions → External probe → Run workflow: both jobs end with `uptime: external=ok`. Dev, for 15 minutes: `sudo tailscale down` on slax-dev (BOOTSTRAP §11 item 15a) → one `[Dev] DOWN: external ... (timeout)`; back up → one `[Dev] RECOVERED: external ...`. Prod is not stopped for this: its probe is the same code. | [ ] | – |
 
 (**A**: `make monitor-test` proves the uptime logic, the thresholds, the anti-flood and the
-absence of secrets in messages; `make backup-test` the backup alerts; Pest the app's
+absence of secrets in messages, `make external-probe-test` the outside probe's; `make backup-test` the backup alerts; Pest the app's
 `AdminNotifier` grouping and redaction.)
 
 ## 11. Google sign-in, the real one

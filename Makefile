@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots icons e2e load load-smoke chart-lint images web-check backup-test monitor-test proxy-test aws-test edge-guard-test
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots icons e2e load load-smoke chart-lint images web-check backup-test monitor-test external-probe-test proxy-test aws-test edge-guard-test
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
@@ -199,6 +199,9 @@ backup-test: ## Build slax-backup and test pg-backup.sh / restore-check.sh (Post
 monitor-test: ## Build slax-backup and test the uptime monitor (deploy/monitoring/uptime.sh: fake target, PostgreSQL, Redis, fake Telegram)
 	docker build -q -f docker/backup/Dockerfile -t slax-backup:local . >/dev/null
 	deploy/monitoring/test/monitor-test.sh slax-backup:local
+
+external-probe-test: ## Test the outside probe (deploy/monitoring/external-probe.sh: fake health endpoint and Telegram, no container)
+	deploy/monitoring/test/external-probe-test.sh
 
 proxy-test: ## Build slax-web and test the production front path (Caddy -> nginx): HSTS, no spoofed client IP
 	docker build -q -f docker/web/Dockerfile -t slax-web:local . >/dev/null

@@ -443,9 +443,14 @@ receives the channel's events until it disconnects.
 **Where:** `deploy/monitoring/uptime.sh`, `deploy/helm/slax/templates/monitor-cronjob.yaml`, `e2e/load/`,
 `docs/load-test-results.md`, runbook §2 and §4.10.
 
-- **Nothing watches the watcher's node.** The monitor runs in the cluster: a dead node, k3s down or the instance cut
-  from the Internet sends nothing. The silence (and the missing Sunday "restore check OK") is the signal. A free
-  external pinger on `/api/v1/health` would close that gap; none is set up.
+- **The in-cluster monitor cannot watch its own node.** It runs in the cluster: a dead node, k3s down, a switched-off
+  machine or an instance cut from the Internet sends nothing (slax-dev stayed off for two days unnoticed). The
+  outside probe (`.github/workflows/external-probe.yml`, runbook §4.10) covers that for both environments. Its own
+  limits: it is as shallow as `/api/v1/health`; a scheduled run starts a few minutes late (an alert comes 5 to 15
+  minutes after the node went silent), and GitHub disables the schedule of a repository left idle for 60 days;
+  GitHub itself, or the run's tailnet join for dev (OAuth client), failing shows as a red run and GitHub's e-mail,
+  not as a Telegram alert; it shares the Telegram chat with the other alerts; and it leaves one tiny cache entry per
+  run (evicted after 7 days unused). Nothing else watches the probe.
 - **`/api/v1/health` is shallow** (nginx, PHP-FPM and Laravel's boot). The monitor checks PostgreSQL and Redis on
   their own, as "answering" (`pg_isready`, a bare `PING`), not as "Slax's queries work"; Administration → Status
   goes further (a query, a Redis ping, Reverb, the scanner, S3) but only for a signed-in administrator.

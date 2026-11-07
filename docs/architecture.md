@@ -65,6 +65,7 @@ flowchart LR
 | PostgreSQL, Redis | Data; sessions, cache, queue, presence | upstream, pinned by digest |
 | Backup, restore check | Daily `pg_dump` to S3, weekly restore into a throwaway server | `ghcr.io/yechpa/slax-backup` |
 | Uptime monitor | Every minute, outside Laravel: health, Reverb, PostgreSQL, Redis, the public URL, disks | `slax-backup` |
+| Outside probe | Every 5 minutes from GitHub's runners, outside both clusters: `/api/v1/health` of prod and (through the tailnet) dev, so a dead or switched-off node is reported | `.github/workflows/external-probe.yml` |
 
 Every image is built for amd64 and arm64 by `.github/workflows/images.yml` from a commit,
 tagged with its SHA, scanned by Trivy, and deployed by that tag only.
@@ -331,6 +332,5 @@ Encrypt, Turnstile and Telegram cost nothing. Details: [runbook.md §2](runbook.
   messages; still no e-mail.
 - **More than one workspace**: the data model already carries `workspace_id`.
 - **Bots and integrations**: a Python service on the same pattern as the scanner.
-- **Operations**: an external uptime pinger (to see a dead node), metrics with a light
-  agent if the instance grows, Reverb's Redis scaling and a second node for upgrades
+- **Operations**: metrics with a light agent if the instance grows, Reverb's Redis scaling and a second node for upgrades
   without the few seconds of WebSocket reconnection.
