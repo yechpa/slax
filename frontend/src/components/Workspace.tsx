@@ -12,7 +12,7 @@
  *
  * Also here for the session's life: presence (heartbeats, the workspace presence
  * channel), the channel list refreshed every minute while the tab is visible and when it
- * comes back (the fallback for `channel.added`, see store/chat.ts), and the sidebar's dialogs.
+ * comes back (the fallback for `channel.added`, see store/chat.ts), and the sidebar's dialogs (the channel ones here, the tasks ones in tasks/TaskDialogs).
  */
 import { effect } from '@preact/signals'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
@@ -39,6 +39,7 @@ import { NewMessageDialog } from './NewMessageDialog.tsx'
 import { Skeleton } from './MessageList.tsx'
 import { NavToggle } from './NavToggle.tsx'
 import { Sidebar } from './Sidebar.tsx'
+import { TaskDialogs } from './tasks/TaskDialogs.tsx'
 import { TasksPage } from './tasks/TasksPage.tsx'
 
 /** How long the socket may be down before the banner says so: a blip is not news. */
@@ -136,6 +137,7 @@ export function Workspace({ connect, chat: given }: Props) {
     <ChatContext.Provider value={chat}>
       <Shell loadFailed={loadFailed} onRetryLoad={retryLoad} />
       <Dialogs />
+      <TaskDialogs />
     </ChatContext.Provider>
   )
 }

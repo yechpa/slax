@@ -21,7 +21,7 @@ export function taskRights(task: Task, meId: number | null) {
 }
 
 /** The server's refusals by rule, each with its own sentence (`tasks.error.<code>`). */
-const REFUSALS = new Set(['task_limit', 'inbox_full', 'invalid_assignee', 'invalid_list', 'validation'])
+const REFUSALS = new Set(['task_list_limit', 'task_limit', 'inbox_full', 'invalid_assignee', 'invalid_list', 'validation'])
 
 /** A failed task call, said in the reader's language; `fallback` is the key for anything else. */
 export function taskErrorText(error: unknown, fallback: string): string {
