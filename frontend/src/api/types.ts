@@ -187,7 +187,6 @@ export interface Task {
   completed_at: string | null
   /** A list of the assignee; null: unfiled (in the assignee's inbox). */
   list_id: number | null
-  position: number
   creator: UserSummary
   assignee: UserSummary
   created_at: string

@@ -460,6 +460,7 @@
   "tasks.error.inbox_full": "This person's “Assigned to me” is full (200 tasks to file). They must file some first.",
   "tasks.error.invalid_assignee": "This person cannot receive tasks.",
   "tasks.error.invalid_list": "This list no longer exists.",
+  "tasks.error.rate_limited": "Too many actions in a row. Wait a moment, then try again.",
   "tasks.list.name": "Name",
   "tasks.list.create": "Create list",
   "tasks.list.rename": "Rename list",

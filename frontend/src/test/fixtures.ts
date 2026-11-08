@@ -72,7 +72,6 @@ export function task(id: number, overrides: Partial<Task> = {}): Task {
     completed: false,
     completed_at: null,
     list_id: 1,
-    position: id,
     creator: summary(ME),
     assignee: summary(ME),
     created_at: '2026-11-08T08:00:00.000Z',

@@ -461,6 +461,7 @@
   "tasks.error.inbox_full": "„הוקצו אליי” של האדם הזה מלא (200 משימות לסידור). קודם צריך לסדר שם כמה משימות.",
   "tasks.error.invalid_assignee": "אי אפשר להקצות משימות לאדם הזה.",
   "tasks.error.invalid_list": "הרשימה הזאת כבר לא קיימת.",
+  "tasks.error.rate_limited": "יותר מדי פעולות ברצף. חכו רגע ונסו שוב.",
   "tasks.list.name": "שם",
   "tasks.list.create": "יצירת רשימה",
   "tasks.list.rename": "שינוי שם הרשימה",

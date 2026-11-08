@@ -180,7 +180,6 @@ const INBOX: Task[] = [
     completed: false,
     completed_at: null,
     list_id: null,
-    position: 0,
     creator: DANA,
     assignee: ALICE,
     created_at: at(0, 8, 40),

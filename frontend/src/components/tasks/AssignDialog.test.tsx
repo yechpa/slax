@@ -109,6 +109,25 @@ describe('assign dialog', () => {
     expect(titles().length).toBe(2)
   })
 
+  it('too many actions (429) says to wait, in French, and keeps the dialog', async () => {
+    const { routes } = server({ 'PATCH /api/v1/tasks/1': () => ({ status: 429, body: { message: 'Too Many Attempts.' } }) })
+    app = await mountApp(routes, '/tasks/l/1', { locale: 'fr' })
+    await settle()
+    const row = app.host.querySelector<HTMLElement>('[data-task-id="1"]')!
+    row.querySelector<HTMLButtonElement>('.task-row__more')!.click()
+    await settle(2)
+    document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[2].click()
+    await settle()
+    await search('da')
+    dialog()!.querySelector<HTMLElement>('[role="option"]')!.click()
+    await settle()
+    const submit = dialog()!.querySelector<HTMLButtonElement>('button[type="submit"]')!
+    submit.click()
+    await settle()
+    expect(plain(dialog()!.querySelector('[role="alert"]')?.textContent)).toBe('Trop d’actions d’affilée. Attendez un instant, puis réessayez.')
+    expect(submit.disabled).toBe(false)
+  })
+
   it('Cancel and Escape clear the state and send nothing; focus returns to the row menu button', async () => {
     const { routes } = server()
     app = await mountApp(routes, '/tasks/l/1')

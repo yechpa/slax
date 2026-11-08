@@ -460,6 +460,7 @@
   "tasks.error.inbox_full": "La boîte « Assignées à moi » de cette personne est pleine (200 tâches à ranger). Elle doit d’abord en ranger.",
   "tasks.error.invalid_assignee": "Cette personne ne peut pas recevoir de tâches.",
   "tasks.error.invalid_list": "Cette liste n’existe plus.",
+  "tasks.error.rate_limited": "Trop d’actions d’affilée. Attendez un instant, puis réessayez.",
   "tasks.list.name": "Nom",
   "tasks.list.create": "Créer la liste",
   "tasks.list.rename": "Renommer la liste",

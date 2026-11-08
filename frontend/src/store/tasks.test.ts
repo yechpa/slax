@@ -15,7 +15,6 @@ function task(id: number, overrides: Partial<Task> = {}): Task {
     completed: false,
     completed_at: null,
     list_id: null,
-    position: id,
     creator: person(DANA),
     assignee: person(ME),
     created_at: '2026-11-08T08:00:00.000Z',

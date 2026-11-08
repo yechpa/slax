@@ -27,6 +27,7 @@ const REFUSALS = new Set(['task_list_limit', 'task_limit', 'inbox_full', 'invali
 export function taskErrorText(error: unknown, fallback: string): string {
   if (isApiError(error) && REFUSALS.has(error.code)) return t(`tasks.error.${error.code}`)
   if (isApiError(error, 'not_found')) return t('tasks.error.gone')
+  if (isApiError(error) && error.status === 429) return t('tasks.error.rate_limited')
   return t(fallback)
 }
 
