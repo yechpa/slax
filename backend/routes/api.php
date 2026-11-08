@@ -13,6 +13,7 @@ use App\Http\Controllers\ReactionController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskListController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\UserTaskController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -66,6 +67,11 @@ Route::prefix('v1')->group(function () {
         Route::delete('/task-lists/{taskList}', [TaskListController::class, 'destroy'])->middleware('throttle:tasks');
 
         // Tasks: a hidden one answers 404, a visible one its creator alone may change answers 403.
+        Route::get('/task-lists/{taskList}/tasks', [TaskListController::class, 'tasks']);
+        Route::get('/tasks/inbox', [TaskController::class, 'inbox']);
+        Route::get('/tasks/by-me', [TaskController::class, 'byMe']);
+        // A colleague's page: only what the caller may see; a banned or unknown person answers 404.
+        Route::get('/users/{user}/tasks', [UserTaskController::class, 'show'])->whereNumber('user');
         Route::post('/tasks', [TaskController::class, 'store'])->middleware('throttle:tasks');
         Route::patch('/tasks/{task}', [TaskController::class, 'update'])->middleware('throttle:tasks');
         Route::put('/tasks/{task}/completion', [TaskController::class, 'complete'])->middleware('throttle:tasks');

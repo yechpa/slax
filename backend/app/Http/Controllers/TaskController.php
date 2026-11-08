@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Resources\TaskResource;
 use App\Models\Task;
 use App\Services\TaskService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -14,6 +15,21 @@ use Illuminate\Validation\Rule;
 class TaskController extends Controller
 {
     public function __construct(private readonly TaskService $tasks) {}
+
+    /** The most tasks the inbox may hold (TaskService enforces it on assignment). */
+    private const INBOX_LIMIT = 200;
+
+    /** Unfiled tasks assigned to the caller. */
+    public function inbox(Request $request): JsonResponse
+    {
+        return $this->listTasks($request, Task::where('assignee_id', $request->user()->id)->whereNull('list_id')->limit(self::INBOX_LIMIT));
+    }
+
+    /** Tasks the caller created for somebody else. */
+    public function byMe(Request $request): JsonResponse
+    {
+        return $this->listTasks($request, Task::where('creator_id', $request->user()->id)->where('assignee_id', '!=', $request->user()->id));
+    }
 
     public function store(Request $request): JsonResponse
     {
@@ -80,6 +96,16 @@ class TaskController extends Controller
         $this->tasks->deleteTask($task);
 
         return response()->noContent();
+    }
+
+    /** @param  Builder<Task>  $query */
+    private function listTasks(Request $request, Builder $query): JsonResponse
+    {
+        $tasks = $query->with(['creator:id,name,avatar_url', 'assignee:id,name,avatar_url'])
+            ->orderBy('position')->orderBy('id')
+            ->get();
+
+        return response()->json(TaskResource::collection($tasks)->resolve($request));
     }
 
     /** `creator` and `assignee` as the resource shows them (a reassignment changes the latter). */

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Resources\TaskListResource;
+use App\Http\Resources\TaskResource;
 use App\Models\Task;
 use App\Models\TaskList;
 use App\Services\TaskService;
@@ -35,6 +36,20 @@ class TaskListController extends Controller
         $list->loadCount(self::openCount($request));
 
         return (new TaskListResource($list))->response()->setStatusCode(201);
+    }
+
+    /** The owner's tasks in one list: all of them are visible to the owner, who holds them. */
+    public function tasks(Request $request, TaskList $taskList): JsonResponse
+    {
+        Gate::authorize('manage', $taskList);
+
+        $tasks = $taskList->tasks()
+            ->where('assignee_id', $request->user()->id)
+            ->with(['creator:id,name,avatar_url', 'assignee:id,name,avatar_url'])
+            ->orderBy('position')->orderBy('id')
+            ->get();
+
+        return response()->json(TaskResource::collection($tasks)->resolve($request));
     }
 
     public function update(Request $request, TaskList $taskList): TaskListResource
