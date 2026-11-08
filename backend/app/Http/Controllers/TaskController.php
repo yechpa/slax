@@ -57,6 +57,22 @@ class TaskController extends Controller
         return new TaskResource($this->withPeople($this->tasks->setCompleted($task, (bool) $data['completed'])));
     }
 
+    public function move(Request $request, Task $task): TaskResource
+    {
+        Gate::authorize('move', $task);
+
+        $data = $request->validate(['list_id' => ['present', 'nullable', 'integer']]);
+
+        return new TaskResource($this->withPeople($this->tasks->moveTask($task, isset($data['list_id']) ? (int) $data['list_id'] : null)));
+    }
+
+    public function return(Task $task): TaskResource
+    {
+        Gate::authorize('return', $task);
+
+        return new TaskResource($this->withPeople($this->tasks->returnToAuthor($task)));
+    }
+
     public function destroy(Task $task): Response
     {
         Gate::authorize('delete', $task);

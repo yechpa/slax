@@ -7,6 +7,7 @@ use App\Models\Task;
 use App\Models\TaskList;
 use App\Models\User;
 use App\Models\Workspace;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -177,6 +178,74 @@ class TaskService
         $task->delete();
     }
 
+    /**
+     * The assignee files the task into one of their lists (last place), or back into their inbox with `null`.
+     * Already being there is not a change, so it is never refused by a cap. Decides on the task as it is once the
+     * assignee is locked: if it changed hands since the caller was authorized, that is a 403.
+     */
+    public function moveTask(Task $task, ?int $listId): Task
+    {
+        return DB::transaction(function () use ($task, $listId) {
+            $assignee = $this->lockOwner($task->assignee_id);
+            $task = $this->lockedHeldBy($task, $assignee->id);
+
+            if ($task->list_id === $listId) {
+                return $task;
+            }
+
+            if ($listId === null) {
+                $this->ensureInboxRoom($assignee);
+            } else {
+                TaskList::where('user_id', $assignee->id)->find($listId) ?? throw new TaskRefused('invalid_list');
+                if ($this->placeQuery($assignee, $listId)->count() >= self::MAX_TASKS_PER_LIST) {
+                    throw new TaskRefused('task_limit');
+                }
+            }
+
+            $task->list_id = $listId;
+            $task->position = $this->nextPosition($assignee, $listId);
+            $task->save();
+
+            return $task;
+        });
+    }
+
+    /**
+     * The assignee gives the task back: it goes to its creator's inbox, last place, and `$task->previousAssigneeId`
+     * holds who returned it. A creator who holds their own task has nothing to return (403, like a stale caller).
+     */
+    public function returnToAuthor(Task $task): Task
+    {
+        return DB::transaction(function () use ($task) {
+            $author = $this->lockOwner($task->creator_id);
+            $heldBy = $task->assignee_id;
+            $task = $this->lockedHeldBy($task, $heldBy);
+            if ($heldBy === $author->id) {
+                throw new AuthorizationException;
+            }
+            $this->ensureInboxRoom($author);
+
+            $task->previousAssigneeId = $heldBy;
+            $task->assignee_id = $author->id;
+            $task->list_id = null;
+            $task->position = $this->nextPosition($author, null);
+            $task->save();
+
+            return $task;
+        });
+    }
+
+    /** The task has to exist and still be held by `$assigneeId`, as the caller was authorized against. */
+    private function lockedHeldBy(Task $task, int $assigneeId): Task
+    {
+        $fresh = Task::whereKey($task->id)->lockForUpdate()->firstOrFail();
+        if ($fresh->assignee_id !== $assigneeId) {
+            throw new AuthorizationException;
+        }
+
+        return $fresh;
+    }
+
     /** A person who exists and is not banned, else `invalid_assignee`. */
     private function assignableUser(int $id): User
     {
@@ -210,8 +279,8 @@ class TaskService
     }
 
     /** Serializes a person's list and task changes, so two requests cannot both pass a cap or take the same position. */
-    private function lockOwner(User $owner): void
+    private function lockOwner(User|int $owner): User
     {
-        User::whereKey($owner->id)->lockForUpdate()->first();
+        return User::whereKey($owner instanceof User ? $owner->id : $owner)->lockForUpdate()->firstOrFail();
     }
 }

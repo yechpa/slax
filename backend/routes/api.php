@@ -69,6 +69,8 @@ Route::prefix('v1')->group(function () {
         Route::post('/tasks', [TaskController::class, 'store'])->middleware('throttle:tasks');
         Route::patch('/tasks/{task}', [TaskController::class, 'update'])->middleware('throttle:tasks');
         Route::put('/tasks/{task}/completion', [TaskController::class, 'complete'])->middleware('throttle:tasks');
+        Route::post('/tasks/{task}/move', [TaskController::class, 'move'])->middleware('throttle:tasks');
+        Route::post('/tasks/{task}/return', [TaskController::class, 'return'])->middleware('throttle:tasks');
         Route::delete('/tasks/{task}', [TaskController::class, 'destroy'])->middleware('throttle:tasks');
 
         // Administrators only: the `admin` gate runs before anything is looked up

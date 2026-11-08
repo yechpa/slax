@@ -33,6 +33,22 @@ class TaskPolicy
             : $this->denyUnlessHidden($user, $task);
     }
 
+    /** Filing it into one of their lists: the assignee's. */
+    public function move(User $user, Task $task): Response
+    {
+        return $task->assignee_id === $user->id
+            ? Response::allow()
+            : $this->denyUnlessHidden($user, $task);
+    }
+
+    /** Giving it back to its creator: the assignee's, when somebody else created it. */
+    public function return(User $user, Task $task): Response
+    {
+        return $task->assignee_id === $user->id && $task->creator_id !== $user->id
+            ? Response::allow()
+            : $this->denyUnlessHidden($user, $task);
+    }
+
     public function delete(User $user, Task $task): Response
     {
         return $this->edit($user, $task);
