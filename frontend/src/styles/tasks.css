@@ -58,6 +58,24 @@
     color: var(--color-muted);
   }
 
+  /* "Keep it for me too": the whole line is the target. */
+  .new-task__keep {
+    display: flex;
+    flex: 1 1 100%;
+    align-items: center;
+    gap: var(--space-2);
+    min-block-size: 2.75rem;
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .new-task__keep input {
+    inline-size: 1.25rem;
+    block-size: 1.25rem;
+    margin: 0;
+    accent-color: var(--color-accent);
+  }
+
   .new-task__error {
     color: var(--color-danger);
   }

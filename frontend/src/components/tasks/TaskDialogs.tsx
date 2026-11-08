@@ -25,7 +25,7 @@ export function TaskDialogs() {
     case 'move':
       return <MoveTaskDialog task={dialog.task} onClose={close} />
     case 'assign':
-      return <AssignDialog task={dialog.task} onClose={close} />
+      return <AssignDialog task={dialog.task} also={dialog.also} onClose={close} />
     case 'people':
       return <PeopleTasksDialog onClose={close} />
   }

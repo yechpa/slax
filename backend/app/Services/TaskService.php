@@ -13,6 +13,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Throwable;
 
 /** The rules for task lists and tasks. Controllers validate and authorize; this decides. */
@@ -110,39 +111,99 @@ class TaskService
      */
     public function createTask(User $by, string $title, string $visibility, ?int $listId, ?int $assigneeId): Task
     {
-        $assignee = $assigneeId === null ? $by : $this->assignableUser($assigneeId);
+        return $this->createTasks($by, $title, $visibility, $listId, $assigneeId === null ? [] : [$assigneeId])->firstOrFail();
+    }
 
-        return DB::transaction(function () use ($by, $assignee, $title, $visibility, $listId) {
-            $this->lockOwner($assignee);
+    /**
+     * Creates the task for each person named (the creator among them if they want it too; nobody named = the creator alone).
+     * Several people get one copy each, linked by a group id: the creator's goes in their list, the others' in their inbox.
+     * All or nothing. Returns the copies, the creator's first.
+     *
+     * @param  list<int>  $assigneeIds
+     * @return Collection<int, Task>
+     */
+    public function createTasks(User $by, string $title, string $visibility, ?int $listId, array $assigneeIds): Collection
+    {
+        $people = $this->assignableUsers($assigneeIds === [] ? [$by->id] : $assigneeIds);
+        $group = $people->count() > 1 ? (string) Str::uuid() : null;
 
-            if ($assignee->is($by)) {
-                $list = $listId === null
-                    ? $this->ensureDefaultList($by)
-                    : TaskList::where('user_id', $by->id)->find($listId) ?? throw new TaskRefused('invalid_list');
-                if ($this->placeQuery($assignee, $list->id)->count() >= self::MAX_TASKS_PER_LIST) {
-                    throw new TaskRefused('task_limit');
-                }
-                $destination = $list->id;
-            } else {
-                $this->ensureInboxRoom($assignee);
-                $destination = null;
+        return DB::transaction(function () use ($by, $people, $title, $visibility, $listId, $group) {
+            $this->lockAll($people);
+
+            return $people->sortByDesc(fn (User $person) => $person->is($by))->values()
+                ->map(fn (User $person) => $this->createCopy($by, $person, $title, $visibility, $listId, $group));
+        });
+    }
+
+    /**
+     * Gives the creator's task to more people: one new copy each, linked to the task's group (started now if it had none).
+     * A person who already has a copy is skipped; the creator, if named, gets theirs in `$listId` (their first list by default).
+     * All or nothing. Returns the new copies only.
+     *
+     * @param  list<int>  $assigneeIds
+     * @return Collection<int, Task>
+     */
+    public function assignAlso(Task $task, array $assigneeIds, ?int $listId = null): Collection
+    {
+        $people = $this->assignableUsers($assigneeIds);
+
+        return DB::transaction(function () use ($task, $people, $listId) {
+            // People first, then the task, like updateTask.
+            $this->lockAll($people);
+            $this->lockGroupOf($task->id);
+            $task = Task::whereKey($task->id)->lockForUpdate()->firstOrFail();
+
+            $holders = $task->group_id === null
+                ? collect([$task->assignee_id])
+                : Task::where('group_id', $task->group_id)->pluck('assignee_id');
+            $newcomers = $people->reject(fn (User $person) => $holders->contains($person->id))->values();
+            if ($newcomers->isEmpty()) {
+                return collect();
             }
 
-            $task = new Task([
-                'workspace_id' => Workspace::default()->id,
-                'title' => trim($title),
-                'visibility' => $visibility,
-                'position' => $this->nextPosition($assignee, $destination),
-            ]);
-            $task->creator_id = $by->id;
-            $task->assignee_id = $assignee->id;
-            $task->list_id = $destination;
-            $task->save();
-            $this->announce($task);
-            $this->pushAssignment($task, $by);
+            $group = $task->group_id ?? (string) Str::uuid();
+            if ($task->group_id === null) {
+                $task->group_id = $group;
+                $task->save();
+            }
+            $by = $task->creator;
 
-            return $task;
+            return $newcomers->sortByDesc(fn (User $person) => $person->is($by))->values()
+                ->map(fn (User $person) => $this->createCopy($by, $person, $task->title, $task->visibility, $listId, $group));
         });
+    }
+
+    /** One task for one person, whose row is already locked: in the creator's list for themselves, else in the person's inbox. */
+    private function createCopy(User $by, User $assignee, string $title, string $visibility, ?int $listId, ?string $group): Task
+    {
+        if ($assignee->is($by)) {
+            $list = $listId === null
+                ? $this->ensureDefaultList($by)
+                : TaskList::where('user_id', $by->id)->find($listId) ?? throw new TaskRefused('invalid_list');
+            if ($this->placeQuery($assignee, $list->id)->count() >= self::MAX_TASKS_PER_LIST) {
+                throw new TaskRefused('task_limit');
+            }
+            $destination = $list->id;
+        } else {
+            $this->ensureInboxRoom($assignee);
+            $destination = null;
+        }
+
+        $task = new Task([
+            'workspace_id' => Workspace::default()->id,
+            'title' => trim($title),
+            'visibility' => $visibility,
+            'position' => $this->nextPosition($assignee, $destination),
+        ]);
+        $task->creator_id = $by->id;
+        $task->assignee_id = $assignee->id;
+        $task->list_id = $destination;
+        $task->group_id = $group;
+        $task->save();
+        $this->announce($task);
+        $this->pushAssignment($task, $by);
+
+        return $task;
     }
 
     /**
@@ -165,6 +226,7 @@ class TaskService
         return DB::transaction(function () use ($task, $changes, $newAssigneeId) {
             // Person first, then the task, like moveTask: whoever will hold it, so a cap and a position are decided under lock.
             $this->lockOwner($newAssigneeId ?? $task->assignee_id);
+            $this->lockGroupOf($task->id);
             $task = Task::whereKey($task->id)->lockForUpdate()->firstOrFail();
             $assignee = $newAssigneeId !== null && $newAssigneeId !== $task->assignee_id ? $this->assignableUser($newAssigneeId) : null;
 
@@ -184,6 +246,9 @@ class TaskService
             }
             $task->save();
             $this->announce($task);
+            if ($task->group_id !== null && (isset($changes['title']) || isset($changes['visibility']))) {
+                $this->shareEdit($task);
+            }
             if ($assignee !== null) {
                 // Changing the assignee is the creator's alone (TaskPolicy::edit).
                 $this->pushAssignment($task, $task->creator);
@@ -191,6 +256,18 @@ class TaskService
 
             return $task;
         });
+    }
+
+    /** The other copies of the task get its title and visibility (the creator's edit, so they share one creator). */
+    private function shareEdit(Task $task): void
+    {
+        $others = Task::where('group_id', $task->group_id)->whereKeyNot($task->id)->lockForUpdate()->get();
+        foreach ($others as $other) {
+            $other->title = $task->title;
+            $other->visibility = $task->visibility;
+            $other->save();
+            $this->announce($other);
+        }
     }
 
     /** Ticking again keeps the first completion time. */
@@ -353,6 +430,37 @@ class TaskService
         }
 
         return $user;
+    }
+
+    /**
+     * Each id once, in the order given, as people who can receive a task (else `invalid_assignee`).
+     *
+     * @param  list<int>  $ids
+     * @return Collection<int, User>
+     */
+    private function assignableUsers(array $ids): Collection
+    {
+        return collect($ids)->map(fn ($id) => (int) $id)->unique()->values()->map(fn (int $id) => $this->assignableUser($id));
+    }
+
+    /** Locks them in id order, so two requests naming the same people cannot wait on each other. @param  Collection<int, User>  $people */
+    private function lockAll(Collection $people): void
+    {
+        foreach ($people->pluck('id')->sort()->values() as $id) {
+            $this->lockOwner($id);
+        }
+    }
+
+    /**
+     * Locks every copy of the task's group in id order, so two edits of different copies (or an edit and a new copy) wait
+     * for each other instead of deadlocking, and shareEdit sees every copy. Call after the people are locked, before the task row.
+     */
+    private function lockGroupOf(int $taskId): void
+    {
+        $group = Task::whereKey($taskId)->value('group_id');
+        if ($group !== null) {
+            Task::where('group_id', $group)->orderBy('id')->lockForUpdate()->get(['id']);
+        }
     }
 
     /** The tasks a person holds in a list, or in their inbox (no list). @return Builder<Task> */

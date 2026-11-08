@@ -5,7 +5,7 @@ import { SEARCH_DELAY_MS } from '../../lib/search.ts'
 import { tasksVersion } from '../../store/tasks.ts'
 import { resetUi } from '../../store/ui.ts'
 import type { FakeHandler } from '../../test/fakes.ts'
-import { DANA, NOAM, channel, task, taskList } from '../../test/fixtures.ts'
+import { DANA, ME, NOAM, channel, task, taskList } from '../../test/fixtures.ts'
 import { mountApp, plain, settle, typeInto, type Mounted } from '../../test/mountApp.tsx'
 
 let app: Mounted | null = null
@@ -31,11 +31,13 @@ function server(initial: Task[] = [], extra: Record<string, FakeHandler> = {}) {
     'GET /api/v1/users': ({ query }) => ({ body: [DANA, NOAM].filter((p) => p.name.includes(query.get('q') ?? '')) }),
     'POST /api/v1/tasks': ({ body }) => {
       posted.push(body)
-      const sent = body as { title: string; visibility: Task['visibility']; list_id?: number; assignee_id?: number }
+      const sent = body as { title: string; visibility: Task['visibility']; list_id?: number; assignee_id?: number; assignee_ids?: number[] }
+      // Given away unless it is for me too (then the answer is my copy, in my list).
+      const away = sent.assignee_id !== undefined || (sent.assignee_ids !== undefined && !sent.assignee_ids.includes(ME.id))
       const created = task(nextId++, {
         title: sent.title,
         visibility: sent.visibility,
-        list_id: sent.assignee_id ? null : (sent.list_id ?? 1),
+        list_id: away ? null : (sent.list_id ?? 1),
         assignee: sent.assignee_id === DANA.id ? DANA : task(0).assignee,
       })
       if (created.list_id === 1) tasks.push(created)
@@ -137,6 +139,64 @@ describe('tasks page', () => {
     expect(posted).toEqual([{ title: 'review the slides', visibility: 'private', assignee_id: DANA.id }])
     // Not in my list: it went to dana.
     expect(titles()).toEqual([])
+  })
+
+  async function pick(name: string) {
+    typeInto(form().querySelector<HTMLInputElement>('.people-picker__input')!, name)
+    await wait(SEARCH_DELAY_MS + 20)
+    await settle()
+    document.querySelector<HTMLElement>('.new-task [role="option"]')!.click()
+    await settle()
+  }
+
+  it('several colleagues send assignee_ids, each gets a copy, and the list choice goes', async () => {
+    const { routes, posted } = server()
+    await open(routes)
+    await pick('da')
+    await pick('נע')
+    expect([...form().querySelectorAll('.person-chip')].length).toBe(2)
+    expect(form().querySelector('select')).toBeNull()
+    expect(plain(form().querySelector('.new-task__inbox')?.textContent)).toBe('Each gets their own copy in “Assigned to me”.')
+
+    typeInto(titleField(), 'plan the trip')
+    await submit()
+    expect(posted).toEqual([{ title: 'plan the trip', visibility: 'private', assignee_ids: [DANA.id, NOAM.id] }])
+    // Nothing was kept for me, and the form is empty again.
+    expect(titles()).toEqual([])
+    expect(form().querySelectorAll('.person-chip').length).toBe(0)
+    expect(form().querySelector('.new-task__keep')).toBeNull()
+  })
+
+  it('"Keep it for me too" adds my copy in the chosen list, ahead of the colleagues', async () => {
+    const { routes, posted } = server()
+    await open(routes)
+    // Only offered once somebody else is chosen, and unchecked to begin with.
+    expect(form().querySelector('.new-task__keep')).toBeNull()
+    await pick('da')
+    const keep = form().querySelector<HTMLInputElement>('.new-task__keep input')!
+    expect(plain(form().querySelector('.new-task__keep')?.textContent)).toBe('Keep it for me too')
+    expect(keep.checked).toBe(false)
+    keep.click()
+    await settle()
+    // My copy goes into a list: the choice is back.
+    expect(form().querySelector('select')).not.toBeNull()
+
+    typeInto(titleField(), 'shared plan')
+    await submit()
+    expect(posted).toEqual([{ title: 'shared plan', visibility: 'private', list_id: 1, assignee_ids: [ME.id, DANA.id] }])
+  })
+
+  it('"Keep it for me too" is forgotten when every colleague is removed', async () => {
+    const { routes } = server()
+    await open(routes)
+    await pick('da')
+    form().querySelector<HTMLInputElement>('.new-task__keep input')!.click()
+    await settle()
+    form().querySelector<HTMLButtonElement>('.person-chip__remove')!.click()
+    await settle()
+    expect(form().querySelector('.new-task__keep')).toBeNull()
+    await pick('da')
+    expect(form().querySelector<HTMLInputElement>('.new-task__keep input')!.checked).toBe(false)
   })
 
   it('a server refusal (inbox_full) shows its translated message and keeps the typed title', async () => {

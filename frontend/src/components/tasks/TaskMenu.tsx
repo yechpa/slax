@@ -1,6 +1,6 @@
 /**
  * What can be done to a task, as a menu on its row: rename, change its visibility, assign it
- * to someone, delete it (its author); move it between lists (the person holding it); give it
+ * to someone or also to others, delete it (its author); move it between lists (the person holding it); give it
  * back to its author (the person holding it, when someone else wrote it). Each item shows only
  * when the viewer may do it (spec §6, mirrored here); the server still decides. "Assign to…"
  * and "Move to…" open their dialogs through `taskDialog` (Workspace renders them).
@@ -50,6 +50,7 @@ export function TaskMenu({ task, meId, onRename, onToggleVisibility, onReturn, o
     items.push({ label: t('tasks.rename'), run: onRename })
     items.push({ label: t(task.visibility === 'private' ? 'tasks.makePublic' : 'tasks.makePrivate'), run: onToggleVisibility })
     items.push({ label: t('tasks.assign'), run: () => (taskDialog.value = { kind: 'assign', task }) })
+    items.push({ label: t('tasks.assignAlso'), run: () => (taskDialog.value = { kind: 'assign', task, also: true }) })
   }
   if (rights.move) items.push({ label: t('tasks.move'), run: () => (taskDialog.value = { kind: 'move', task }) })
   if (rights.giveBack) items.push({ label: t('tasks.return', { name: task.creator.name }), run: onReturn })
