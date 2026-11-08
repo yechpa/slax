@@ -10,6 +10,7 @@ use App\Http\Controllers\MessageController;
 use App\Http\Controllers\PresenceController;
 use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Controllers\ReactionController;
+use App\Http\Controllers\TaskListController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -56,6 +57,12 @@ Route::prefix('v1')->group(function () {
 
         Route::post('/files', [FileController::class, 'store'])->middleware('throttle:uploads');
         Route::get('/files/{file}/download', [FileController::class, 'download']);
+
+        // A person's own task lists (somebody else's list answers 404).
+        Route::get('/task-lists', [TaskListController::class, 'index']);
+        Route::post('/task-lists', [TaskListController::class, 'store'])->middleware('throttle:tasks');
+        Route::patch('/task-lists/{taskList}', [TaskListController::class, 'update'])->middleware('throttle:tasks');
+        Route::delete('/task-lists/{taskList}', [TaskListController::class, 'destroy'])->middleware('throttle:tasks');
 
         // Administrators only: the `admin` gate runs before anything is looked up
         // (AdminTest checks every route registered here). Writes are rate limited.
