@@ -8,9 +8,11 @@ use App\Models\Task;
 use App\Models\TaskList;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\Push\PushNotifier;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /** The rules for task lists and tasks. Controllers validate and authorize; this decides. */
 class TaskService
@@ -20,6 +22,8 @@ class TaskService
     public const MAX_TASKS_PER_LIST = 500;
 
     public const MAX_INBOX = 200;
+
+    public function __construct(private readonly PushNotifier $push) {}
 
     public function createList(User $owner, string $name): TaskList
     {
@@ -134,6 +138,7 @@ class TaskService
             $task->list_id = $destination;
             $task->save();
             $this->announce($task);
+            $this->pushAssignment($task, $by);
 
             return $task;
         });
@@ -170,6 +175,10 @@ class TaskService
             }
             $task->save();
             $this->announce($task);
+            if ($assignee !== null) {
+                // Changing the assignee is the creator's alone (TaskPolicy::edit).
+                $this->pushAssignment($task, $task->creator);
+            }
         });
 
         return $task;
@@ -245,6 +254,7 @@ class TaskService
             $task->position = $this->nextPosition($author, null);
             $task->save();
             $this->announce($task);
+            $this->pushAssignment($task, User::findOrFail($heldBy));
 
             return $task;
         });
@@ -257,6 +267,21 @@ class TaskService
     public function announce(Task $task, ?int $alsoUserId = null): void
     {
         $this->notify($task->id, [$task->creator_id, $task->assignee_id, $task->previousAssigneeId, $alsoUserId]);
+    }
+
+    /**
+     * Web Push to the new assignee, once the transaction committed (nothing if it is rolled back). A failure is reported,
+     * never thrown: the task is saved and its author gets their answer.
+     */
+    private function pushAssignment(Task $task, User $by): void
+    {
+        DB::afterCommit(function () use ($task, $by) {
+            try {
+                $this->push->taskAssigned($task, $by);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
     }
 
     /** @param  array<int|null>  $userIds */

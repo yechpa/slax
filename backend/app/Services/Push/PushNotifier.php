@@ -7,6 +7,7 @@ use App\Jobs\SendPushNotification;
 use App\Models\Channel;
 use App\Models\Message;
 use App\Models\PushSubscription;
+use App\Models\Task;
 use App\Models\User;
 use App\Services\PresenceService;
 
@@ -82,6 +83,32 @@ class PushNotifier
         foreach (PushSubscription::whereIn('user_id', $away)->orderBy('id')->get() as $device) {
             $payload = PushPayload::forMessage($reasons[$device->user_id], $author, $channel, $message->parent_id, $device->locale);
             SendPushNotification::dispatch($device->id, $channel->id, $message->id, $payload);
+            $queued++;
+        }
+
+        return $queued;
+    }
+
+    /**
+     * A task was just given to its assignee by `$by`: one push per device of the assignee, unless push is off, they
+     * gave it to themselves, they are banned or online (same rule as a message). Never the task's title.
+     *
+     * @return int jobs queued
+     */
+    public function taskAssigned(Task $task, User $by): int
+    {
+        if (! Push::enabled() || $task->assignee_id === $by->id) {
+            return 0;
+        }
+        $assignee = User::find($task->assignee_id);
+        if ($assignee === null || $assignee->isBanned()
+            || $this->presence->stateOf($assignee->id) === PresenceState::Online->value) {
+            return 0;
+        }
+
+        $queued = 0;
+        foreach (PushSubscription::where('user_id', $assignee->id)->orderBy('id')->get() as $device) {
+            SendPushNotification::dispatch($device->id, null, null, PushPayload::forTask($by, $device->locale));
             $queued++;
         }
 

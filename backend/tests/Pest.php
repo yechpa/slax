@@ -2,8 +2,10 @@
 
 use App\Models\Channel;
 use App\Models\File;
+use App\Models\PushSubscription;
 use App\Models\User;
 use App\Services\FakeScannerClient;
+use App\Services\Push\Push;
 use App\Services\ScannerClient;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -187,6 +189,19 @@ function enablePush(): array
     ]);
 
     return $keys;
+}
+
+/** A device of $user, written straight to the database (made with the current VAPID key). */
+function device(User $user, string $locale = 'en'): PushSubscription
+{
+    return PushSubscription::create([
+        'user_id' => $user->id,
+        'endpoint' => 'https://fcm.googleapis.com/fcm/send/'.Str::random(40),
+        'p256dh' => base64url("\x04".random_bytes(64)),
+        'auth' => base64url(random_bytes(16)),
+        'locale' => $locale,
+        'key_id' => Push::keyId(),
+    ]);
 }
 
 function base64url(string $bytes): string

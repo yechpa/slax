@@ -21,6 +21,8 @@ final class PushPayload
 
     public const TYPE_TEST = 'test';
 
+    public const TYPE_TASK = 'task';
+
     /**
      * @param  self::TYPE_DM|self::TYPE_MENTION|self::TYPE_REPLY  $type
      * @return array{type: string, title: string, body: string, url: string, tag: string}
@@ -38,6 +40,22 @@ final class PushPayload
             'body' => __("push.body_{$type}", [], $locale),
             'url' => $threadId === null ? "/c/{$channel->id}" : "/c/{$channel->id}/t/{$threadId}",
             'tag' => self::tag($channel->id),
+        ];
+    }
+
+    /**
+     * A task was assigned to the device's owner: who gave it, never what it says (the task's title stays in the app).
+     *
+     * @return array{type: string, title: string, body: string, url: string, tag: string}
+     */
+    public static function forTask(User $sender, string $locale): array
+    {
+        return [
+            'type' => self::TYPE_TASK,
+            'title' => __('push.title_task', ['sender' => self::senderName($sender, $locale)], $locale),
+            'body' => __('push.body_task', [], $locale),
+            'url' => '/tasks/inbox',
+            'tag' => 'tasks',
         ];
     }
 
