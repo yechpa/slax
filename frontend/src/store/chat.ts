@@ -18,7 +18,9 @@
  *   (1 s, 2 s, 4 s… at most 30 s) while the channel stays open; after 3 failures the
  *   view offers a Retry.
  * - The user's own private channel (`App.Models.User.{id}`) says `channel.added` when someone
- *   else makes them a member: the channel list is refetched (Workspace also polls it).
+ *   else makes them a member: the channel list is refetched (Workspace also polls it). It also
+ *   says `task.changed` (task lists module): the tasks store is refetched, same debounce and
+ *   same fallbacks (the reconnection, Workspace's poll).
  * - While a latest page is on its way, events for that channel are held and applied
  *   after it, through the same merge, so none is lost and none is undone by the page.
  * - A REST answer never undoes a live event that arrived while it was on its way (the event
@@ -62,6 +64,7 @@ import {
 import { createPresence } from './presence.ts'
 import { createReactions } from './reactions.ts'
 import { me } from './session.ts'
+import { refreshTasks } from './tasks.ts'
 import { createThreads, type ReplyEvent } from './threads.ts'
 import { createTyping } from './typing.ts'
 import { createUploads } from './uploads.ts'
@@ -124,6 +127,7 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
   /** The user's own channel (`channel.added`): for which connection and user, and its unsubscribe. */
   let personal: { realtime: Realtime; userId: number; unsubscribe: () => void } | null = null
   let addedTimer: ReturnType<typeof setTimeout> | undefined
+  let taskTimer: ReturnType<typeof setTimeout> | undefined
 
   const meId = () => me.peek()?.id ?? null
   /** A check that turns false once stop() ran (whatever started now must then not touch the stores). */
@@ -194,6 +198,9 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
         'channel.added': () => {
           if (still()) onChannelAdded()
         },
+        'task.changed': () => {
+          if (still()) onTaskChanged()
+        },
       },
       () => {
         if (still() && personal?.unsubscribe === unsubscribe) dropPersonal()
@@ -212,6 +219,15 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     addedTimer = setTimeout(() => {
       addedTimer = undefined
       void refreshChannels().catch(() => undefined)
+    }, CHANNEL_ADDED_DEBOUNCE_MS)
+  }
+
+  /** A task of mine changed (the payload, a task id, is not needed): tasks refetched, a burst of events once. */
+  function onTaskChanged(): void {
+    if (taskTimer !== undefined) return
+    taskTimer = setTimeout(() => {
+      taskTimer = undefined
+      void refreshTasks()
     }, CHANNEL_ADDED_DEBOUNCE_MS)
   }
 
@@ -653,12 +669,14 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     // The list is refetched below: a pending channel.added refresh would only repeat it.
     clearTimeout(addedTimer)
     addedTimer = undefined
+    clearTimeout(taskTimer)
+    taskTimer = undefined
     subscribePersonal()
     for (const key of timelineKeys()) {
       if (key === (current === null ? '' : channelKey(current)) || threads.isOpen(key)) continue
       updateTimeline(key, (t) => (t.status === 'idle' ? t : { ...t, stale: true }))
     }
-    await Promise.all([refreshChannels().catch(() => undefined), current === null ? undefined : catchUp(current), threads.reconnect()])
+    await Promise.all([refreshChannels().catch(() => undefined), refreshTasks(), current === null ? undefined : catchUp(current), threads.reconnect()])
   }
 
   async function catchUp(channelId: number): Promise<void> {
@@ -730,6 +748,8 @@ export function createChat({ api, realtime: initialRealtime, uuid = () => crypto
     dropPersonal()
     clearTimeout(addedTimer)
     addedTimer = undefined
+    clearTimeout(taskTimer)
+    taskTimer = undefined
     for (const unsubscribe of subscriptions.values()) unsubscribe()
     subscriptions.clear()
     refusals.clear()

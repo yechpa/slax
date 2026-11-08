@@ -26,6 +26,7 @@ import { channelPath, navigate, route } from '../router.ts'
 import { channelById, channels, channelsLoaded, rooms } from '../store/channels.ts'
 import { createChat, type Chat } from '../store/chat.ts'
 import { me } from '../store/session.ts'
+import { loadTasks, refreshTasks } from '../store/tasks.ts'
 import { connection, everConnected, navOpen, openDialog, realtimeDown } from '../store/ui.ts'
 import { Button } from './ui/Button.tsx'
 import { EmptyState } from './ui/EmptyState.tsx'
@@ -72,6 +73,8 @@ export function Workspace({ connect, chat: given }: Props) {
     let unavailable: ReturnType<typeof setTimeout> | undefined
     const user = me.peek()
     chat.start().catch(() => !cancelled && setLoadFailed(true))
+    // The sidebar's lists and badge; not part of the workspace's readiness: the minute's poll retries a failure.
+    loadTasks().catch(() => undefined)
     if (user) chat.presence.start(user.id)
     connect().then(
       (connected) => {
@@ -95,14 +98,18 @@ export function Workspace({ connect, chat: given }: Props) {
     }
   }, [chat, connect])
 
-  // New conversations and invitations to private rooms are pushed (channel.added); this poll
-  // is the fallback for a missed event (not while the tab is hidden; once when it comes back).
+  // New conversations and invitations to private rooms are pushed (channel.added), task changes
+  // too (task.changed); this poll is the fallback for a missed event (not while the tab is
+  // hidden; once when it comes back).
   useEffect(
     () =>
-      pollWhileVisible(() => void chat.refreshChannels().catch(() => undefined), {
-        everyMs: CHANNELS_REFRESH_MS,
-        staleAfterMs: CHANNELS_ON_RETURN_MS,
-      }),
+      pollWhileVisible(
+        () => {
+          void chat.refreshChannels().catch(() => undefined)
+          void refreshTasks()
+        },
+        { everyMs: CHANNELS_REFRESH_MS, staleAfterMs: CHANNELS_ON_RETURN_MS },
+      ),
     [chat],
   )
 

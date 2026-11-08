@@ -9,6 +9,7 @@ import { channelById, channels, resetChannels } from './channels.ts'
 import type { Entry } from './merge.ts'
 import { channelKey, resetTimelines, timeline } from './messages.ts'
 import { session } from './session.ts'
+import { resetTasks, tasksVersion } from './tasks.ts'
 
 const CHANNEL = 7
 const UUID = '6f1c2a5e-0b9d-4c47-9a3e-1d2b3c4d5e6f'
@@ -38,6 +39,7 @@ beforeEach(() => {
   realtime = new FakeRealtime()
   session.value = { status: 'signed-in', me: ME }
   resetClientState()
+  resetTasks()
 })
 
 afterEach(() => {
@@ -538,6 +540,71 @@ describe('the user’s own channel (channel.added)', () => {
     realtime.emit(theirs, 'channel.added', { channel_id: 41 })
     await vi.advanceTimersByTimeAsync(CHANNEL_ADDED_DEBOUNCE_MS)
     expect(listCalls(server)).toBe(calls + 1)
+  })
+})
+
+describe('the user’s own channel (task.changed)', () => {
+  const MINE = `private-App.Models.User.${ME.id}`
+  const taskCalls = (server: ReturnType<typeof setup>['server']) =>
+    server.calls.filter((c) => c.method === 'GET' && c.path === '/api/v1/tasks/inbox').length
+  const routes = {
+    'GET /api/v1/task-lists': () => ({ body: [] }),
+    'GET /api/v1/tasks/inbox': () => ({ body: [] }),
+  }
+
+  it('a task.changed on my channel refreshes tasks once for a burst of three', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup(routes)
+    await chat.start()
+    expect(taskCalls(server)).toBe(0)
+
+    for (const id of [1, 2, 3]) realtime.emit(MINE, 'task.changed', { task_id: id })
+    await vi.advanceTimersByTimeAsync(CHANNEL_ADDED_DEBOUNCE_MS - 1)
+    expect(taskCalls(server)).toBe(0)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(taskCalls(server)).toBe(1)
+    expect(tasksVersion.value).toBe(1)
+    await vi.advanceTimersByTimeAsync(5 * CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(taskCalls(server)).toBe(1)
+
+    // A later one gets its own refresh; the channel list is not refetched for tasks.
+    realtime.emit(MINE, 'task.changed', { task_id: 4 })
+    await vi.advanceTimersByTimeAsync(CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(taskCalls(server)).toBe(2)
+    expect(server.calls.filter((c) => c.path === '/api/v1/channels')).toHaveLength(1)
+  })
+
+  it('after reconnect the tasks are refreshed too, and a pending debounce is not repeated', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup(routes)
+    await chat.start()
+    realtime.emit(MINE, 'task.changed', { task_id: 1 })
+    realtime.reconnect()
+    await vi.advanceTimersByTimeAsync(10 * CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(taskCalls(server)).toBe(1)
+    expect(tasksVersion.value).toBe(1)
+  })
+
+  it('a task.changed on someone else’s channel does nothing', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup(routes)
+    await chat.start()
+    realtime.emit(`private-App.Models.User.${DANA.id}`, 'task.changed', { task_id: 1 })
+    await vi.advanceTimersByTimeAsync(10 * CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(taskCalls(server)).toBe(0)
+    expect(tasksVersion.value).toBe(0)
+  })
+
+  it('refreshes nothing after sign-out, even for an event already received or from a handler kept', async () => {
+    vi.useFakeTimers()
+    const { chat, server } = setup(routes)
+    await chat.start()
+    const handlers = realtime.subscriptions.get(MINE)!.handlers
+    realtime.emit(MINE, 'task.changed', { task_id: 1 })
+    chat.stop()
+    handlers['task.changed']({ task_id: 2 })
+    await vi.advanceTimersByTimeAsync(10 * CHANNEL_ADDED_DEBOUNCE_MS)
+    expect(taskCalls(server)).toBe(0)
   })
 })
 
