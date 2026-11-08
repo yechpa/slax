@@ -10,6 +10,9 @@
 > memberBody, demoTitle, demoBody, madeMember, madeDemo), `admin.error.cannot_change_admin`,
 > `admin.error.cannot_change_seed`, `admin.action.user.made_member` and
 > `admin.action.user.made_demo`.
+> Likewise the task lists: every `tasks.*` key and `nav.tasks` in `he.json`, the Hebrew lines
+> of `backend/lang/he/push.php` (`title_task`, `body_task`) and `backend/lang/he/tasks.php`,
+> and part 7 below in Hebrew.
 
 <a id="english"></a>
 
@@ -90,6 +93,26 @@ Write to the person who invited you (in Slax or as you usually do), with:
 - a **screenshot** if you can.
 
 Never send a password or a code.
+
+### 7. Tasks
+
+At the bottom of the menu, after the direct messages, the **tasks** section holds your to-do
+lists.
+
+- **New list** makes a list ("Shopping", "Work"…). Open a list to add a task at the top: type
+  it, choose **Private** or **Public**, then **Add task**. Tick a task when it is done; done
+  tasks fold away under **Done**. The **···** button on a task renames it, changes who can see
+  it, assigns it, moves it or deletes it.
+- **Private** (the starting choice) is seen only by you and the person it is for. **Public**
+  is seen by everyone in Slax, the demo's strangers included, and so is the name of the list
+  it is in. Keep family errands private.
+- **For someone else**: type their name under **Assign to** (or **···** → **Assign to…** later).
+  It arrives in their **Assigned to me**, with a notification that says who, never the task.
+  They can tick it, file it into one of their lists (**···** → **Move to…**) or give it back to
+  you (**···** → **Return to** your name). You keep an eye on it under **Assigned by me**.
+- **People's tasks** shows someone's tasks: their public ones, and the private ones you gave
+  them.
+- No dates, reminders or comments on tasks.
 
 ### What was tested before you
 
@@ -172,6 +195,23 @@ notifications arriving. That is exactly what you are helping to check.
 - **צילום מסך** אם אפשר.
 
 אף פעם אל תשלחו סיסמה או קוד.
+
+### 7. משימות
+
+בתחתית התפריט, אחרי ההודעות הישירות, החלק **משימות** מכיל את רשימות המשימות שלכם.
+
+- **רשימה חדשה** יוצרת רשימה („קניות”, „עבודה”…). פותחים רשימה ומוסיפים משימה בראשה: כותבים
+  אותה, בוחרים **פרטית** או **ציבורית**, ואז **הוספת משימה**. מסמנים משימה כשהיא בוצעה; המשימות
+  שבוצעו מתקפלות תחת **בוצעו**. הכפתור **···** של משימה משנה את שמה, מי רואה אותה, למי היא
+  מוקצית, באיזו רשימה היא, או מוחק אותה.
+- משימה **פרטית** (הבחירה ההתחלתית) גלויה רק לכם ולמי שהיא בשבילו. משימה **ציבורית** גלויה לכל
+  מי שב־Slax, כולל הזרים של ההדגמה, וכך גם שם הרשימה שהיא בה. ענייני משפחה משאירים פרטיים.
+- **בשביל מישהו אחר**: כותבים את שמו תחת **הקצאה אל** (או אחר כך **···** ← **הקצאה אל…**).
+  היא מגיעה אצלו ל**הוקצו אליי**, עם התראה שאומרת ממי, אף פעם לא את המשימה. הוא יכול לסמן
+  אותה, להעביר אותה לאחת הרשימות שלו (**···** ← **העברה אל…**) או להחזיר אותה אליכם (**···** ←
+  **החזרה אל** והשם שלכם). אתם עוקבים אחריה ב**הוקצו על ידיי**.
+- **משימות של אחרים** מראה את המשימות של מישהו: הציבוריות, והפרטיות שאתם נתתם לו.
+- אין תאריכים, תזכורות או תגובות על משימות.
 
 ### מה נבדק לפניכם
 
@@ -264,6 +304,28 @@ affiche « Impossible de se déconnecter ». Réessayez une fois connecté.
 - une **capture d'écran** si possible.
 
 N'envoyez jamais de mot de passe ni de code.
+
+### 7. Tâches
+
+En bas du menu, après les messages directs, la rubrique **tâches** contient vos listes de
+choses à faire.
+
+- **Nouvelle liste** crée une liste (« Courses », « Boulot »…). Ouvrez une liste pour ajouter
+  une tâche en haut : tapez-la, choisissez **Privée** ou **Publique**, puis **Ajouter la
+  tâche**. Cochez une tâche quand elle est faite ; les tâches faites se replient sous
+  **Terminées**. Le bouton **···** d'une tâche la renomme, change qui la voit, l'assigne, la
+  déplace ou la supprime.
+- **Privée** (le choix de départ) : vue seulement par vous et la personne à qui elle est
+  confiée. **Publique** : vue par tout le monde dans Slax, inconnus de la démo compris, comme le
+  nom de la liste qui la contient. Gardez les affaires de famille en privé.
+- **Pour quelqu'un d'autre** : tapez son nom sous **Assigner à** (ou plus tard **···** →
+  **Assigner à…**). Elle arrive dans ses **Assignées à moi**, avec une notification qui dit de
+  qui, jamais la tâche. La personne peut la cocher, la ranger dans une de ses listes (**···** →
+  **Déplacer vers…**) ou vous la rendre (**···** → **Rendre à** votre nom). Vous la suivez dans
+  **Assignées par moi**.
+- **Tâches des autres** montre les tâches de quelqu'un : ses tâches publiques, et les privées
+  que vous lui avez confiées.
+- Pas de dates, de rappels ni de commentaires sur les tâches.
 
 ### Ce qui a été testé avant vous
 

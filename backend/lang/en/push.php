@@ -9,6 +9,8 @@ return [
     'body_dm' => 'New message',
     'body_mention' => 'You were mentioned',
     'body_reply' => 'New reply',
+    'title_task' => ':sender assigned you a task',
+    'body_task' => 'New task',
     'test_title' => 'Slax',
     'test_body' => 'Notifications work on this device.',
 ];

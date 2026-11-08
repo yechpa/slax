@@ -83,7 +83,7 @@ describe('sidebar', () => {
     render(<Sidebar currentId={1} />, host)
 
     const labels = [...host.querySelectorAll('a.nav-item .nav-item__label')].map((l) => l.textContent?.replace(/[⁨⁩]/g, ''))
-    expect(labels).toEqual(['general', 'secret', 'random', 'נעם', 'dana, נעם'])
+    expect(labels).toEqual(['general', 'secret', 'random', 'נעם', 'dana, נעם', 'Assigned to me', 'Assigned by me'])
     expect(host.querySelector('a[aria-current="page"]')?.getAttribute('href')).toBe('/c/1')
     const random = [...host.querySelectorAll('a.nav-item')][2]
     expect(random.classList.contains('nav-item--muted')).toBe(true)

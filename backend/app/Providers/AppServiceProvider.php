@@ -85,6 +85,8 @@ class AppServiceProvider extends ServiceProvider
         // Turning notifications on or off on a device; the test button sends to every device.
         RateLimiter::for('push-subscriptions', fn (Request $request) => Limit::perMinute(20)->by('user:'.$request->user()->id));
         RateLimiter::for('push-test', fn (Request $request) => Limit::perMinute(3)->by('user:'.$request->user()->id));
+        // Task and list writes: a person ticking through a list stays well under one a second.
+        RateLimiter::for('tasks', fn (Request $request) => Limit::perMinute(60)->by('user:'.$request->user()->id));
         RateLimiter::for('admin-writes', fn (Request $request) => Limit::perMinute(30)->by('user:'.$request->user()->id));
 
         // Administrators are the ADMIN_EMAILS accounts (set at each sign-in); a banned one is not.
@@ -94,6 +96,8 @@ class AppServiceProvider extends ServiceProvider
         Route::pattern('channel', '[0-9]+');
         Route::pattern('message', '[0-9]+');
         Route::pattern('file', '[0-9]+');
+        Route::pattern('taskList', '[0-9]+');
+        Route::pattern('task', '[0-9]+');
 
         // Reverb speaks the Pusher protocol; this subclass adds what channel revocation needs.
         Broadcast::extend('reverb', fn ($app, array $config) => new ReverbBroadcaster($app->make(BroadcastManager::class)->pusher($config)));

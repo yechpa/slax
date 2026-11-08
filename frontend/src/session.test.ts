@@ -3,6 +3,7 @@ import { resetClientState } from './api/client.ts'
 import { LAST_CHANNEL_KEY } from './lib/prefs.ts'
 import { boot, endSession } from './session.ts'
 import { session } from './store/session.ts'
+import { inbox, taskDialog, taskLists, tasksLoaded } from './store/tasks.ts'
 import { fakeFetch } from './test/fakes.ts'
 
 afterEach(() => {
@@ -25,6 +26,20 @@ describe('endSession', () => {
       expect(localStorage.getItem('slax.theme')).toBe('listing')
     },
   )
+})
+
+describe('endSession and tasks', () => {
+  it('forgets the task lists, the inbox and any open task dialog', () => {
+    taskLists.value = [{ id: 1, name: 'Home', position: 0, open_count: 1 }]
+    inbox.value = [{ id: 1 } as never]
+    tasksLoaded.value = true
+    taskDialog.value = { kind: 'new-list' }
+    endSession(null)
+    expect(taskLists.value).toEqual([])
+    expect(inbox.value).toEqual([])
+    expect(tasksLoaded.value).toBe(false)
+    expect(taskDialog.value).toBeNull()
+  })
 })
 
 describe('boot', () => {

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale, type Locale } from './index.ts'
+import { taskDialog, type TaskDialog } from '../store/tasks.ts'
 import { openDialog, realtimeDown, resetUi, showToast } from '../store/ui.ts'
-import { DANA, NOAM, channel, live, tombstone } from '../test/fixtures.ts'
+import { DANA, NOAM, channel, live, task, taskList, tombstone } from '../test/fixtures.ts'
 import type { FakeHandler } from '../test/fakes.ts'
 import { mountApp, settle, type Mounted } from '../test/mountApp.tsx'
 
@@ -13,6 +14,12 @@ afterEach(() => {
 })
 
 const routes = () => ({
+  'GET /api/v1/task-lists': () => ({ body: [taskList(1, { name: 'Home', open_count: 1 })] }),
+  'GET /api/v1/tasks/inbox': () => ({ body: [task(4, { creator: DANA, list_id: null, visibility: 'public' })] }),
+  'GET /api/v1/task-lists/1/tasks': () => ({ body: [task(5), task(6, { completed: true, completed_at: '2026-11-08T09:00:00.000Z' })] }),
+  'GET /api/v1/users/2/tasks': () => ({
+    body: { user: DANA, lists: [{ id: 11, name: 'Garden', tasks: [task(20, { creator: DANA, assignee: DANA, list_id: 11, visibility: 'public' })] }], unfiled: [task(21, { list_id: null, assignee: DANA })] },
+  }),
   'GET /api/v1/channels': () => ({
     body: [
       channel(7, { name: 'general', topic: 'News', member_count: 12, unread_count: 0 }),
@@ -35,7 +42,7 @@ const routes = () => ({
   }),
 })
 
-type Scene = { path: string; signedOut?: boolean; dialog?: 'create-channel' | 'browse-channels' | 'new-message'; details?: boolean }
+type Scene = { path: string; signedOut?: boolean; dialog?: 'create-channel' | 'browse-channels' | 'new-message'; tasks?: TaskDialog; details?: boolean }
 
 /** The whole page as the person sees it (ids from useId are positional: the same in both). */
 async function page(scene: Scene, locale: Locale, switchTo?: Locale): Promise<string> {
@@ -46,6 +53,7 @@ async function page(scene: Scene, locale: Locale, switchTo?: Locale): Promise<st
     realtimeDown.value = true
     showToast({ tone: 'success', text: 'kept as written', key: 'x' })
     if (scene.dialog) openDialog.value = scene.dialog
+    if (scene.tasks) taskDialog.value = scene.tasks
     if (scene.details) app.host.querySelector<HTMLButtonElement>('.channel-header__details')!.click()
   }
   await settle()
@@ -79,6 +87,15 @@ const scenes: Scene[] = [
   { path: '/c/7/t/1' },
   { path: '/c/8' },
   { path: '/admin' },
+  { path: '/tasks/inbox' },
+  { path: '/tasks/l/1' },
+  { path: '/tasks/u/2' },
+  { path: '/tasks/l/1', tasks: { kind: 'new-list' } },
+  { path: '/tasks/l/1', tasks: { kind: 'rename-list', list: taskList(1, { name: 'Home' }) } },
+  { path: '/tasks/l/1', tasks: { kind: 'delete-list', list: taskList(1, { name: 'Home' }) } },
+  { path: '/tasks/inbox', tasks: { kind: 'move', task: task(4, { creator: DANA, list_id: null }) } },
+  { path: '/tasks/l/1', tasks: { kind: 'assign', task: task(5) } },
+  { path: '/tasks/inbox', tasks: { kind: 'people' } },
   { path: '/c/7', dialog: 'create-channel' },
   { path: '/c/7', dialog: 'browse-channels' },
   { path: '/c/7', dialog: 'new-message' },

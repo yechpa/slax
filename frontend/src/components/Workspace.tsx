@@ -12,7 +12,7 @@
  *
  * Also here for the session's life: presence (heartbeats, the workspace presence
  * channel), the channel list refreshed every minute while the tab is visible and when it
- * comes back (the fallback for `channel.added`, see store/chat.ts), and the sidebar's dialogs.
+ * comes back (the fallback for `channel.added`, see store/chat.ts), and the sidebar's dialogs (the channel ones here, the tasks ones in tasks/TaskDialogs).
  */
 import { effect } from '@preact/signals'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
@@ -26,6 +26,7 @@ import { channelPath, navigate, route } from '../router.ts'
 import { channelById, channels, channelsLoaded, rooms } from '../store/channels.ts'
 import { createChat, type Chat } from '../store/chat.ts'
 import { me } from '../store/session.ts'
+import { loadTasks, refreshTasks } from '../store/tasks.ts'
 import { connection, everConnected, navOpen, openDialog, realtimeDown } from '../store/ui.ts'
 import { Button } from './ui/Button.tsx'
 import { EmptyState } from './ui/EmptyState.tsx'
@@ -38,6 +39,8 @@ import { NewMessageDialog } from './NewMessageDialog.tsx'
 import { Skeleton } from './MessageList.tsx'
 import { NavToggle } from './NavToggle.tsx'
 import { Sidebar } from './Sidebar.tsx'
+import { TaskDialogs } from './tasks/TaskDialogs.tsx'
+import { TasksPage } from './tasks/TasksPage.tsx'
 
 /** How long the socket may be down before the banner says so: a blip is not news. */
 const BANNER_DELAY_MS = 2000
@@ -72,6 +75,8 @@ export function Workspace({ connect, chat: given }: Props) {
     let unavailable: ReturnType<typeof setTimeout> | undefined
     const user = me.peek()
     chat.start().catch(() => !cancelled && setLoadFailed(true))
+    // The sidebar's lists and badge; not part of the workspace's readiness: the minute's poll retries a failure.
+    loadTasks().catch(() => undefined)
     if (user) chat.presence.start(user.id)
     connect().then(
       (connected) => {
@@ -95,14 +100,18 @@ export function Workspace({ connect, chat: given }: Props) {
     }
   }, [chat, connect])
 
-  // New conversations and invitations to private rooms are pushed (channel.added); this poll
-  // is the fallback for a missed event (not while the tab is hidden; once when it comes back).
+  // New conversations and invitations to private rooms are pushed (channel.added), task changes
+  // too (task.changed); this poll is the fallback for a missed event (not while the tab is
+  // hidden; once when it comes back).
   useEffect(
     () =>
-      pollWhileVisible(() => void chat.refreshChannels().catch(() => undefined), {
-        everyMs: CHANNELS_REFRESH_MS,
-        staleAfterMs: CHANNELS_ON_RETURN_MS,
-      }),
+      pollWhileVisible(
+        () => {
+          void chat.refreshChannels().catch(() => undefined)
+          void refreshTasks()
+        },
+        { everyMs: CHANNELS_REFRESH_MS, staleAfterMs: CHANNELS_ON_RETURN_MS },
+      ),
     [chat],
   )
 
@@ -128,6 +137,7 @@ export function Workspace({ connect, chat: given }: Props) {
     <ChatContext.Provider value={chat}>
       <Shell loadFailed={loadFailed} onRetryLoad={retryLoad} />
       <Dialogs />
+      <TaskDialogs />
     </ChatContext.Provider>
   )
 }
@@ -180,6 +190,7 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
   const current = route.value
   const currentId = current.name === 'channel' ? current.id : null
   const adminPage = current.name === 'admin'
+  const tasksView = current.name === 'tasks' ? current.view : null
   const threadId = current.name === 'channel' ? current.thread : null
   const channel = currentId === null ? undefined : channelById.value.get(currentId)
   const open = navOpen.value
@@ -192,7 +203,7 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
 
   // "/" (or an unknown path) opens a channel as soon as the list is known.
   useEffect(() => {
-    if (current.name === 'channel' || current.name === 'admin' || !channelsLoaded.value) return
+    if (current.name === 'channel' || current.name === 'admin' || current.name === 'tasks' || !channelsLoaded.value) return
     const id = defaultChannelId()
     if (id !== null) navigate(channelPath(id), { replace: true })
   }, [current, channelsLoaded.value])
@@ -230,6 +241,8 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
   let main
   if (adminPage) {
     main = <Admin navOpen={open} onToggleNav={toggle} toggleRef={toggleRef} />
+  } else if (tasksView) {
+    main = <TasksPage view={tasksView} navOpen={open} onToggleNav={toggle} toggleRef={toggleRef} />
   } else if (channel) {
     main = (
       <ChannelView
@@ -281,7 +294,7 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
       {drawer && <div class="shell__scrim" aria-hidden="true" onClick={() => (navOpen.value = false)} />}
       <section
         class={threadId !== null && channel ? 'shell__main shell__main--thread' : 'shell__main'}
-        aria-labelledby={channel || adminPage ? 'channel-title' : undefined}
+        aria-labelledby={channel || adminPage || tasksView ? 'channel-title' : undefined}
         inert={drawer || undefined}
       >
         {main}

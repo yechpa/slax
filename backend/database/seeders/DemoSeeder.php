@@ -5,6 +5,8 @@ namespace Database\Seeders;
 use App\Models\Channel;
 use App\Models\Message;
 use App\Models\Reaction;
+use App\Models\Task;
+use App\Models\TaskList;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Database\Seeder;
@@ -20,6 +22,9 @@ use Ramsey\Uuid\Uuid;
  * it puts the starter channels' topics, the seed messages (bodies, thread, not deleted, not
  * edited) and the reactions on them (anyone's) back as defined here, and removes seed
  * messages no longer defined. Other messages and channels are left alone.
+ *
+ * The seed people also have a few task lists and tasks (matched on owner + name, creator + title):
+ * put back as defined (assignee, list, visibility, not completed), never duplicated. Nothing else is touched.
  */
 class DemoSeeder extends Seeder
 {
@@ -56,6 +61,31 @@ class DemoSeeder extends Seeder
         ['key' => 'securite.sessions', 'channel' => 'securite', 'by' => 'camille', 'body' => 'Rappel : la connexion se fait uniquement par Google, sans mot de passe propre à Slax.'],
     ];
 
+    /**
+     * The seed people's task lists, in order. Names are final (the service does not trim).
+     *
+     * @var list<array{key: string, by: string, name: string}>
+     */
+    public const TASK_LISTS = [
+        ['key' => 'sam.demo', 'by' => 'sam', 'name' => 'Demo checklist'],
+        ['key' => 'noa.week', 'by' => 'noa', 'name' => 'השבוע שלי'],
+        ['key' => 'camille.todo', 'by' => 'camille', 'name' => 'À faire'],
+    ];
+
+    /**
+     * Seed tasks, in order. `by` creates the task, `to` holds it (default: `by`); `list` is a TASK_LISTS key
+     * of the holder, absent for the inbox. A task handed to someone else always sits in their inbox.
+     *
+     * @var list<array{by: string, to?: string, list?: string, title: string, visibility: string}>
+     */
+    public const TASKS = [
+        ['by' => 'sam', 'list' => 'sam.demo', 'title' => 'Write the welcome message', 'visibility' => 'public'],
+        ['by' => 'sam', 'list' => 'sam.demo', 'title' => 'Check the nightly reset', 'visibility' => 'private'],
+        ['by' => 'noa', 'list' => 'noa.week', 'title' => 'לבדוק את התצוגה מימין לשמאל', 'visibility' => 'public'],
+        ['by' => 'camille', 'list' => 'camille.todo', 'title' => 'Relire la doc de la CI', 'visibility' => 'private'],
+        ['by' => 'sam', 'to' => 'noa', 'title' => 'Review the Hebrew copy of the demo', 'visibility' => 'public'],
+    ];
+
     /** @var list<array{message: string, by: string, emoji: string}> */
     public const REACTIONS = [
         ['message' => 'general.welcome', 'by' => 'noa', 'emoji' => '👋'],
@@ -82,6 +112,7 @@ class DemoSeeder extends Seeder
             $people = $this->restorePeople($channels);
             $messages = $this->restoreMessages($channels, $people);
             $this->restoreReactions($messages, $people);
+            $this->restoreTasks($people);
         });
     }
 
@@ -177,5 +208,43 @@ class DemoSeeder extends Seeder
             'emoji' => $reaction['emoji'],
             'created_at' => $now,
         ], self::REACTIONS));
+    }
+
+    /**
+     * Written through the models: no announcement, no push for the seed.
+     *
+     * @param  array<string, User>  $people
+     */
+    private function restoreTasks(array $people): void
+    {
+        $workspace = Workspace::default();
+
+        $lists = [];
+        foreach (self::TASK_LISTS as $position => $seed) {
+            $list = TaskList::firstOrNew(['user_id' => $people[$seed['by']]->id, 'name' => $seed['name']]);
+            $list->forceFill(['user_id' => $people[$seed['by']]->id, 'workspace_id' => $workspace->id, 'name' => $seed['name'], 'position' => $position]);
+            if ($list->isDirty()) {
+                $list->save();
+            }
+            $lists[$seed['key']] = $list;
+        }
+
+        foreach (self::TASKS as $position => $seed) {
+            $holder = $people[$seed['to'] ?? $seed['by']];
+            $task = Task::firstOrNew(['creator_id' => $people[$seed['by']]->id, 'title' => $seed['title']]);
+            $task->forceFill([
+                'creator_id' => $people[$seed['by']]->id,
+                'title' => $seed['title'],
+                'workspace_id' => $workspace->id,
+                'assignee_id' => $holder->id,
+                'list_id' => isset($seed['list']) ? $lists[$seed['list']]->id : null,
+                'visibility' => $seed['visibility'],
+                'completed_at' => null,
+                'position' => $position,
+            ]);
+            if ($task->isDirty()) {
+                $task->save();
+            }
+        }
     }
 }

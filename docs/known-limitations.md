@@ -89,6 +89,10 @@ receives the channel's events until it disconnects.
   subscription, a queue delay) by the poll that stays: `GET /channels` every minute while the tab is visible (never
   in a hidden tab), and once when the tab comes back after 15 s away. A conversation started by someone else
   therefore shows up at once, at worst within a minute, and its messages from then on are live.
+- **Tasks: pushed, with the same poll as a fallback.** A change to a task goes as `task.changed` (the task id only)
+  to its creator and its assignee (and the one who held it before), on the same private channel; the client
+  refetches its lists and "Assigned to me" and the task page on screen. The one-minute poll above refreshes the
+  tasks too, so a missed event shows at worst within a minute. A colleague's page is not told (see Task lists).
 - **Thread summaries.** The server does not push a parent's `reply_count`/`last_reply_at` when a reply comes or
   goes; the client recomputes them from the replies' own events (each reply counted once). Two gaps remain until
   the next refresh of the channel: deleting the *latest* reply of a thread that is not open keeps the old "last
@@ -365,6 +369,39 @@ receives the channel's events until it disconnects.
 - **Locked channels and administrators.** Administrators still post in a locked channel they are a member of, so
   that they can explain the lock; a moderator who is not a member reads a public channel but posts nowhere.
 
+
+## Task lists
+
+**Where:** `backend/app/Services/TaskService.php`, `backend/app/Policies/Task*Policy.php`,
+`backend/app/Http/Controllers/Task*Controller.php`, `UserTaskController.php`, `frontend/src/components/tasks/`,
+`frontend/src/store/tasks.ts`, `e2e/tests/tasks.spec.ts`; design in
+`docs/superpowers/specs/2026-11-08-task-lists-design.md`.
+
+- **Deliberately not built:** due dates, reminders, recurring tasks, subtasks, notes or comments on a task, labels,
+  search, several assignees, a list shared by several people, drag and drop, making a task from a message. Tasks
+  cannot be reordered (each one goes last when created or moved); lists can be reordered through the API
+  (`PATCH /task-lists/{id}` with `position`) but the app has no control for it yet.
+- **A list's name is not private.** A list is personal, but its name shows on its owner's page to anyone who can see
+  a task in it: everyone as soon as it holds one public task, and the author of a private task filed in it. Name
+  lists accordingly; a list holding only tasks the viewer cannot see does not appear at all.
+- **Administrators get no special access.** They cannot see private tasks (by decision), and there is no moderation
+  of tasks either: an offensive public task can be removed only by its author. Banning the author does not hide a
+  public task someone else holds: it stays on the holder's page. The holder can give it back; it then sits with
+  the banned author, whose page answers 404. The nightly demo reset deletes it if the author is a demo account.
+- **Caps.** 50 lists per person, 500 tasks per list (the done ones count), 200 unfiled tasks in "Assigned to me":
+  assigning or giving back a task to someone whose inbox is full is refused (`inbox_full`), they must file some
+  first. The cap holds assignments only: deleting a list, or the demo reset giving tasks back to their author, unfiles
+  without checking it, so an inbox can hold more than 200, and `GET /tasks/inbox` returns them all. Nothing is
+  paginated: a colleague's page is bounded by their caps, "Assigned by me" by nothing but everyone's inbox and list
+  caps.
+- **Colleagues' pages are refreshed, not pushed.** `task.changed` goes to a task's creator and assignee only, so a
+  third person looking at someone's page sees changes at the next one-minute refresh, or when the tab comes back.
+- **Banned accounts.** A ban changes no task: their page answers 404 and they are never offered as an assignee nor
+  pushed, but the tasks they wrote or hold stay as they were (and come back if the ban is lifted). A task assigned
+  to a banned person stays with them until its author reassigns or deletes it.
+- **Hebrew strings are a proposal.** Every `tasks.*` string in `frontend/src/i18n/he.json`, the task lines of
+  `backend/lang/he/push.php` and `backend/lang/he/tasks.php`, and the Hebrew part of the family guide's "Tasks"
+  were written without a native speaker: review them before relying on them (as recette 4.6 asks for the rest).
 
 ## Deployment (Helm chart, images)
 

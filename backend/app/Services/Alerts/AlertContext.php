@@ -20,7 +20,7 @@ final class AlertContext
         'status', 'status_code', 'service', 'latency_ms',
         'route', 'method', 'exception', 'location', 'digest', 'log_channel',
         'job', 'queue', 'attempts', 'duration_ms',
-        'deleted_users', 'deleted_messages', 'deleted_channels', 'deleted_files', 'failed_files', 'kept_users',
+        'deleted_users', 'deleted_messages', 'deleted_channels', 'deleted_tasks', 'deleted_task_lists', 'deleted_files', 'failed_files', 'kept_users',
         'age_hours', 'newest', 'aws_error',
     ];
 

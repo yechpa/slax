@@ -174,3 +174,36 @@ export interface AdminChannel {
   locked: boolean
   member_count: number
 }
+
+export type TaskVisibility = 'public' | 'private'
+
+/** GET /tasks/inbox, /tasks/by-me, /task-lists/{id}/tasks, POST /tasks… (TaskResource). */
+export interface Task {
+  id: number
+  title: string
+  visibility: TaskVisibility
+  completed: boolean
+  /** ISO 8601, null while open. */
+  completed_at: string | null
+  /** A list of the assignee; null: unfiled (in the assignee's inbox). */
+  list_id: number | null
+  creator: UserSummary
+  assignee: UserSummary
+  created_at: string
+}
+
+/** GET /task-lists (TaskListResource): one of the caller's own lists. */
+export interface TaskList {
+  id: number
+  name: string
+  position: number
+  /** The owner's uncompleted tasks in the list. */
+  open_count: number
+}
+
+/** GET /users/{id}/tasks: what a colleague holds that the caller may see (empty lists are left out). */
+export interface ColleagueTasks {
+  user: UserSummary
+  lists: { id: number; name: string; tasks: Task[] }[]
+  unfiled: Task[]
+}

@@ -9,6 +9,8 @@ return [
     'body_dm' => 'Nouveau message',
     'body_mention' => 'Nouvelle mention',
     'body_reply' => 'Nouvelle réponse',
+    'title_task' => ':sender t\'a assigné une tâche',
+    'body_task' => 'Nouvelle tâche',
     'test_title' => 'Slax',
     'test_body' => 'Les notifications fonctionnent sur cet appareil.',
 ];

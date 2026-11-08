@@ -11,6 +11,8 @@ return [
     'body_dm' => 'הודעה חדשה',
     'body_mention' => 'הוזכרת בהודעה',
     'body_reply' => 'תגובה חדשה',
+    'title_task' => "\u{2068}:sender\u{2069} הקצה לך משימה",
+    'body_task' => 'משימה חדשה',
     'test_title' => 'Slax',
     'test_body' => 'ההתראות פועלות במכשיר הזה.',
 ];
