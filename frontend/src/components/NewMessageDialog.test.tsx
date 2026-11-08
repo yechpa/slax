@@ -84,7 +84,7 @@ describe('new message', () => {
       },
       '/c/7',
     )
-    const conversations = () => [...app!.host.querySelectorAll('.sidebar a.nav-item')].map((a) => a.getAttribute('href'))
+    const conversations = () => [...app!.host.querySelectorAll('.sidebar a.nav-item[href^="/c/"]')].map((a) => a.getAttribute('href'))
 
     // 201: a new conversation, listed, subscribed and opened.
     let input = await openDialog(app.host)

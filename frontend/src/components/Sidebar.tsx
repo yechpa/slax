@@ -1,5 +1,5 @@
 /**
- * The workspace navigation: brand, rooms, direct conversations, and the account menu.
+ * The workspace navigation: brand, rooms, direct conversations, tasks, and the account menu.
  * Rooms the user has not joined (public ones) are listed muted, tagged "not joined";
  * opening one shows it read-only with a Join button.
  */
@@ -19,6 +19,7 @@ import { useContext } from 'preact/hooks'
 import { ChatContext } from './chatContext.ts'
 import { useTrackPresence } from './usePresence.ts'
 import { UserMenu } from './UserMenu.tsx'
+import { TasksSidebar } from './tasks/TasksSidebar.tsx'
 
 type Props = {
   currentId: number | null
@@ -96,6 +97,7 @@ export function Sidebar({ currentId, onNavigate, navRef, inert }: Props) {
             <NavAction sigil="+" label={t('nav.newMessage')} onClick={action('new-message')} />
           </li>
         </ul>
+        <TasksSidebar onNavigate={onNavigate} />
       </div>
       <UserMenu />
     </nav>

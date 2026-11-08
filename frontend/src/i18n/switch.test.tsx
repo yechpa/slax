@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale, type Locale } from './index.ts'
 import { openDialog, realtimeDown, resetUi, showToast } from '../store/ui.ts'
-import { DANA, NOAM, channel, live, tombstone } from '../test/fixtures.ts'
+import { DANA, NOAM, channel, live, task, taskList, tombstone } from '../test/fixtures.ts'
 import type { FakeHandler } from '../test/fakes.ts'
 import { mountApp, settle, type Mounted } from '../test/mountApp.tsx'
 
@@ -13,6 +13,9 @@ afterEach(() => {
 })
 
 const routes = () => ({
+  'GET /api/v1/task-lists': () => ({ body: [taskList(1, { name: 'Home', open_count: 1 })] }),
+  'GET /api/v1/tasks/inbox': () => ({ body: [task(4, { creator: DANA, list_id: null, visibility: 'public' })] }),
+  'GET /api/v1/task-lists/1/tasks': () => ({ body: [task(5), task(6, { completed: true, completed_at: '2026-11-08T09:00:00.000Z' })] }),
   'GET /api/v1/channels': () => ({
     body: [
       channel(7, { name: 'general', topic: 'News', member_count: 12, unread_count: 0 }),
@@ -79,6 +82,8 @@ const scenes: Scene[] = [
   { path: '/c/7/t/1' },
   { path: '/c/8' },
   { path: '/admin' },
+  { path: '/tasks/inbox' },
+  { path: '/tasks/l/1' },
   { path: '/c/7', dialog: 'create-channel' },
   { path: '/c/7', dialog: 'browse-channels' },
   { path: '/c/7', dialog: 'new-message' },

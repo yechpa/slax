@@ -39,6 +39,7 @@ import { NewMessageDialog } from './NewMessageDialog.tsx'
 import { Skeleton } from './MessageList.tsx'
 import { NavToggle } from './NavToggle.tsx'
 import { Sidebar } from './Sidebar.tsx'
+import { TasksPage } from './tasks/TasksPage.tsx'
 
 /** How long the socket may be down before the banner says so: a blip is not news. */
 const BANNER_DELAY_MS = 2000
@@ -187,6 +188,7 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
   const current = route.value
   const currentId = current.name === 'channel' ? current.id : null
   const adminPage = current.name === 'admin'
+  const tasksView = current.name === 'tasks' ? current.view : null
   const threadId = current.name === 'channel' ? current.thread : null
   const channel = currentId === null ? undefined : channelById.value.get(currentId)
   const open = navOpen.value
@@ -199,7 +201,7 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
 
   // "/" (or an unknown path) opens a channel as soon as the list is known.
   useEffect(() => {
-    if (current.name === 'channel' || current.name === 'admin' || !channelsLoaded.value) return
+    if (current.name === 'channel' || current.name === 'admin' || current.name === 'tasks' || !channelsLoaded.value) return
     const id = defaultChannelId()
     if (id !== null) navigate(channelPath(id), { replace: true })
   }, [current, channelsLoaded.value])
@@ -237,6 +239,8 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
   let main
   if (adminPage) {
     main = <Admin navOpen={open} onToggleNav={toggle} toggleRef={toggleRef} />
+  } else if (tasksView) {
+    main = <TasksPage view={tasksView} navOpen={open} onToggleNav={toggle} toggleRef={toggleRef} />
   } else if (channel) {
     main = (
       <ChannelView
@@ -288,7 +292,7 @@ function Shell({ loadFailed, onRetryLoad }: { loadFailed: boolean; onRetryLoad: 
       {drawer && <div class="shell__scrim" aria-hidden="true" onClick={() => (navOpen.value = false)} />}
       <section
         class={threadId !== null && channel ? 'shell__main shell__main--thread' : 'shell__main'}
-        aria-labelledby={channel || adminPage ? 'channel-title' : undefined}
+        aria-labelledby={channel || adminPage || tasksView ? 'channel-title' : undefined}
         inert={drawer || undefined}
       >
         {main}

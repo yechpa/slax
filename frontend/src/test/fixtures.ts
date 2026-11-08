@@ -1,5 +1,5 @@
 /** Test data shaped like the API's resources. */
-import type { Channel, DeletedMessage, LiveMessage, Me, UserSummary } from '../api/types.ts'
+import type { Channel, DeletedMessage, LiveMessage, Me, Task, TaskList, UserSummary } from '../api/types.ts'
 
 export const ME: Me = {
   id: 1,
@@ -59,4 +59,27 @@ export function channel(id: number, overrides: Partial<Channel> = {}): Channel {
     unread_count: 0,
     ...overrides,
   }
+}
+
+const summary = (u: UserSummary): UserSummary => ({ id: u.id, name: u.name, avatar_url: u.avatar_url })
+
+/** A task of mine (created by and assigned to ME) in list 1 unless overridden. */
+export function task(id: number, overrides: Partial<Task> = {}): Task {
+  return {
+    id,
+    title: `task ${id}`,
+    visibility: 'private',
+    completed: false,
+    completed_at: null,
+    list_id: 1,
+    position: id,
+    creator: summary(ME),
+    assignee: summary(ME),
+    created_at: '2026-11-08T08:00:00.000Z',
+    ...overrides,
+  }
+}
+
+export function taskList(id: number, overrides: Partial<TaskList> = {}): TaskList {
+  return { id, name: `list ${id}`, position: id, open_count: 0, ...overrides }
 }

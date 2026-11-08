@@ -6,7 +6,7 @@
  * screenshots only (it is part of the design-system build, never of the production one).
  */
 import { signal } from '@preact/signals'
-import type { AdminStatus, AuditPage, Channel, ChannelMember, FileInfo, Me, Message, ModeratedUser, PresenceState, UserSummary } from '../api/types.ts'
+import type { AdminStatus, AuditPage, Channel, ChannelMember, FileInfo, Me, Message, ModeratedUser, PresenceState, Task, TaskList, UserSummary } from '../api/types.ts'
 import type { Realtime } from '../realtime/echo.ts'
 
 const ALICE: UserSummary = { id: 1, name: 'Alice Martin', avatar_url: null }
@@ -167,6 +167,25 @@ const AUDIT: AuditPage = {
     { id: 4, action: 'demo.reset', created_at: at(0, 3, 0), ip: null, actor: null, target: null },
   ],
 }
+/** The sidebar's tasks section: two lists, one task from dana still to file. */
+const TASK_LISTS: TaskList[] = [
+  { id: 1, name: 'Maison', position: 0, open_count: 3 },
+  { id: 2, name: 'homelab', position: 1, open_count: 1 },
+]
+const INBOX: Task[] = [
+  {
+    id: 1,
+    title: 'Relire le plan de sauvegarde',
+    visibility: 'private',
+    completed: false,
+    completed_at: null,
+    list_id: null,
+    position: 0,
+    creator: DANA,
+    assignee: ALICE,
+    created_at: at(0, 8, 40),
+  },
+]
 const BANNED: ModeratedUser[] = [{ id: 44, name: 'Spam Bot 3000', avatar_url: null, banned: true, banned_at: at(0, 9, 30) }]
 
 export function installFixtureServer({ signedIn, admin = false }: { signedIn: boolean; admin?: boolean }): void {
@@ -182,6 +201,8 @@ export function installFixtureServer({ signedIn, admin = false }: { signedIn: bo
         : json({ message: 'Forbidden' }, 403)
     if (path === '/api/v1/admin/users/banned') return admin ? json({ data: BANNED }) : json({ message: 'Forbidden' }, 403)
     if (path === '/api/v1/channels') return json(channels)
+    if (path === '/api/v1/task-lists') return json(TASK_LISTS)
+    if (path === '/api/v1/tasks/inbox') return json(INBOX)
     if (path === '/api/v1/users') {
       const q = (url.searchParams.get('q') ?? '').toLowerCase()
       return json(PEOPLE.filter((p) => p.name.toLowerCase().includes(q)))

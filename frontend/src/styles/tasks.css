@@ -1,0 +1,262 @@
+/*
+ * The tasks area (/tasks/…): the new-task form, task rows (checkbox, title, public/private,
+ * the other person, the menu button), the folding "Done (n)" section and the inline
+ * rename and delete confirmation. The sidebar's rows reuse .nav-item.
+ * Same rules as everywhere: tokens only, logical properties only, motion opt-in,
+ * 44px targets on phones.
+ */
+@layer components {
+  .tasks {
+    display: grid;
+    align-content: start;
+    gap: var(--space-4);
+    min-block-size: 0;
+    overflow: auto;
+    overscroll-behavior-y: contain;
+    padding-block: var(--space-4) calc(var(--space-4) + var(--footer-safe-bottom));
+    padding-inline: var(--space-4);
+  }
+
+  .tasks__loading {
+    color: var(--color-muted);
+    font-size: var(--text-sm);
+  }
+
+  /* ── New task ────────────────────────────────────────── */
+  .new-task {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: var(--space-3) var(--space-4);
+    padding: var(--space-3);
+    background: var(--color-surface);
+    border: var(--border-width) var(--rule-style) var(--color-border);
+    border-radius: var(--radius-1);
+  }
+
+  .new-task__title {
+    flex: 1 1 100%;
+  }
+
+  .new-task__who {
+    flex: 1 1 16rem;
+    min-inline-size: 0;
+  }
+
+  .new-task__list {
+    flex: 0 1 12rem;
+  }
+
+  .new-task__inbox,
+  .new-task__error {
+    flex: 1 1 100%;
+    font-size: var(--text-sm);
+  }
+
+  .new-task__inbox {
+    color: var(--color-muted);
+  }
+
+  .new-task__error {
+    color: var(--color-danger);
+  }
+
+  .new-task__error::before {
+    content: '[!!] ';
+    font-weight: var(--weight-strong);
+  }
+
+  .new-task__submit {
+    margin-inline-start: auto;
+  }
+
+  /* ── Rows ────────────────────────────────────────────── */
+  .tasks__list {
+    display: grid;
+    padding: 0;
+    list-style: none;
+  }
+
+  .task-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    column-gap: var(--space-2);
+    min-block-size: 2.25rem;
+    padding-inline: var(--space-1) var(--space-2);
+    border-block-end: var(--border-width) var(--rule-style) var(--color-border);
+  }
+
+  .task-row:hover {
+    background: var(--color-hover);
+  }
+
+  .task-row__tick {
+    display: inline-grid;
+    place-items: center;
+    min-inline-size: 1.75rem;
+    min-block-size: 1.75rem;
+    cursor: pointer;
+  }
+
+  .task-row__check {
+    inline-size: 1rem;
+    block-size: 1rem;
+    margin: 0;
+    accent-color: var(--color-accent);
+    cursor: inherit;
+  }
+
+  .task-row__check:disabled {
+    cursor: not-allowed;
+  }
+
+  .task-row__title {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+    color: var(--color-text);
+    text-align: start;
+  }
+
+  .task-row--done .task-row__title {
+    color: var(--color-muted);
+    text-decoration: line-through;
+  }
+
+  .task-row__meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: end;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--color-muted);
+    font-size: var(--text-xs);
+  }
+
+  .task-row__visibility {
+    padding-inline: var(--space-1);
+    border: var(--border-width) solid var(--color-border-strong);
+    border-radius: var(--radius-0);
+  }
+
+  .task-row__visibility--public {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  .task-row__more {
+    display: inline-grid;
+    place-items: center;
+    min-inline-size: 1.75rem;
+    min-block-size: 1.75rem;
+    padding-inline: var(--space-1);
+    border-radius: var(--radius-1);
+    color: var(--color-text-dim);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-strong);
+    line-height: 1;
+  }
+
+  .task-row__more:hover,
+  .task-row__more[aria-expanded='true'] {
+    background: var(--color-raised);
+    color: var(--color-accent);
+  }
+
+  .task-row__edit {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-inline-size: 0;
+  }
+
+  .task-row__confirm {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding-block: var(--space-1) var(--space-2);
+    color: var(--color-danger);
+    font-size: var(--text-sm);
+  }
+
+  /* ── Done (n) ────────────────────────────────────────── */
+  .tasks__done-title {
+    display: flex;
+    align-items: center;
+    min-block-size: var(--control-height);
+    color: var(--color-text-dim);
+    font-size: var(--text-xs);
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .tasks__done-title::-webkit-details-marker {
+    display: none;
+  }
+
+  .tasks__done-title::before {
+    content: '[+]';
+    margin-inline-end: var(--space-2);
+    color: var(--color-muted);
+  }
+
+  .tasks__done[open] > .tasks__done-title::before {
+    content: '[-]';
+  }
+
+  .tasks__done-title:hover {
+    color: var(--color-accent);
+  }
+
+  /* A finger needs 44 px: on any touch screen, and on a phone-width shell. */
+  @media (pointer: coarse) {
+    .task-row__tick,
+    .task-row__more,
+    .tasks__done-title,
+    .new-task .btn {
+      min-inline-size: 2.75rem;
+      min-block-size: 2.75rem;
+    }
+  }
+
+  @container shell (inline-size < 44rem) {
+    .shell--app .task-row__tick,
+    .shell--app .task-row__more,
+    .shell--app .tasks__done-title,
+    .shell--app .new-task .btn,
+    .shell--app .new-task .input {
+      min-block-size: 2.75rem;
+    }
+
+    .shell--app .task-row__tick,
+    .shell--app .task-row__more {
+      min-inline-size: 2.75rem;
+    }
+
+    .shell--app .task-row__check {
+      inline-size: 1.25rem;
+      block-size: 1.25rem;
+    }
+
+    /* The meta line goes under the title rather than squeezing it. */
+    .task-row {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    .task-row__meta {
+      grid-column: 2;
+      grid-row: 2;
+      justify-content: start;
+      padding-block-end: var(--space-1);
+    }
+
+    .task-row__actions {
+      grid-column: 3;
+      grid-row: 1;
+    }
+  }
+}
