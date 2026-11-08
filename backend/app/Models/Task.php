@@ -24,6 +24,12 @@ class Task extends Model
     protected $fillable = ['workspace_id', 'title', 'visibility', 'position'];
 
     /**
+     * Who held the task before TaskService::updateTask reassigned it (null otherwise). A plain property on
+     * the returned instance, not a column, so the notifications can reach the former assignee.
+     */
+    public ?int $previousAssigneeId = null;
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array

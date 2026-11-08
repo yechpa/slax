@@ -10,6 +10,7 @@ use App\Http\Controllers\MessageController;
 use App\Http\Controllers\PresenceController;
 use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Controllers\ReactionController;
+use App\Http\Controllers\TaskController;
 use App\Http\Controllers\TaskListController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -63,6 +64,12 @@ Route::prefix('v1')->group(function () {
         Route::post('/task-lists', [TaskListController::class, 'store'])->middleware('throttle:tasks');
         Route::patch('/task-lists/{taskList}', [TaskListController::class, 'update'])->middleware('throttle:tasks');
         Route::delete('/task-lists/{taskList}', [TaskListController::class, 'destroy'])->middleware('throttle:tasks');
+
+        // Tasks: a hidden one answers 404, a visible one its creator alone may change answers 403.
+        Route::post('/tasks', [TaskController::class, 'store'])->middleware('throttle:tasks');
+        Route::patch('/tasks/{task}', [TaskController::class, 'update'])->middleware('throttle:tasks');
+        Route::put('/tasks/{task}/completion', [TaskController::class, 'complete'])->middleware('throttle:tasks');
+        Route::delete('/tasks/{task}', [TaskController::class, 'destroy'])->middleware('throttle:tasks');
 
         // Administrators only: the `admin` gate runs before anything is looked up
         // (AdminTest checks every route registered here). Writes are rate limited.
