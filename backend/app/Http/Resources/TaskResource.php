@@ -9,7 +9,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * Load `creator` and `assignee` first (TaskController does). People appear as id, name and avatar only:
- * never an e-mail address.
+ * never an e-mail address. No `position`: the server orders, and a number seen by someone other than the holder
+ * would tell them how many tasks the holder has, private ones included.
  *
  * @mixin Task
  */
@@ -27,7 +28,6 @@ class TaskResource extends JsonResource
             'completed' => $this->isCompleted(),
             'completed_at' => $this->completed_at?->toISOString(),
             'list_id' => $this->list_id,
-            'position' => $this->position,
             'creator' => self::person($this->creator),
             'assignee' => self::person($this->assignee),
             'created_at' => $this->created_at->toISOString(),

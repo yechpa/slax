@@ -16,13 +16,13 @@ class TaskController extends Controller
 {
     public function __construct(private readonly TaskService $tasks) {}
 
-    /** The most tasks the inbox may hold (TaskService enforces it on assignment). */
-    private const INBOX_LIMIT = 200;
-
-    /** Unfiled tasks assigned to the caller. */
+    /**
+     * Unfiled tasks assigned to the caller, all of them: TaskService::MAX_INBOX caps assignments only, and deleting a
+     * list or giving tasks back to their author may unfile past it.
+     */
     public function inbox(Request $request): JsonResponse
     {
-        return $this->listTasks($request, Task::where('assignee_id', $request->user()->id)->whereNull('list_id')->limit(self::INBOX_LIMIT));
+        return $this->listTasks($request, Task::where('assignee_id', $request->user()->id)->whereNull('list_id'));
     }
 
     /** Tasks the caller created for somebody else. */

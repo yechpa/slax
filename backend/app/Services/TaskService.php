@@ -147,7 +147,9 @@ class TaskService
 
     /**
      * Applies `title`, `visibility` and/or `assignee_id`. A new assignee gets the task in their inbox (no list,
-     * last place) and `$task->previousAssigneeId` holds the former one; it stays null when the assignee did not change.
+     * last place) and the returned model's `previousAssigneeId` holds the former one; it stays null when the assignee
+     * did not change. Decides on the task as it is once its holder (or the person named) is locked, never on the
+     * caller's copy: returns that fresh model.
      *
      * @param  array{title?: string, visibility?: string, assignee_id?: int|null}  $changes
      */
@@ -155,10 +157,17 @@ class TaskService
     {
         $task->previousAssigneeId = null;
         $newAssigneeId = isset($changes['assignee_id']) ? (int) $changes['assignee_id'] : null;
-        $reassigned = $newAssigneeId !== null && $newAssigneeId !== $task->assignee_id;
-        $assignee = $reassigned ? $this->assignableUser($newAssigneeId) : null;
+        if ($newAssigneeId !== null && $newAssigneeId !== $task->assignee_id) {
+            // Refused before anything is locked: an unknown id has no row to lock.
+            $this->assignableUser($newAssigneeId);
+        }
 
-        DB::transaction(function () use ($task, $changes, $assignee) {
+        return DB::transaction(function () use ($task, $changes, $newAssigneeId) {
+            // Person first, then the task, like moveTask: whoever will hold it, so a cap and a position are decided under lock.
+            $this->lockOwner($newAssigneeId ?? $task->assignee_id);
+            $task = Task::whereKey($task->id)->lockForUpdate()->firstOrFail();
+            $assignee = $newAssigneeId !== null && $newAssigneeId !== $task->assignee_id ? $this->assignableUser($newAssigneeId) : null;
+
             if (isset($changes['title'])) {
                 $task->title = trim($changes['title']);
             }
@@ -166,7 +175,6 @@ class TaskService
                 $task->visibility = $changes['visibility'];
             }
             if ($assignee !== null) {
-                $this->lockOwner($assignee);
                 $this->ensureInboxRoom($assignee);
 
                 $task->previousAssigneeId = $task->assignee_id;
@@ -180,9 +188,9 @@ class TaskService
                 // Changing the assignee is the creator's alone (TaskPolicy::edit).
                 $this->pushAssignment($task, $task->creator);
             }
-        });
 
-        return $task;
+            return $task;
+        });
     }
 
     /** Ticking again keeps the first completion time. */
@@ -263,8 +271,9 @@ class TaskService
 
     /**
      * The demo reset's share of the content: the tasks demo accounts created go (even held by a `member` or a `seed` account:
-     * visitor content), then the lists they own (the foreign key unfiles the tasks others put in them: they stay with their
-     * assignee, in the inbox). Bulk and silent: no announcement, no push (the next load shows it). Call it inside the reset's transaction.
+     * visitor content), then the lists they own. A task someone else created that sat in one of those lists goes back to its
+     * author, in their inbox (spec §10), whether the demo account survives or not; one already unfiled stays with its holder.
+     * Bulk and silent: no announcement, no push (the next load shows it). Call it inside the reset's transaction.
      *
      * @param  Collection<int, int>  $demoIds
      * @return array{deleted_tasks: int, deleted_task_lists: int}
@@ -272,6 +281,9 @@ class TaskService
     public function wipeDemoContent(Collection $demoIds): array
     {
         $deletedTasks = Task::whereIn('creator_id', $demoIds)->delete();
+        // What is left in demo lists was created by others (the demo accounts' own tasks are gone).
+        Task::whereIn('list_id', TaskList::whereIn('user_id', $demoIds)->select('id'))
+            ->update(['assignee_id' => DB::raw('creator_id'), 'list_id' => null]);
 
         return ['deleted_tasks' => $deletedTasks, 'deleted_task_lists' => TaskList::whereIn('user_id', $demoIds)->delete()];
     }

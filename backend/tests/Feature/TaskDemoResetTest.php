@@ -53,7 +53,7 @@ test('the reset deletes tasks and lists of demo accounts, including surviving on
         ->and(Task::find($mine->id))->list_id->toBe($memberList->id);
 });
 
-test('a member\'s task that sat in a demo list returns to the member\'s inbox', function () {
+test('a member\'s or a seed\'s task that sat in a demo list returns to its author\'s inbox', function () {
     $member = User::factory()->create();
     $survivor = User::factory()->demo()->create();
     $expired = User::factory()->demo(daysAgo: 30)->create();
@@ -63,12 +63,19 @@ test('a member\'s task that sat in a demo list returns to the member\'s inbox', 
     $toSurvivor = Task::factory()->create(['creator_id' => $member->id, 'assignee_id' => $survivor->id, 'list_id' => $survivorList->id]);
     $toExpired = Task::factory()->create(['creator_id' => $member->id, 'assignee_id' => $expired->id, 'list_id' => $expiredList->id]);
 
+    $seed = User::where('google_sub', DemoSeeder::SUB_PREFIX.'noa')->sole();
+    $fromSeed = Task::factory()->public()->create(['creator_id' => $seed->id, 'assignee_id' => $survivor->id, 'list_id' => $survivorList->id]);
+    // Already unfiled with the surviving account: not in a demo list, it stays where it is.
+    $unfiled = Task::factory()->create(['creator_id' => $member->id, 'assignee_id' => $survivor->id]);
+
     $this->artisan('slax:demo-reset')->assertSuccessful();
 
-    // Out of the demo list; the account that is gone hands it back to its author.
-    expect($toExpired->fresh())->list_id->toBeNull()->assignee_id->toBe($member->id)->creator_id->toBe($member->id)
-        // The surviving account keeps it, unfiled: its lists are gone.
-        ->and($toSurvivor->fresh())->list_id->toBeNull()->assignee_id->toBe($survivor->id);
+    // Spec §10: out of the deleted demo list, back to its author, in their inbox, whether the demo account survives or not.
+    expect(User::find($survivor->id))->not->toBeNull()
+        ->and($toSurvivor->fresh())->list_id->toBeNull()->assignee_id->toBe($member->id)->creator_id->toBe($member->id)
+        ->and($toExpired->fresh())->list_id->toBeNull()->assignee_id->toBe($member->id)->creator_id->toBe($member->id)
+        ->and($fromSeed->fresh())->list_id->toBeNull()->assignee_id->toBe($seed->id)
+        ->and($unfiled->fresh())->list_id->toBeNull()->assignee_id->toBe($survivor->id);
 });
 
 test('a task a member gave a deleted demo account returns to the member, one given to a surviving demo account stays', function () {

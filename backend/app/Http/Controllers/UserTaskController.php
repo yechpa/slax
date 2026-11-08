@@ -28,6 +28,7 @@ class UserTaskController extends Controller
             ->get();
 
         $lists = TaskList::query()
+            ->where('user_id', $user->id)
             ->whereIn('id', $tasks->pluck('list_id')->filter()->unique())
             ->orderBy('position')->orderBy('id')
             ->get(['id', 'name']);

@@ -24,6 +24,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('workspace_id')->constrained()->cascadeOnDelete();
             $table->foreignId('creator_id')->constrained('users')->cascadeOnDelete();
+            // Any path that deletes an account must call TaskService::releaseTasksOf first, or tasks others gave it go with it.
             $table->foreignId('assignee_id')->constrained('users')->cascadeOnDelete();
             // A list of the assignee; null = unfiled (the assignee's inbox). A deleted list unfiles its tasks.
             $table->foreignId('list_id')->nullable()->constrained('task_lists')->nullOnDelete();

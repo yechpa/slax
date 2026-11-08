@@ -32,8 +32,8 @@ use Throwable;
  *
  *  1. Demo content goes: every message and reaction of a demo account, the channels demo
  *     accounts created, the conversations a demo account is part of, the task lists demo
- *     accounts own and the tasks they created (a `member`'s task that sat in a demo list is
- *     unfiled; one given to a deleted account goes back to its author, TaskService).
+ *     accounts own and the tasks they created (a `member`'s or `seed`'s task that sat in a demo
+ *     list goes back to its author's inbox; so does one given to a deleted account, TaskService).
  *  2. Demo accounts without activity (last seen, or created) for 7 days are deleted;
  *     active ones are kept, with their memberships, and so are banned ones (deleting them
  *     would undo the ban: the person could sign up again).

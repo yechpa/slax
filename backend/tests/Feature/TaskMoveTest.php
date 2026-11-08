@@ -21,19 +21,22 @@ test('the assignee files an inbox task into one of their lists and it leaves the
     // A task somebody else gave me goes last in my list.
     asUser($assignee)->postJson("/api/v1/tasks/{$given->id}/move", ['list_id' => $list->id])
         ->assertOk()
-        ->assertJson(['id' => $given->id, 'list_id' => $list->id, 'position' => 5, 'assignee' => ['id' => $assignee->id], 'creator' => ['id' => $creator->id]]);
+        ->assertJson(['id' => $given->id, 'list_id' => $list->id, 'assignee' => ['id' => $assignee->id], 'creator' => ['id' => $creator->id]]);
     expect($given->fresh()->list_id)->toBe($list->id)
+        ->and($given->fresh()->position)->toBe(5)
         ->and($given->fresh()->assignee_id)->toBe($assignee->id)
         ->and(Task::where('assignee_id', $assignee->id)->whereNull('list_id')->pluck('id')->all())->toBe([$own->id]);
 
     // So does one of my own.
     asUser($assignee)->postJson("/api/v1/tasks/{$own->id}/move", ['list_id' => $list->id])
-        ->assertOk()->assertJson(['list_id' => $list->id, 'position' => 6]);
-    expect(Task::where('assignee_id', $assignee->id)->whereNull('list_id')->count())->toBe(0);
+        ->assertOk()->assertJson(['list_id' => $list->id]);
+    expect(Task::where('assignee_id', $assignee->id)->whereNull('list_id')->count())->toBe(0)
+        ->and($own->fresh()->position)->toBe(6);
 
     // Moving to the list it is already in changes nothing.
     asUser($assignee)->postJson("/api/v1/tasks/{$own->id}/move", ['list_id' => $list->id])
-        ->assertOk()->assertJson(['list_id' => $list->id, 'position' => 6]);
+        ->assertOk()->assertJson(['list_id' => $list->id]);
+    expect($own->fresh()->position)->toBe(6);
 });
 
 test("a task cannot be moved into someone else's list (invalid_list), nor by someone who is not the assignee", function () {
@@ -71,8 +74,8 @@ test('moving to null puts it back in the inbox', function () {
     Task::factory()->create(['creator_id' => $creator->id, 'assignee_id' => $assignee->id, 'position' => 6]);
 
     asUser($assignee)->postJson("/api/v1/tasks/{$task->id}/move", ['list_id' => null])
-        ->assertOk()->assertJson(['list_id' => null, 'position' => 7]);
-    expect($task->fresh()->list_id)->toBeNull();
+        ->assertOk()->assertJson(['list_id' => null]);
+    expect($task->fresh())->list_id->toBeNull()->position->toBe(7);
 });
 
 test('moving into a full inbox is refused with inbox_full, but a task already in the inbox may "move" there', function () {
@@ -130,10 +133,12 @@ test('returning to the author puts it in the author\'s inbox; the creator cannot
     // Filed or not, it lands in the author's inbox, last.
     asUser($assignee)->postJson("/api/v1/tasks/{$filed->id}/return")
         ->assertOk()
-        ->assertJson(['id' => $filed->id, 'list_id' => null, 'position' => 4, 'assignee' => ['id' => $creator->id], 'creator' => ['id' => $creator->id]]);
+        ->assertJson(['id' => $filed->id, 'list_id' => null, 'assignee' => ['id' => $creator->id], 'creator' => ['id' => $creator->id]]);
     asUser($assignee)->postJson("/api/v1/tasks/{$inboxed->id}/return")
-        ->assertOk()->assertJson(['list_id' => null, 'position' => 5, 'assignee' => ['id' => $creator->id]]);
-    expect($filed->fresh()->assignee_id)->toBe($creator->id)
+        ->assertOk()->assertJson(['list_id' => null, 'assignee' => ['id' => $creator->id]]);
+    expect($filed->fresh()->position)->toBe(4)
+        ->and($inboxed->fresh()->position)->toBe(5)
+        ->and($filed->fresh()->assignee_id)->toBe($creator->id)
         ->and($filed->fresh()->list_id)->toBeNull();
 
     // A task you created and hold yourself cannot be returned: to whom?

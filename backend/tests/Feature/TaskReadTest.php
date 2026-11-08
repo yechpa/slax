@@ -128,7 +128,7 @@ test('inbox and by-me show the right tasks and nothing else, completed ones incl
     $inbox = asUser($me)->getJson('/api/v1/tasks/inbox')->assertOk()->json();
     expect(collect($inbox)->pluck('id')->all())->toBe([$givenInbox->id, $ownInbox->id, $doneInbox->id])
         ->and(collect($inbox)->pluck('completed')->all())->toBe([false, false, true])
-        ->and($inbox[0])->toHaveKeys(['id', 'title', 'visibility', 'completed', 'completed_at', 'list_id', 'position', 'creator', 'assignee', 'created_at'])
+        ->and($inbox[0])->toHaveKeys(['id', 'title', 'visibility', 'completed', 'completed_at', 'list_id', 'creator', 'assignee', 'created_at'])
         ->and($inbox[0]['creator']['id'])->toBe($other->id);
 
     $mine = asUser($me)->getJson('/api/v1/tasks/by-me')->assertOk()->json();
@@ -141,11 +141,41 @@ test('inbox and by-me show the right tasks and nothing else, completed ones incl
     expect($filed)->toHaveCount(2)->and($filed->pluck('list_id')->unique()->all())->toBe([$list->id]);
 });
 
-test('the inbox holds at most 200 tasks', function () {
+test('the inbox shows every unfiled task, even past the 200 an assignment may fill it to', function () {
     $me = User::factory()->create();
+    // Deleting a list or a deleted account's tasks coming back can unfile past the cap: nothing is cut off.
     Task::factory()->count(201)->create(['creator_id' => $me->id]);
 
-    expect(asUser($me)->getJson('/api/v1/tasks/inbox')->assertOk()->json())->toHaveCount(200);
+    expect(asUser($me)->getJson('/api/v1/tasks/inbox')->assertOk()->json())->toHaveCount(201);
+});
+
+test('a task never shows its position: the creator and a stranger cannot count what the holder hides', function () {
+    [$creator, $holder, $stranger] = User::factory()->count(3)->create();
+    // The holder has private tasks in the inbox; the next one would be numbered after them.
+    Task::factory()->count(3)->private()->sequence(fn ($sequence) => ['position' => $sequence->index])->create(['creator_id' => $holder->id]);
+
+    $created = asUser($creator)->postJson('/api/v1/tasks', ['title' => 'Public', 'visibility' => 'public', 'assignee_id' => $holder->id])
+        ->assertCreated()->json();
+    expect($created)->not->toHaveKey('position')
+        ->and(Task::findOrFail($created['id'])->position)->toBe(3);
+
+    $edited = asUser($creator)->patchJson("/api/v1/tasks/{$created['id']}", ['title' => 'Edited'])->assertOk()->json();
+    $byMe = asUser($creator)->getJson('/api/v1/tasks/by-me')->assertOk()->json();
+    $page = asUser($stranger)->getJson("/api/v1/users/{$holder->id}/tasks")->assertOk()->json();
+    expect($edited)->not->toHaveKey('position')
+        ->and($byMe[0])->not->toHaveKey('position')
+        ->and($page['unfiled'])->toHaveCount(1)
+        ->and($page['unfiled'][0])->not->toHaveKey('position');
+});
+
+test("a colleague's page names only lists of that colleague", function () {
+    [$me, $colleague, $other] = User::factory()->count(3)->create();
+    $foreign = TaskList::factory()->create(['user_id' => $other->id, 'name' => 'Not theirs']);
+    // A broken row (the invariant says it cannot exist): a task held by the colleague in someone else's list.
+    Task::factory()->public()->create(['creator_id' => $colleague->id, 'list_id' => $foreign->id]);
+
+    asUser($me)->getJson("/api/v1/users/{$colleague->id}/tasks")->assertOk()->assertJsonPath('lists', [])
+        ->assertJsonMissing(['name' => 'Not theirs']);
 });
 
 test("a banned colleague's page answers 404", function () {

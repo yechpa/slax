@@ -29,29 +29,31 @@ test('create for myself lands in the given list, or in "My tasks" when I have no
             'completed' => false,
             'completed_at' => null,
             'list_id' => TaskList::where('user_id', $me->id)->firstOrFail()->id,
-            'position' => 0,
             'creator' => ['id' => $me->id, 'name' => $me->name, 'avatar_url' => $me->avatar_url],
             'assignee' => ['id' => $me->id, 'name' => $me->name, 'avatar_url' => $me->avatar_url],
             'created_at' => Task::firstOrFail()->created_at->toISOString(),
         ]);
+    expect(Task::firstOrFail()->position)->toBe(0);
     $myTasks = TaskList::where('user_id', $me->id)->firstOrFail();
     expect($myTasks->name)->toBe('My tasks')
         ->and($first->json())->not->toHaveKey('email')
         ->and($first->json('creator'))->not->toHaveKey('email');
 
     // A second task without list_id goes to the same list, last.
-    asUser($me)->postJson('/api/v1/tasks', newTask(['title' => 'Second', 'list_id' => null]))->assertCreated()
-        ->assertJson(['list_id' => $myTasks->id, 'position' => 1]);
-    expect(TaskList::where('user_id', $me->id)->count())->toBe(1);
+    $second = asUser($me)->postJson('/api/v1/tasks', newTask(['title' => 'Second', 'list_id' => null]))->assertCreated()
+        ->assertJson(['list_id' => $myTasks->id]);
+    expect(TaskList::where('user_id', $me->id)->count())->toBe(1)
+        ->and(Task::findOrFail($second->json('id'))->position)->toBe(1);
 
     // An explicit list of mine, and an explicit assignee that is me.
     $other = TaskList::factory()->create(['user_id' => $me->id, 'position' => 5]);
     asUser($me)->postJson('/api/v1/tasks', newTask(['list_id' => $other->id, 'assignee_id' => $me->id, 'visibility' => 'public']))
         ->assertCreated()
-        ->assertJson(['list_id' => $other->id, 'position' => 0, 'visibility' => 'public']);
+        ->assertJson(['list_id' => $other->id, 'visibility' => 'public']);
 
     $task = Task::latest('id')->firstOrFail();
-    expect($task->workspace_id)->toBe(Workspace::default()->id)
+    expect($task->position)->toBe(0)
+        ->and($task->workspace_id)->toBe(Workspace::default()->id)
         ->and($task->creator_id)->toBe($me->id)
         ->and($task->assignee_id)->toBe($me->id);
 });
@@ -76,14 +78,14 @@ test('create for a colleague puts it in their inbox with no list and ignores lis
     $theirs = TaskList::factory()->create(['user_id' => $colleague->id]);
     Task::factory()->create(['creator_id' => $colleague->id, 'position' => 3]);
 
-    asUser($me)->postJson('/api/v1/tasks', newTask(['assignee_id' => $colleague->id, 'list_id' => $mine->id]))
+    $given = asUser($me)->postJson('/api/v1/tasks', newTask(['assignee_id' => $colleague->id, 'list_id' => $mine->id]))
         ->assertCreated()
         ->assertJson([
             'list_id' => null,
-            'position' => 4,
             'creator' => ['id' => $me->id],
             'assignee' => ['id' => $colleague->id, 'name' => $colleague->name],
         ]);
+    expect(Task::findOrFail($given->json('id'))->position)->toBe(4);
     // Even the colleague's own list is ignored: the task lands in the inbox.
     asUser($me)->postJson('/api/v1/tasks', newTask(['assignee_id' => $colleague->id, 'list_id' => $theirs->id]))
         ->assertCreated()->assertJson(['list_id' => null]);
@@ -238,9 +240,10 @@ test('reassigning clears the list and the former assignee loses a private task',
 
     asUser($creator)->patchJson("/api/v1/tasks/{$task->id}", ['assignee_id' => $newcomer->id])
         ->assertOk()
-        ->assertJson(['list_id' => null, 'position' => 3, 'assignee' => ['id' => $newcomer->id]]);
+        ->assertJson(['list_id' => null, 'assignee' => ['id' => $newcomer->id]]);
 
     expect($task->fresh()->list_id)->toBeNull()
+        ->and($task->fresh()->position)->toBe(3)
         ->and($task->fresh()->assignee_id)->toBe($newcomer->id)
         ->and(Task::visibleTo($assignee)->whereKey($task->id)->exists())->toBeFalse()
         ->and(Task::visibleTo($newcomer)->whereKey($task->id)->exists())->toBeTrue();
@@ -271,6 +274,30 @@ test('updateTask records the former assignee on the returned model, only when th
         // A plain property: never written to the database.
         ->and($updated->getAttributes())->not->toHaveKey('previousAssigneeId')
         ->and($task->fresh()->assignee_id)->toBe($newcomer->id);
+});
+
+test('updateTask decides on fresh state: a stale instance filed meanwhile by its assignee is still unfiled when reassigned', function () {
+    [$creator, $assignee, $newcomer] = User::factory()->count(3)->create();
+    $service = app(TaskService::class);
+    $list = TaskList::factory()->create(['user_id' => $assignee->id]);
+    $stale = Task::factory()->public()->create(['creator_id' => $creator->id, 'assignee_id' => $assignee->id]);
+
+    // The assignee files it while the creator's request still holds the task as it was (unfiled).
+    $service->moveTask(Task::findOrFail($stale->id), $list->id);
+    expect($stale->list_id)->toBeNull();
+
+    $updated = $service->updateTask($stale, ['assignee_id' => $newcomer->id]);
+
+    // Never left in a list of somebody who no longer holds it.
+    expect($stale->fresh())->assignee_id->toBe($newcomer->id)->list_id->toBeNull()
+        ->and($updated)->assignee_id->toBe($newcomer->id)->list_id->toBeNull()->previousAssigneeId->toBe($assignee->id);
+
+    // A plain edit on a stale instance keeps what changed meanwhile.
+    $again = Task::findOrFail($stale->id);
+    $service->moveTask(Task::findOrFail($stale->id), TaskList::factory()->create(['user_id' => $newcomer->id])->id);
+    $edited = $service->updateTask($again, ['title' => 'Renamed']);
+    expect($stale->fresh())->title->toBe('Renamed')->list_id->not->toBeNull()
+        ->and($edited->list_id)->toBe($stale->fresh()->list_id);
 });
 
 test('creator and assignee may complete and reopen, a stranger may not', function () {
