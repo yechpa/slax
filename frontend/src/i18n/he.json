@@ -478,10 +478,10 @@
   "tasks.people.hint": "מציג את המשימות שלהם שמותר לך לראות.",
   "tasks.ofUser": "המשימות של {name}",
   "tasks.noList": "בלי רשימה",
-  "tasks.empty.user": "ל{name} אין משימות שאפשר לראות.",
+  "tasks.empty.user": "אין משימות שאפשר לראות אצל {name}.",
   "tasks.user.notFound": "המשימות של האדם הזה אינן זמינות.",
   "tasks.error.task_list_limit": "כבר יש לך 50 רשימות, המקסימום. קודם מחקו אחת.",
   "tasks.error.listName": "נדרש שם, עד 60 תווים.",
-  "tasks.error.list": "לא ניתן היה לשמור את הרשימה. כדאי לנסות שוב.",
-  "tasks.error.listDelete": "לא ניתן היה למחוק את הרשימה. כדאי לנסות שוב."
+  "tasks.error.list": "לא ניתן היה לשמור את הרשימה. נסו שוב.",
+  "tasks.error.listDelete": "לא ניתן היה למחוק את הרשימה. נסו שוב."
 }

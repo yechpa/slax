@@ -230,8 +230,6 @@
     color: var(--color-text-dim);
     font-size: var(--text-xs);
     font-weight: var(--weight-text);
-    letter-spacing: var(--tracking-label);
-    text-transform: uppercase;
     overflow-wrap: anywhere;
   }
 

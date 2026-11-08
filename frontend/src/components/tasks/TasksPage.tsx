@@ -63,7 +63,6 @@ export function TasksPage({ view, navOpen, onToggleNav, toggleRef }: Props) {
               variant="quiet"
               size="sm"
               aria-haspopup="dialog"
-              aria-label={t('tasks.list.rename')}
               title={t('tasks.list.rename')}
               onClick={() => list && (taskDialog.value = { kind: 'rename-list', list })}
             >
@@ -73,7 +72,6 @@ export function TasksPage({ view, navOpen, onToggleNav, toggleRef }: Props) {
               variant="quiet"
               size="sm"
               aria-haspopup="dialog"
-              aria-label={t('tasks.list.delete')}
               title={t('tasks.list.delete')}
               onClick={() => list && (taskDialog.value = { kind: 'delete-list', list })}
             >

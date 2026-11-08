@@ -25,6 +25,7 @@ type Props = { onClose: () => void }
 /** A failed list call, said in the reader's language. */
 function listErrorText(error: unknown, fallback: string): string {
   if (isApiError(error, 'validation')) return t('tasks.error.listName')
+  if (isApiError(error, 'not_found')) return t('tasks.error.invalid_list')
   return taskErrorText(error, fallback)
 }
 
@@ -143,7 +144,7 @@ export function DeleteListDialog({ list, onClose }: Props & { list: TaskList }) 
       onClose()
     } catch (failure) {
       setBusy(false)
-      setError(isApiError(failure, 'not_found') ? t('tasks.error.invalid_list') : listErrorText(failure, 'tasks.error.listDelete'))
+      setError(listErrorText(failure, 'tasks.error.listDelete'))
     }
   }
 

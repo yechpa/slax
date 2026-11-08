@@ -50,7 +50,7 @@ async function open(routes: Record<string, FakeHandler>, path = '/tasks/inbox', 
 
 const sidebarAction = (label: string) =>
   [...app!.host.querySelectorAll<HTMLButtonElement>('button.nav-item--action')].find((b) => b.textContent?.includes(label))!
-const headerButton = (label: string) => [...app!.host.querySelectorAll<HTMLButtonElement>('.tasks-header__actions button')].find((b) => b.getAttribute('aria-label') === label)!
+const headerButton = (label: string) => [...app!.host.querySelectorAll<HTMLButtonElement>('.tasks-header__actions button')].find((b) => b.title === label)!
 const dialog = () => document.querySelector<HTMLDialogElement>('dialog')
 const button = (label: string) => [...dialog()!.querySelectorAll<HTMLButtonElement>('button')].find((b) => plain(b.textContent) === label)!
 const submit = async () => {
@@ -189,6 +189,32 @@ describe('list dialogs', () => {
     expect([...app!.host.querySelectorAll('.sidebar a.nav-item .nav-item__label')].map((n) => plain(n.textContent))).not.toContain('Home')
     // Its trigger is gone too: focus lands on the page, not nowhere.
     expect(document.activeElement).toBe(app!.host.querySelector('#messages'))
+  })
+
+  it('a rename of a list that is gone says the list no longer exists', async () => {
+    const { routes } = server([taskList(1, { name: 'Home' })], { 'PATCH /api/v1/task-lists/1': () => ({ status: 404, body: { message: 'Not Found' } }) })
+    await open(routes, '/tasks/l/1')
+    headerButton('Rename list').click()
+    await settle()
+    typeInto(dialog()!.querySelector('input')!, 'House')
+    await settle()
+    await submit()
+    expect(plain(dialog()!.querySelector('.field__error')?.textContent)).toBe('This list no longer exists.')
+    expect(taskDialog.value?.kind).toBe('rename-list')
+  })
+
+  it.each(['en', 'he', 'fr'] as const)('the list header buttons are named by their visible text (%s)', async (locale) => {
+    const { routes } = server([taskList(1, { name: 'Home' })])
+    await open(routes, '/tasks/l/1', locale)
+    const buttons = [...app!.host.querySelectorAll<HTMLButtonElement>('.tasks-header__actions button')]
+    expect(buttons).toHaveLength(2)
+    for (const b of buttons) {
+      const visible = plain(b.textContent).trim()
+      expect(visible).not.toBe('')
+      // WCAG 2.5.3: the accessible name (aria-label wins over the content) contains the visible text.
+      const name = plain(b.getAttribute('aria-label') ?? b.textContent)
+      expect(name).toContain(visible)
+    }
   })
 
   it('a failed delete says so, keeps the dialog and the list', async () => {
