@@ -40,7 +40,8 @@ address is the target, not a promise.
   (or the Add to Home Screen steps on iOS), the app shell opens offline, a new version is
   announced with a Reload button.
 - Push notifications (Web Push, VAPID) for direct messages, mentions and thread replies, while
-  the app is closed: sender and channel only, never the text. Off without keys (dev, e2e).
+  the app is closed: sender and channel only, never the text; and for a task assigned to you:
+  the sender and a generic line, never the title. Off without keys (dev, e2e).
 
 ## How it is built
 

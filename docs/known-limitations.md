@@ -89,6 +89,10 @@ receives the channel's events until it disconnects.
   subscription, a queue delay) by the poll that stays: `GET /channels` every minute while the tab is visible (never
   in a hidden tab), and once when the tab comes back after 15 s away. A conversation started by someone else
   therefore shows up at once, at worst within a minute, and its messages from then on are live.
+- **Tasks: pushed, with the same poll as a fallback.** A change to a task goes as `task.changed` (the task id only)
+  to its creator and its assignee (and the one who held it before), on the same private channel; the client
+  refetches its lists and "Assigned to me" and the task page on screen. The one-minute poll above refreshes the
+  tasks too, so a missed event shows at worst within a minute. A colleague's page is not told (see Task lists).
 - **Thread summaries.** The server does not push a parent's `reply_count`/`last_reply_at` when a reply comes or
   goes; the client recomputes them from the replies' own events (each reply counted once). Two gaps remain until
   the next refresh of the channel: deleting the *latest* reply of a thread that is not open keeps the old "last
@@ -381,12 +385,15 @@ receives the channel's events until it disconnects.
   a task in it: everyone as soon as it holds one public task, and the author of a private task filed in it. Name
   lists accordingly; a list holding only tasks the viewer cannot see does not appear at all.
 - **Administrators get no special access.** They cannot see private tasks (by decision), and there is no moderation
-  of tasks either: an offensive public task can be removed only by its author (or by banning the author, which hides
-  their page but deletes nothing; the demo reset deletes a visitor's tasks at night).
+  of tasks either: an offensive public task can be removed only by its author. Banning the author does not hide a
+  public task someone else holds: it stays on the holder's page. The holder can give it back; it then sits with
+  the banned author, whose page answers 404. The nightly demo reset deletes it if the author is a demo account.
 - **Caps.** 50 lists per person, 500 tasks per list (the done ones count), 200 unfiled tasks in "Assigned to me":
   assigning or giving back a task to someone whose inbox is full is refused (`inbox_full`), they must file some
-  first. `GET /tasks/inbox` returns 200 tasks at most; "Assigned by me" and a colleague's page are not paginated
-  (a colleague's page is bounded by their caps, "Assigned by me" by nothing but everyone's inbox and list caps). The demo reset gives tasks back to their author without checking the cap.
+  first. The cap holds assignments only: deleting a list, or the demo reset giving tasks back to their author, unfiles
+  without checking it, so an inbox can hold more than 200, and `GET /tasks/inbox` returns them all. Nothing is
+  paginated: a colleague's page is bounded by their caps, "Assigned by me" by nothing but everyone's inbox and list
+  caps.
 - **Colleagues' pages are refreshed, not pushed.** `task.changed` goes to a task's creator and assignee only, so a
   third person looking at someone's page sees changes at the next one-minute refresh, or when the tab comes back.
 - **Banned accounts.** A ban changes no task: their page answers 404 and they are never offered as an assignee nor

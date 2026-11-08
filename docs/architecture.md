@@ -108,7 +108,9 @@ on 50 sockets, with nothing lost or doubled ([load-test-results.md](load-test-re
    (with the user id inside, for presence and whispers). Besides one `private-channel.{id}`
    per channel and `presence-workspace.{id}`, each client subscribes to its own
    `private-App.Models.User.{id}`: `channel.added` (the channel id only) when someone else
-   makes the user a member, and the client refetches its channel list.
+   makes the user a member, and the client refetches its channel list; `task.changed` (the
+   task id only) when a task the user created or holds changes, and the client refetches its
+   lists and inbox (and the task page on screen).
 3. When someone is removed from a private channel or banned, the server asks Reverb to
    close that user's connections (a custom broadcaster method); their client cannot
    subscribe again because the authorization is refused. Limits:
@@ -178,7 +180,7 @@ live in `TaskService`; controllers validate and authorize (`TaskPolicy`, `TaskLi
   | `GET /task-lists` · `POST /task-lists` {name} | My lists (with `open_count`), a new one |
   | `PATCH /task-lists/{id}` {name?, position?} · `DELETE /task-lists/{id}` | Rename or reorder, delete |
   | `GET /task-lists/{id}/tasks` | The tasks of one of my lists |
-  | `GET /tasks/inbox` · `GET /tasks/by-me` | "Assigned to me" (no list; 200 at most), "Assigned by me" |
+  | `GET /tasks/inbox` · `GET /tasks/by-me` | "Assigned to me" (no list; all of them, the 200 cap is on assignment), "Assigned by me" |
   | `GET /users/{id}/tasks` | A colleague's page: `{user, lists: [{id, name, tasks}], unfiled}`, only what the caller may see (a list with nothing visible is left out; a banned account is 404) |
   | `POST /tasks` {title, visibility, list_id?, assignee_id?} | For me: into the list given (the first one, "My tasks" created if none, when none is given); for someone else: their inbox |
   | `PATCH /tasks/{id}` {title?, visibility?, assignee_id?} | Creator only; a new assignee gets it in their inbox |
@@ -196,9 +198,10 @@ live in `TaskService`; controllers validate and authorize (`TaskPolicy`, `TaskLi
   `{type: "task", title: "<sender> assigned you a task", body: "New task", url: "/tasks/inbox",
   tag: "tasks"}`, in the device's language. Never the title.
 - **Demo reset.** `slax:demo-reset` deletes every task a demo account created (even one held
-  by a member) and every list a demo account owns (the tasks others had put in them become
-  unfiled); before deleting an account, the tasks others had given it go back to their
-  creator's inbox. Bulk and silent: no event, no push. `DemoSeeder` then puts back the
+  by a member) and every list a demo account owns; a task someone else created that sat in
+  one of those lists goes back to its creator's inbox, whether the demo account survives or
+  not. Before deleting an account, the tasks others had given it (unfiled) go back to their
+  creator's inbox too; a surviving account keeps the ones in its inbox. Bulk and silent: no event, no push. `DemoSeeder` then puts back the
   sample lists and tasks (public and private) of the seed people, without duplicates.
 
 ## 3. Sign-in
