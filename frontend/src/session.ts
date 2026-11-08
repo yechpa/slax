@@ -14,6 +14,7 @@ import { navigate, route } from './router.ts'
 import { resetChannels } from './store/channels.ts'
 import { resetTimelines } from './store/messages.ts'
 import { session, signedOut, type AuthErrorCode } from './store/session.ts'
+import { resetTasks } from './store/tasks.ts'
 import { offline, resetUi, showToast } from './store/ui.ts'
 import { isTheme, setTheme } from './theme.ts'
 
@@ -66,6 +67,7 @@ export function endSession(error: AuthErrorCode | null): void {
   removePref(LAST_CHANNEL_KEY)
   batch(() => {
     resetChannels()
+    resetTasks()
     resetTimelines()
     resetUi()
     signedOut(error)

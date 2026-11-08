@@ -3,6 +3,10 @@
  *   /             home: the app opens the first channel (or an empty state)
  *   /c/:id        a channel or conversation
  *   /c/:id/t/:mid the same, with the thread of message :mid open beside it
+ *   /tasks, /tasks/inbox   my tasks: the ones assigned to me and not filed in a list
+ *   /tasks/by-me  the tasks I gave to other people
+ *   /tasks/l/:id  one of my task lists
+ *   /tasks/u/:id  a colleague's task page
  *   /admin        administration (administrators only; the server checks every call)
  *   /privacy, /terms  the public legal pages (shown to everyone, signed in or not)
  * Anything else is `unknown` (shown as home). Same-origin links are intercepted
@@ -10,22 +14,49 @@
  */
 import { signal } from '@preact/signals'
 
-export type Route = { name: 'home' } | { name: 'channel'; id: number; thread: number | null } | { name: 'admin' } | { name: 'legal'; page: 'privacy' | 'terms' } | { name: 'unknown' }
+/** Which page of the task module: my inbox, what I assigned, one of my lists, a colleague's page. */
+export type TasksView = { kind: 'inbox' } | { kind: 'by-me' } | { kind: 'list'; id: number } | { kind: 'user'; id: number }
+
+export type Route =
+  | { name: 'home' }
+  | { name: 'channel'; id: number; thread: number | null }
+  | { name: 'tasks'; view: TasksView }
+  | { name: 'admin' }
+  | { name: 'legal'; page: 'privacy' | 'terms' }
+  | { name: 'unknown' }
 
 export const ADMIN_PATH = '/admin'
 const ID = '([1-9][0-9]{0,15})'
 const CHANNEL = new RegExp(`^/c/${ID}(?:/t/${ID})?/?$`)
+const TASKS = new RegExp(`^/tasks(?:/(inbox|by-me)|/(l|u)/${ID})?/?$`)
 
 export function parseRoute(pathname: string): Route {
   if (pathname === '/' || pathname === '') return { name: 'home' }
   if (pathname === ADMIN_PATH || pathname === `${ADMIN_PATH}/`) return { name: 'admin' }
   const legal = /^\/(privacy|terms)\/?$/.exec(pathname)
   if (legal) return { name: 'legal', page: legal[1] as 'privacy' | 'terms' }
+  const tasks = TASKS.exec(pathname)
+  if (tasks) {
+    if (tasks[2]) return { name: 'tasks', view: { kind: tasks[2] === 'l' ? 'list' : 'user', id: Number(tasks[3]) } }
+    return { name: 'tasks', view: { kind: tasks[1] === 'by-me' ? 'by-me' : 'inbox' } }
+  }
   const match = CHANNEL.exec(pathname)
   return match ? { name: 'channel', id: Number(match[1]), thread: match[2] ? Number(match[2]) : null } : { name: 'unknown' }
 }
 
 export const channelPath = (id: number) => `/c/${id}`
+export function tasksPath(view: TasksView): string {
+  switch (view.kind) {
+    case 'inbox':
+      return '/tasks/inbox'
+    case 'by-me':
+      return '/tasks/by-me'
+    case 'list':
+      return `/tasks/l/${view.id}`
+    case 'user':
+      return `/tasks/u/${view.id}`
+  }
+}
 export const threadPath = (channelId: number, messageId: number) => `/c/${channelId}/t/${messageId}`
 
 export const route = signal<Route>(parseRoute(globalThis.location?.pathname ?? '/'))

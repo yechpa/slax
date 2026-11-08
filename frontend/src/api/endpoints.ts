@@ -9,12 +9,16 @@ import type {
   AuditPage,
   Channel,
   ChannelMember,
+  ColleagueTasks,
   Me,
   Message,
   MessagePage,
   ModeratedUser,
   PresenceState,
   RepliesPage,
+  Task,
+  TaskList,
+  TaskVisibility,
   UserSummary,
 } from './types.ts'
 
@@ -81,6 +85,34 @@ export const api = {
       request<void>(apiPath('/push/subscriptions'), { method: 'DELETE', body: { endpoint }, quiet: true, duringSignOut }),
     /** 202 {devices}: a test notification to each of this account's devices. */
     test: () => request<{ devices: number }>(apiPath('/push/test'), { method: 'POST' }),
+  },
+
+  /** Task lists and tasks. A hidden one answers 404, a visible one the caller may not change 403; a refusal by rule is 422 `{error}`. */
+  tasks: {
+    lists: (signal?: AbortSignal) => request<TaskList[]>(apiPath('/task-lists'), { signal }),
+    createList: (name: string) => request<TaskList>(apiPath('/task-lists'), { method: 'POST', body: { name } }),
+    renameList: (id: number, name: string) => request<TaskList>(apiPath(`/task-lists/${id}`), { method: 'PATCH', body: { name } }),
+    moveList: (id: number, position: number) => request<TaskList>(apiPath(`/task-lists/${id}`), { method: 'PATCH', body: { position } }),
+    deleteList: (id: number) => request<void>(apiPath(`/task-lists/${id}`), { method: 'DELETE' }),
+    /** My tasks in one of my lists. */
+    listTasks: (id: number, signal?: AbortSignal) => request<Task[]>(apiPath(`/task-lists/${id}/tasks`), { signal }),
+    /** Assigned to me, in no list. */
+    inbox: (signal?: AbortSignal) => request<Task[]>(apiPath('/tasks/inbox'), { signal }),
+    /** Created by me for somebody else. */
+    byMe: (signal?: AbortSignal) => request<Task[]>(apiPath('/tasks/by-me'), { signal }),
+    /** A colleague's page: what they hold that I may see. 404 for a banned account. */
+    ofUser: (id: number, signal?: AbortSignal) => request<ColleagueTasks>(apiPath(`/users/${id}/tasks`), { signal }),
+    create: (task: { title: string; visibility: TaskVisibility; list_id?: number | null; assignee_id?: number | null }) =>
+      request<Task>(apiPath('/tasks'), { method: 'POST', body: task }),
+    /** Changing the assignee clears the list. */
+    update: (id: number, changes: { title?: string; visibility?: TaskVisibility; assignee_id?: number }) =>
+      request<Task>(apiPath(`/tasks/${id}`), { method: 'PATCH', body: changes }),
+    setCompleted: (id: number, completed: boolean) => request<Task>(apiPath(`/tasks/${id}/completion`), { method: 'PUT', body: { completed } }),
+    /** Into one of my lists, or `null`: back to the inbox. */
+    move: (id: number, listId: number | null) => request<Task>(apiPath(`/tasks/${id}/move`), { method: 'POST', body: { list_id: listId } }),
+    /** Gives an assigned task back to the person who created it. */
+    returnToAuthor: (id: number) => request<Task>(apiPath(`/tasks/${id}/return`), { method: 'POST' }),
+    remove: (id: number) => request<void>(apiPath(`/tasks/${id}`), { method: 'DELETE' }),
   },
 
   /** Administrators only (403 for everyone else): moderation, audit log, service status. */
