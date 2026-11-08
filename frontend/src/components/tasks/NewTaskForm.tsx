@@ -1,8 +1,8 @@
 /**
  * A new task, at the top of one of my lists: its title, whether it is public or private
  * (private to begin with: the safer choice after a careless click), and who it is for (me
- * by default, then into the chosen list; someone else, then into their "Assigned to me", and
- * the list choice goes). A refusal by the server is said in the reader's language and the
+ * by default, then into the chosen list; one or several colleagues, each getting their own copy
+ * in their "Assigned to me", and "keep it for me too" adds my copy, in the chosen list). A refusal by the server is said in the reader's language and the
  * typed title stays.
  */
 import { useId, useState } from 'preact/hooks'
@@ -10,7 +10,7 @@ import { api } from '../../api/endpoints.ts'
 import type { Task, TaskVisibility, UserSummary } from '../../api/types.ts'
 import { t } from '../../i18n/index.ts'
 import { me } from '../../store/session.ts'
-import { refreshTasks, taskLists } from '../../store/tasks.ts'
+import { MAX_ASSIGNEES, refreshTasks, taskLists } from '../../store/tasks.ts'
 import { showToast } from '../../store/ui.ts'
 import { Button } from '../ui/Button.tsx'
 import { Segmented } from '../ui/Segmented.tsx'
@@ -29,13 +29,19 @@ const TITLE_MAX = 200
 export function NewTaskForm({ listId, onCreated }: Props) {
   const [title, setTitle] = useState('')
   const [visibility, setVisibility] = useState<TaskVisibility>('private')
-  const [assignee, setAssignee] = useState<UserSummary | null>(null)
+  const [assignees, setAssignees] = useState<UserSummary[]>([])
+  const [keepMine, setKeepMine] = useState(false)
   const [list, setList] = useState(listId)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const listField = useId()
   const lists = taskLists.value
   const meId = me.value?.id
+  const keepId = useId()
+  // My own copy goes into a list: the list choice stays when I have none, or keep one.
+  const mine = assignees.length === 0 || (keepMine && meId !== undefined)
+  // The server counts me among the people: keeping mine leaves room for one colleague less.
+  const limit = MAX_ASSIGNEES - (keepMine ? 1 : 0)
 
   const submit = async (event: Event) => {
     event.preventDefault()
@@ -44,12 +50,19 @@ export function NewTaskForm({ listId, onCreated }: Props) {
     setBusy(true)
     setError(null)
     try {
-      const created = await api.tasks.create(assignee ? { title: text, visibility, assignee_id: assignee.id } : { title: text, visibility, list_id: list })
+      const others = assignees.map((p) => p.id)
+      let body: Parameters<typeof api.tasks.create>[0]
+      if (assignees.length === 0) body = { title: text, visibility, list_id: list }
+      else if (!mine) body = others.length === 1 ? { title: text, visibility, assignee_id: others[0] } : { title: text, visibility, assignee_ids: others }
+      else body = { title: text, visibility, list_id: list, assignee_ids: [meId!, ...others] }
+      const created = await api.tasks.create(body)
+      const sentTo = assignees.map((p) => p.name).join(', ')
       setTitle('')
       setVisibility('private')
-      setAssignee(null)
+      setAssignees([])
+      setKeepMine(false)
       onCreated(created)
-      if (assignee) showToast({ tone: 'success', text: t('tasks.sent', { name: assignee.name }) })
+      if (sentTo !== '') showToast({ tone: 'success', text: t('tasks.sent', { name: sentTo }) })
       void refreshTasks()
     } catch (failure) {
       setError(taskErrorText(failure, 'tasks.error.create'))
@@ -83,18 +96,31 @@ export function NewTaskForm({ listId, onCreated }: Props) {
         <PeoplePicker
           label={t('tasks.assignTo')}
           placeholder={t('tasks.assignPlaceholder')}
-          hint={assignee ? undefined : t('tasks.assignHint')}
-          selected={assignee ? [assignee] : []}
-          onSelect={setAssignee}
-          onRemove={() => setAssignee(null)}
+          hint={assignees.length > 0 ? undefined : t('tasks.assignHint')}
+          selected={assignees}
+          onSelect={(person) => setAssignees([...assignees, person])}
+          onRemove={(removed) => {
+            const rest = assignees.filter((p) => p.id !== removed.id)
+            setAssignees(rest)
+            if (rest.length === 0) setKeepMine(false)
+          }}
           exclude={meId === undefined ? [] : [meId]}
-          full={assignee !== null}
-          fullText={t('tasks.oneAssignee')}
+          full={assignees.length >= limit}
+          fullText={t('tasks.manyAssignees', { count: limit })}
         />
       </div>
-      {assignee ? (
-        <p class="new-task__inbox">{t('tasks.goesToInbox', { name: assignee.name })}</p>
-      ) : (
+      {assignees.length > 0 && (
+        <label class="new-task__keep" for={keepId}>
+          <input id={keepId} type="checkbox" checked={keepMine} disabled={!keepMine && assignees.length >= MAX_ASSIGNEES} onChange={(event) => setKeepMine(event.currentTarget.checked)} />
+          {t('tasks.keepMine')}
+        </label>
+      )}
+      {assignees.length > 0 && (
+        <p class="new-task__inbox">
+          {assignees.length === 1 ? t('tasks.goesToInbox', { name: assignees[0].name }) : t('tasks.goesToInboxMany')}
+        </p>
+      )}
+      {mine &&
         lists.length > 0 && (
           <div class="field new-task__list">
             <label class="field__label" for={listField}>
@@ -108,8 +134,7 @@ export function NewTaskForm({ listId, onCreated }: Props) {
               ))}
             </select>
           </div>
-        )
-      )}
+        )}
       {error && (
         <p class="new-task__error" role="alert">
           {error}

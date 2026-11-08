@@ -110,6 +110,10 @@ lists.
   It arrives in their **Assigned to me**, with a notification that says who, never the task.
   They can tick it, file it into one of their lists (**···** → **Move to…**) or give it back to
   you (**···** → **Return to** your name). You keep an eye on it under **Assigned by me**.
+- **For several people, you included**: pick several names under **Assign to**, and tick **Keep it
+  for me too** to keep a copy yourself. Each person gets their own copy: they tick it, file it and
+  give it back on their own. Later, **···** → **Also assign to…** adds more people to a task, and
+  renaming it or changing who can see it applies to every copy.
 - **People's tasks** shows someone's tasks: their public ones, and the private ones you gave
   them.
 - No dates, reminders or comments on tasks.
@@ -210,6 +214,9 @@ notifications arriving. That is exactly what you are helping to check.
   היא מגיעה אצלו ל**הוקצו אליי**, עם התראה שאומרת ממי, אף פעם לא את המשימה. הוא יכול לסמן
   אותה, להעביר אותה לאחת הרשימות שלו (**···** ← **העברה אל…**) או להחזיר אותה אליכם (**···** ←
   **החזרה אל** והשם שלכם). אתם עוקבים אחריה ב**הוקצו על ידיי**.
+- **בשביל כמה אנשים, גם אתם**: בוחרים כמה שמות תחת **הקצאה אל**, ומסמנים **לשמור אותה גם לעצמי**
+  כדי להשאיר עותק אצלכם. כל אחד מקבל עותק משלו: הוא מסמן אותו, מארגן אותו ומחזיר אותו בעצמו.
+  אחר כך **···** ← **הקצאה גם אל…** מוסיף אנשים למשימה; שינוי שם או חשיפה חל על כל העותקים.
 - **משימות של אחרים** מראה את המשימות של מישהו: הציבוריות, והפרטיות שאתם נתתם לו.
 - אין תאריכים, תזכורות או תגובות על משימות.
 
@@ -323,6 +330,10 @@ choses à faire.
   qui, jamais la tâche. La personne peut la cocher, la ranger dans une de ses listes (**···** →
   **Déplacer vers…**) ou vous la rendre (**···** → **Rendre à** votre nom). Vous la suivez dans
   **Assignées par moi**.
+- **Pour plusieurs personnes, vous comprise** : choisissez plusieurs noms sous **Assigner à**, et
+  cochez **La garder aussi pour moi** pour en garder une copie. Chacun reçoit sa propre copie : il
+  la coche, la range et la rend de son côté. Plus tard, **···** → **Assigner aussi à…** ajoute
+  des personnes à une tâche ; la renommer ou changer qui la voit s'applique à toutes les copies.
 - **Tâches des autres** montre les tâches de quelqu'un : ses tâches publiques, et les privées
   que vous lui avez confiées.
 - Pas de dates, de rappels ni de commentaires sur les tâches.

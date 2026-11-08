@@ -133,7 +133,7 @@ describe('task row', () => {
     // Mine, for me: everything but giving it back.
     const mine = task(1)
     row(mine)
-    expect(await menu()).toEqual(['Rename', 'Make public', 'Assign to…', 'Move to…', 'Delete'])
+    expect(await menu()).toEqual(['Rename', 'Make public', 'Assign to…', 'Also assign to…', 'Move to…', 'Delete'])
     menuItem('Move to…').click()
     expect(taskDialog.value).toEqual({ kind: 'move', task: mine })
     render(null, host)
@@ -142,9 +142,16 @@ describe('task row', () => {
     const given = task(2, { assignee: DANA, list_id: null, visibility: 'public' })
     row(given)
     expect(plain(host.querySelector('.task-row__person')?.textContent)).toBe('for dana')
-    expect(await menu()).toEqual(['Rename', 'Make private', 'Assign to…', 'Delete'])
+    expect(await menu()).toEqual(['Rename', 'Make private', 'Assign to…', 'Also assign to…', 'Delete'])
     menuItem('Assign to…').click()
     expect(taskDialog.value).toEqual({ kind: 'assign', task: given })
+    render(null, host)
+
+    // "Also assign to…" opens the same dialog in its add-people mode.
+    row(given)
+    await menu()
+    menuItem('Also assign to…').click()
+    expect(taskDialog.value).toEqual({ kind: 'assign', task: given, also: true })
     render(null, host)
 
     // Given to me by dana: I file it or give it back, nothing else.

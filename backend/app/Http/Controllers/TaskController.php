@@ -14,6 +14,9 @@ use Illuminate\Validation\Rule;
 
 class TaskController extends Controller
 {
+    /** People one request may name. */
+    private const MAX_ASSIGNEES = 10;
+
     public function __construct(private readonly TaskService $tasks) {}
 
     /**
@@ -38,17 +41,39 @@ class TaskController extends Controller
             'visibility' => ['required', Rule::in([Task::PUBLIC, Task::PRIVATE])],
             'list_id' => ['nullable', 'integer'],
             'assignee_id' => ['nullable', 'integer'],
+            'assignee_ids' => ['sometimes', 'array', 'min:1', 'max:'.self::MAX_ASSIGNEES],
+            'assignee_ids.*' => ['integer'],
         ]);
 
-        $task = $this->tasks->createTask(
+        // `assignee_ids` is the list of people; `assignee_id` (one person) is still accepted.
+        $ids = $data['assignee_ids'] ?? (isset($data['assignee_id']) ? [$data['assignee_id']] : []);
+
+        $copies = $this->tasks->createTasks(
             $request->user(),
             $data['title'],
             $data['visibility'],
             isset($data['list_id']) ? (int) $data['list_id'] : null,
-            isset($data['assignee_id']) ? (int) $data['assignee_id'] : null,
+            array_map('intval', $ids),
         );
 
-        return (new TaskResource($this->withPeople($task)))->response()->setStatusCode(201);
+        return (new TaskResource($this->withPeople($copies->firstOrFail())))->response()->setStatusCode(201);
+    }
+
+    /** Gives the task to more people: one new copy each. Answers the copies created (none when everyone already had one). */
+    public function assign(Request $request, Task $task): JsonResponse
+    {
+        Gate::authorize('edit', $task);
+
+        $data = $request->validate([
+            'assignee_ids' => ['required', 'array', 'min:1', 'max:'.self::MAX_ASSIGNEES],
+            'assignee_ids.*' => ['integer'],
+            'list_id' => ['nullable', 'integer'],
+        ]);
+
+        $copies = $this->tasks->assignAlso($task, array_map('intval', $data['assignee_ids']), isset($data['list_id']) ? (int) $data['list_id'] : null);
+        $copies->each(fn (Task $copy) => $this->withPeople($copy));
+
+        return response()->json(TaskResource::collection($copies)->resolve($request));
     }
 
     public function update(Request $request, Task $task): TaskResource

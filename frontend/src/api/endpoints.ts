@@ -102,8 +102,12 @@ export const api = {
     byMe: (signal?: AbortSignal) => request<Task[]>(apiPath('/tasks/by-me'), { signal }),
     /** A colleague's page: what they hold that I may see. 404 for a banned account. */
     ofUser: (id: number, signal?: AbortSignal) => request<ColleagueTasks>(apiPath(`/users/${id}/tasks`), { signal }),
-    create: (task: { title: string; visibility: TaskVisibility; list_id?: number | null; assignee_id?: number | null }) =>
+    /** `assignee_ids`: one copy each (mine goes into `list_id`, theirs into their inbox); the answer is the first. */
+    create: (task: { title: string; visibility: TaskVisibility; list_id?: number | null; assignee_id?: number | null; assignee_ids?: number[] }) =>
       request<Task>(apiPath('/tasks'), { method: 'POST', body: task }),
+    /** More people for a task I created: the copies made (none when they all had one already). */
+    assign: (id: number, assigneeIds: number[], listId?: number | null) =>
+      request<Task[]>(apiPath(`/tasks/${id}/assign`), { method: 'POST', body: listId === undefined ? { assignee_ids: assigneeIds } : { assignee_ids: assigneeIds, list_id: listId } }),
     /** Changing the assignee clears the list. */
     update: (id: number, changes: { title?: string; visibility?: TaskVisibility; assignee_id?: number }) =>
       request<Task>(apiPath(`/tasks/${id}`), { method: 'PATCH', body: changes }),

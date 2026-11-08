@@ -28,7 +28,8 @@ address is the target, not a promise.
 - Presence (online, away, offline) and "is typing".
 - Task lists: several named lists per person, each task public or private (private by
   default), a task assigned to a colleague arriving in their "Assigned to me" to be filed
-  into one of their lists or given back, "Assigned by me" for what one handed out, and a
+  into one of their lists or given back (a task can go to several people at once, each with
+  their own copy, and be kept too), "Assigned by me" for what one handed out, and a
   colleague's page showing what one may see of their tasks. Live, and pushed on assignment
   (never the title).
 - English, Hebrew and French, chosen per person; right to left done with CSS logical

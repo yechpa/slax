@@ -24,10 +24,13 @@ export type TaskDialog =
   | { kind: 'rename-list'; list: TaskList }
   | { kind: 'delete-list'; list: TaskList }
   | { kind: 'move'; task: Task }
-  | { kind: 'assign'; task: Task }
+  | { kind: 'assign'; task: Task; /** Add people, keeping the task where it is. */ also?: boolean }
   | { kind: 'people' }
 
 export const taskDialog = signal<TaskDialog | null>(null)
+
+/** People one task can be given to at once (the server's limit). */
+export const MAX_ASSIGNEES = 10
 
 /** Bumped by each fetch; a slower, older answer does not overwrite a newer one. */
 let latest = 0

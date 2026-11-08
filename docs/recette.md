@@ -327,6 +327,9 @@ without the title; a tap opens "Assigned to me".
 the badge goes. A sees it under **Assigned by me**, "for B"; A ticks it, B sees it ticked.
 15.5 [ ] As A: assign B another task from the form (**Assign to**). As B: **···** → **Return to A**:
 it is back in A's "Assigned to me".
+15.5b [ ] As A: a new task for B and C with **Keep it for me too** ticked. A has it in the chosen list; B and C each
+have it in "Assigned to me" (live). B ticks theirs: A's and C's stay open. DevTools → Network: no `group_id` anywhere.
+A: **···** → **Also assign to…** → D: D gets a copy; renaming A's copy renames them all.
 15.6 [ ] As A: file a task B gave A into a list that also holds a task A wrote, then delete that
 list (the dialog says what happens): A's own task goes, B's is back in A's "Assigned to me".
 15.7 [ ] In Hebrew, both themes, on the phone too: the tasks area reads right to left, a Hebrew

@@ -161,7 +161,7 @@ live in `TaskService`; controllers validate and authorize (`TaskPolicy`, `TaskLi
 | Table | Columns | Notes |
 |---|---|---|
 | `task_lists` | `id`, `workspace_id`, `user_id` (owner), `name` (60), `position`, timestamps | Personal: only the owner sees, renames, reorders or deletes it. 50 per person. |
-| `tasks` | `id`, `workspace_id`, `creator_id`, `assignee_id`, `list_id` (nullable), `title` (200 characters), `visibility` (`public` \| `private`, default `private`), `completed_at`, `position`, timestamps | `list_id` is always a list of the assignee (null: their "Assigned to me"); changing the assignee clears it. 500 per list, done ones included; 200 unfiled per person. |
+| `tasks` | `id`, `workspace_id`, `creator_id`, `assignee_id`, `list_id` (nullable), `group_id` (uuid, nullable: the copies of a task given to several people, never in the API), `title` (200 characters), `visibility` (`public` \| `private`, default `private`), `completed_at`, `position`, timestamps | `list_id` is always a list of the assignee (null: their "Assigned to me"); changing the assignee clears it. 500 per list, done ones included; 200 unfiled per person. |
 
 - **Who sees what.** A public task: every non-banned member of the workspace. A private
   one: its creator and its assignee only (administrators included: no special access).
@@ -182,7 +182,8 @@ live in `TaskService`; controllers validate and authorize (`TaskPolicy`, `TaskLi
   | `GET /task-lists/{id}/tasks` | The tasks of one of my lists |
   | `GET /tasks/inbox` · `GET /tasks/by-me` | "Assigned to me" (no list; all of them, the 200 cap is on assignment), "Assigned by me" |
   | `GET /users/{id}/tasks` | A colleague's page: `{user, lists: [{id, name, tasks}], unfiled}`, only what the caller may see (a list with nothing visible is left out; a banned account is 404) |
-  | `POST /tasks` {title, visibility, list_id?, assignee_id?} | For me: into the list given (the first one, "My tasks" created if none, when none is given); for someone else: their inbox |
+  | `POST /tasks` {title, visibility, list_id?, assignee_id? \| assignee_ids?} | For me: into the list given (the first one, "My tasks" created if none, when none is given); for someone else: their inbox. `assignee_ids` (1 to 10, me included): one copy each, all or nothing |
+  | `POST /tasks/{id}/assign` {assignee_ids, list_id?} | Creator only: more copies for people who have none yet; answers the copies created |
   | `PATCH /tasks/{id}` {title?, visibility?, assignee_id?} | Creator only; a new assignee gets it in their inbox |
   | `PUT /tasks/{id}/completion` {completed} | Tick or untick |
   | `POST /tasks/{id}/move` {list_id: id \| null} | Assignee only, to one of their lists or their inbox |

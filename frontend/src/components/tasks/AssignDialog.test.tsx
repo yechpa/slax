@@ -87,6 +87,55 @@ describe('assign dialog', () => {
     expect(document.activeElement).toBe(app.host.querySelector('#messages'))
   })
 
+  it('"Also assign to…" takes several people, sends assignee_ids and leaves the task in my list', async () => {
+    const { routes } = server({
+      'POST /api/v1/tasks/1/assign': () => ({ status: 200, body: [task(11, { assignee: DANA, list_id: null }), task(12, { assignee: NOAM, list_id: null })] }),
+    })
+    app = await mountApp(routes, '/tasks/l/1')
+    await settle()
+    const row = app.host.querySelector<HTMLElement>('[data-task-id="1"]')!
+    row.querySelector<HTMLButtonElement>('.task-row__more')!.click()
+    await settle(2)
+    ;[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((i) => plain(i.textContent) === 'Also assign to…')!.click()
+    await settle()
+    expect(plain(dialog()!.querySelector('.dialog__title')?.textContent)).toBe('Also assign “review the slides”')
+
+    await search('da')
+    dialog()!.querySelector<HTMLElement>('[role="option"]')!.click()
+    await settle()
+    // One person does not fill the field in this mode.
+    await search('נע')
+    dialog()!.querySelector<HTMLElement>('[role="option"]')!.click()
+    await settle()
+    expect(dialog()!.querySelectorAll('.person-chip').length).toBe(2)
+    button('Assign').click()
+    await settle()
+
+    expect(app.server.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/assign')).map((c) => [c.path, c.body])).toEqual([
+      ['/api/v1/tasks/1/assign', { assignee_ids: [DANA.id, NOAM.id] }],
+    ])
+    expect(dialog()).toBeNull()
+    // Mine stays where it is.
+    expect(titles()).toEqual(['review the slides', 'water the plants'])
+  })
+
+  it('"Also assign to…" says so when everyone already had the task', async () => {
+    const { routes } = server({ 'POST /api/v1/tasks/1/assign': () => ({ status: 200, body: [] }) })
+    app = await mountApp(routes, '/tasks/l/1')
+    await settle()
+    app.host.querySelector<HTMLElement>('[data-task-id="1"] .task-row__more')!.click()
+    await settle(2)
+    ;[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((i) => plain(i.textContent) === 'Also assign to…')!.click()
+    await settle()
+    await search('da')
+    dialog()!.querySelector<HTMLElement>('[role="option"]')!.click()
+    await settle()
+    button('Assign').click()
+    await settle()
+    expect(dialog()).toBeNull()
+    expect(plain(document.body.textContent)).toContain('Everyone you picked already has this task.')
+  })
+
   it('a refusal (invalid_assignee) is said in Hebrew, keeps the dialog and the choice', async () => {
     const { routes } = server({ 'PATCH /api/v1/tasks/1': () => ({ status: 422, body: { error: 'invalid_assignee' } }) })
     app = await mountApp(routes, '/tasks/l/1', { locale: 'he' })

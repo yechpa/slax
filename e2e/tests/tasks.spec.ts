@@ -207,6 +207,58 @@ for (const theme of THEMES) {
       await expect(tasks(author).row(title)).toHaveCount(0)
     })
 
+    test('one task for two colleagues and for me too: a copy each, ticked on its own, and "Also assign to…" adds a third', async ({ browser }) => {
+      const author = await person(browser, `Ada ${uniq('a')}`, 'en', theme)
+      const bo = await person(browser, `Bo ${uniq('b')}`, 'en', theme)
+      const chloe = await person(browser, `Chloé ${uniq('c')}`, 'fr', theme)
+      const dan = await person(browser, `Dan ${uniq('d')}`, 'en', theme)
+      const title = `book the hall ${uniq('t')}`
+      const mine = uniq('events')
+
+      // --- From the form: two colleagues, and "Keep it for me too" (unchecked to begin with).
+      await newList(author, mine)
+      const form = tasks(author).form
+      await form.getByLabel(t('en', 'tasks.titleLabel'), { exact: true }).fill(title)
+      await pick(form, bo.name)
+      await pick(form, chloe.name)
+      const keep = form.getByRole('checkbox', { name: t('en', 'tasks.keepMine'), exact: true })
+      await expect(keep).not.toBeChecked()
+      await expect(form).toContainText(t('en', 'tasks.goesToInboxMany'))
+      await keep.check()
+      await form.getByRole('button', { name: t('en', 'tasks.add'), exact: true }).click()
+      await expect(ui(author).toasts).toContainText(t('en', 'tasks.sent', { name: `${bo.name}, ${chloe.name}` }))
+
+      // --- Mine stays in my list; each colleague has their own, live, in their "Assigned to me".
+      await expect(tasks(author).row(title)).toHaveCount(1)
+      await openTasks(bo, t('en', 'tasks.inbox'))
+      await expect(tasks(bo).row(title)).toHaveCount(1)
+      await openTasks(chloe, t('fr', 'tasks.inbox'))
+      await expect(tasks(chloe).row(title)).toHaveCount(1)
+
+      // --- Bo ticks theirs (a done task leaves the "to file" list): mine and Chloé's stay open.
+      await tasks(bo).row(title).getByRole('checkbox', { name: title }).click()
+      await expect(tasks(author).row(title).locator('input.task-row__check:not(:checked)')).toHaveCount(1)
+      await expect(tasks(chloe).row(title).locator('input.task-row__check:not(:checked)')).toHaveCount(1)
+
+      // --- "Assigned by me" shows the two others' copies, each with its own state (a done one folds under "Done").
+      await openTasks(author, t('en', 'tasks.byMe'))
+      await expect(tasks(author).row(title)).toHaveCount(2)
+      await expect(tasks(author).row(title).locator('input.task-row__check:checked')).toHaveCount(1)
+      await expect(tasks(author).row(title).locator('input.task-row__check:not(:checked)')).toHaveCount(1)
+
+      // --- "Also assign to…" on my copy adds a third person, without touching the others.
+      await openTasks(author, mine)
+      await taskMenu(author, title, t('en', 'tasks.assignAlso'))
+      const also = author.page.getByRole('dialog', { name: t('en', 'tasks.assignAlso.title', { title }) })
+      await pick(also, dan.name)
+      await also.getByRole('button', { name: t('en', 'tasks.assign.submit'), exact: true }).click()
+      await expect(also).toHaveCount(0)
+      await expect(ui(author).toasts).toContainText(t('en', 'tasks.sent', { name: dan.name }))
+      await expect(tasks(author).row(title)).toHaveCount(1)
+      await openTasks(dan, t('en', 'tasks.inbox'))
+      await expect(tasks(dan).row(title)).toHaveCount(1)
+    })
+
     test('the colleague returns a task to its author', async ({ browser }) => {
       // The author reads French this time.
       const author = await person(browser, `Aurélie ${uniq('a')}`, 'fr', theme)

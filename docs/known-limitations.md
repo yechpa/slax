@@ -378,9 +378,17 @@ receives the channel's events until it disconnects.
 `docs/superpowers/specs/2026-11-08-task-lists-design.md`.
 
 - **Deliberately not built:** due dates, reminders, recurring tasks, subtasks, notes or comments on a task, labels,
-  search, several assignees, a list shared by several people, drag and drop, making a task from a message. Tasks
+  search, a list shared by several people, drag and drop, making a task from a message. Tasks
   cannot be reordered (each one goes last when created or moved); lists can be reordered through the API
   (`PATCH /task-lists/{id}` with `position`) but the app has no control for it yet.
+- **Several people on one task means several copies.** A task given to more than one person (or kept too) is one copy
+  each, linked by a hidden group id: each copy has its own list, tick, move and return. Renaming it or changing its
+  visibility applies to every copy; deleting deletes one copy; changing who holds a copy concerns that copy only. The
+  copies are not told about each other (the API shows no group), so nobody sees who else has one, and ticking one does
+  not tick the others; "Assigned by me" shows the others' copies one by one. A deleted account's copies go back to
+  their author, who may then hold two copies of the same task; so does handing a copy to someone who already has one, or
+  giving one back to an author who already has theirs. Someone who gave their copy back or lost it can be added again.
+  Up to 10 people per request, the author included.
 - **A list's name is not private.** A list is personal, but its name shows on its owner's page to anyone who can see
   a task in it: everyone as soon as it holds one public task, and the author of a private task filed in it. Name
   lists accordingly; a list holding only tasks the viewer cannot see does not appear at all.
