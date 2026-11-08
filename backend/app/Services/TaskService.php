@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\TaskChanged;
 use App\Exceptions\TaskRefused;
 use App\Models\Task;
 use App\Models\TaskList;
@@ -73,6 +74,14 @@ class TaskService
     public function deleteList(TaskList $list): void
     {
         DB::transaction(function () use ($list) {
+            // Each affected person is told once, about the first affected task that concerns them.
+            $told = [];
+            foreach (Task::where('list_id', $list->id)->orderBy('id')->get(['id', 'creator_id', 'assignee_id']) as $task) {
+                $people = array_diff([$task->creator_id, $task->assignee_id], $told);
+                $this->notify($task->id, $people);
+                $told = [...$told, ...$people];
+            }
+
             Task::where('list_id', $list->id)->where('creator_id', $list->user_id)->delete();
             Task::where('list_id', $list->id)->update(['list_id' => null]);
             $list->delete();
@@ -124,6 +133,7 @@ class TaskService
             $task->assignee_id = $assignee->id;
             $task->list_id = $destination;
             $task->save();
+            $this->announce($task);
 
             return $task;
         });
@@ -159,6 +169,7 @@ class TaskService
                 $task->position = $this->nextPosition($assignee, null);
             }
             $task->save();
+            $this->announce($task);
         });
 
         return $task;
@@ -169,6 +180,7 @@ class TaskService
     {
         $task->completed_at = $done ? ($task->completed_at ?? now()) : null;
         $task->save();
+        $this->announce($task);
 
         return $task;
     }
@@ -176,6 +188,7 @@ class TaskService
     public function deleteTask(Task $task): void
     {
         $task->delete();
+        $this->announce($task);
     }
 
     /**
@@ -205,6 +218,7 @@ class TaskService
             $task->list_id = $listId;
             $task->position = $this->nextPosition($assignee, $listId);
             $task->save();
+            $this->announce($task);
 
             return $task;
         });
@@ -230,9 +244,27 @@ class TaskService
             $task->list_id = null;
             $task->position = $this->nextPosition($author, null);
             $task->save();
+            $this->announce($task);
 
             return $task;
         });
+    }
+
+    /**
+     * Tells everyone concerned that the task changed: its creator, its assignee, the one who held it before
+     * (`$task->previousAssigneeId`) and `$alsoUserId`, once each. Held back until the transaction commits.
+     */
+    public function announce(Task $task, ?int $alsoUserId = null): void
+    {
+        $this->notify($task->id, [$task->creator_id, $task->assignee_id, $task->previousAssigneeId, $alsoUserId]);
+    }
+
+    /** @param  array<int|null>  $userIds */
+    private function notify(int $taskId, array $userIds): void
+    {
+        foreach (array_unique(array_filter($userIds)) as $userId) {
+            TaskChanged::dispatch($taskId, $userId);
+        }
     }
 
     /** The task has to exist and still be held by `$assigneeId`, as the caller was authorized against. */
