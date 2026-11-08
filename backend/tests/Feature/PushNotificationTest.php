@@ -7,7 +7,6 @@ use App\Models\PushSubscription;
 use App\Models\User;
 use App\Services\PresenceService;
 use App\Services\Push\FakeWebPushSender;
-use App\Services\Push\Push;
 use App\Services\Push\PushResult;
 use App\Services\Push\WebPushSender;
 use Database\Seeders\DefaultWorkspaceSeeder;

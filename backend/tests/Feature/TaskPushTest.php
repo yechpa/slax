@@ -53,7 +53,7 @@ test('assigning to an away colleague queues one push per device with type task, 
         ])
         ->and($jobs[1]->payload)->toBe([
             'type' => 'task',
-            'title' => 'Alice Martin הקצה לך משימה',
+            'title' => "\u{2068}Alice Martin\u{2069} הקצה לך משימה",
             'body' => 'משימה חדשה',
             'url' => '/tasks/inbox',
             'tag' => 'tasks',
