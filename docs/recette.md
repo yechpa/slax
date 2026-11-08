@@ -30,7 +30,7 @@ Record each run here (copy the table per environment):
 
 | # | Check | How | |
 |---|---|---|---|
-| 1.1 | CI green on the commit: `lint`, `test`, `e2e` (Playwright, 15 tests, then the 10-second load smoke), `chart`, `secrets` (gitleaks), Images (4 images x 2 architectures: 8 `build` jobs with Trivy, 8 `push` jobs, 4 `manifest` jobs) | GitHub → Actions, or `gh run list --branch main --limit 5` | A |
+| 1.1 | CI green on the commit: `lint`, `test`, `e2e` (Playwright, 64 tests, one skipped on purpose, then the 10-second load smoke), `chart`, `secrets` (gitleaks), Images (4 images x 2 architectures: 8 `build` jobs with Trivy, 8 `push` jobs, 4 `manifest` jobs) | GitHub → Actions, or `gh run list --branch main --limit 5` | A |
 | 1.2 | The deployment pieces' own tests (`make chart-lint` also runs in CI, job `chart`; the others do not) | `make chart-lint backup-test monitor-test proxy-test aws-test edge-guard-test` | A (local) |
 | 1.3 | The load test: 50 WebSocket clients, 10 messages/s for 2 min, 0 lost, 0 duplicated, 0 HTTP error (CI runs only the 10-second smoke at the end of `e2e`) | `make load` → docs/load-test-results.md (a run is committed) | A (local) |
 | 1.4 | No secret in the repository or its history | CI `secrets`; GitHub → Security → Secret scanning: no open alert | A+M |
@@ -297,6 +297,44 @@ browser, installed app or browser tab, what was tapped, what was expected and wh
 the time (to find it in the logs), a screenshot if possible. Record each report here with its
 fix or its known-limitations entry.
 
+## 15. Task lists
+
+Spec: docs/superpowers/specs/2026-11-08-task-lists-design.md (lists, public or private per task,
+assigning, filing, a colleague's page).
+
+**A**: `e2e/tests/tasks.spec.ts`, in both themes: lists from "New list", a public and a private
+task, the colleague's page showing the public one only (nor the name of a list holding only
+private tasks, in the page or its API answer); a task assigned from its menu arriving live in the
+colleague's "Assigned to me" (in French), filed with "Move to…", and still under the author's
+"Assigned by me"; a task given back to its author; the tasks area in Hebrew (sidebar on the right,
+checkbox at the start of the row, a Hebrew title drawn right to left, nothing sideways). Pest
+(`backend/tests/Feature/Task*Test.php`): the rights matrix (404 on a private task, 403 on a
+visible one), the caps, payloads without title (realtime and push), the demo reset.
+
+**M** on prod, account A in browser 1, account B in browser 2:
+
+15.1 [ ] As A: **New list** twice; in the first list a **Public** task and one left **Private**
+(the starting choice); in the second, a private one only. The sidebar shows each list with its
+number of open tasks.
+15.2 [ ] As B: **People's tasks** → A: only the public task, under its list; the second list's
+name appears nowhere. DevTools → Network: the `/api/v1/users/{id}/tasks` answer has neither the
+private titles nor that name.
+15.3 [ ] As A: **···** → **Assign to…** → B on a task. B, with "Assigned to me" open, sees it
+arrive without reloading, "from A", and the badge counts 1. Again with Slax closed everywhere
+for B (notifications on; someone online gets no push): a notification "A assigned you a task",
+without the title; a tap opens "Assigned to me".
+15.4 [ ] As B: **New list**, then **···** → **Move to…** that list: it leaves "Assigned to me",
+the badge goes. A sees it under **Assigned by me**, "for B"; A ticks it, B sees it ticked.
+15.5 [ ] As A: assign B another task from the form (**Assign to**). As B: **···** → **Return to A**:
+it is back in A's "Assigned to me".
+15.6 [ ] As A: file a task B gave A into a list that also holds a task A wrote, then delete that
+list (the dialog says what happens): A's own task goes, B's is back in A's "Assigned to me".
+15.7 [ ] In Hebrew, both themes, on the phone too: the tasks area reads right to left, a Hebrew
+title with an English word inside (`לקנות כבל USB-C לטלפון`) reads in order, nothing scrolls
+sideways.
+15.8 [ ] After a 03:00 reset: a visitor's tasks and lists are gone; a task A gave a deleted
+visitor is back in A's "Assigned to me"; the sample lists of the seed people are back once.
+
 ## Sign-off
 
 | Part | Dev | Prod |
@@ -315,5 +353,6 @@ fix or its known-limitations entry.
 | 12. Accessibility, performance | | |
 | 13. Documentation | | |
 | 14. Family test | – | |
+| 15. Task lists | | |
 
 Then 2.5: tag `v1.0.0`.

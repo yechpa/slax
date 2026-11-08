@@ -57,7 +57,7 @@ flowchart LR
 |---|---|---|
 | SPA | Preact + TypeScript, plain modern CSS (logical properties, `@layer`, container queries), two themes, three languages; installable (manifest, a service worker that serves the public shell only) | built into `slax-web` |
 | nginx | Serves the SPA, sets the CSP and the other headers, routes `/api`, `/auth`, `/sanctum`, `/broadcasting` to PHP-FPM on the pod's loopback (never stored by the browser: `no-store`) and `/app` to Reverb; `/apps` (Reverb's HTTP API) is never public; `/sw.js` always revalidated | `ghcr.io/yechpa/slax-web` |
-| Laravel API | Accounts, channels, messages, threads, reactions, files, presence, moderation, audit log, channel authorization | `ghcr.io/yechpa/slax-app` |
+| Laravel API | Accounts, channels, messages, threads, reactions, files, presence, task lists, moderation, audit log, channel authorization | `ghcr.io/yechpa/slax-app` |
 | Reverb | Laravel's WebSocket server (Pusher protocol); presence channel for the workspace, private channel per conversation | `slax-app` |
 | Queue worker | Broadcasts (after the transaction commits), channel revocations, one worker so their order holds; Web Push notifications to the browsers' push services, on their own `push` queue drained after `default` | `slax-app` |
 | Scheduler | Demo reset (prod), audit pruning, orphan files, backup freshness check | `slax-app` |
@@ -150,6 +150,56 @@ on 50 sockets, with nothing lost or doubled ([load-test-results.md](load-test-re
   tag}` (names and a generic line, never the text) for the browser and signs it with the
   VAPID key (minishlink/web-push); 404/410 deletes the device. Without VAPID keys all of it
   is off. The service worker shows every push and opens the conversation on a tap.
+
+### Task lists
+
+Design: [the task lists spec](superpowers/specs/2026-11-08-task-lists-design.md). The rules
+live in `TaskService`; controllers validate and authorize (`TaskPolicy`, `TaskListPolicy`).
+
+| Table | Columns | Notes |
+|---|---|---|
+| `task_lists` | `id`, `workspace_id`, `user_id` (owner), `name` (60), `position`, timestamps | Personal: only the owner sees, renames, reorders or deletes it. 50 per person. |
+| `tasks` | `id`, `workspace_id`, `creator_id`, `assignee_id`, `list_id` (nullable), `title` (200 characters), `visibility` (`public` \| `private`, default `private`), `completed_at`, `position`, timestamps | `list_id` is always a list of the assignee (null: their "Assigned to me"); changing the assignee clears it. 500 per list, done ones included; 200 unfiled per person. |
+
+- **Who sees what.** A public task: every non-banned member of the workspace. A private
+  one: its creator and its assignee only (administrators included: no special access).
+  An invisible task or list answers **404**, never 403; a visible task the caller may not
+  change answers 403. The creator renames, changes the visibility, reassigns and deletes;
+  the creator and the assignee tick; the assignee moves it between their own lists or back
+  to their inbox, and gives back a task someone else wrote (it returns to the creator's
+  inbox). Deleting a list deletes the owner's own tasks in it and puts the others' back in
+  the owner's inbox.
+- **Endpoints** (`/api/v1`, bare JSON; writes `throttle:tasks`, 60 a minute per person;
+  a refusal by rule is 422 `{"error": "task_list_limit" | "task_limit" | "inbox_full" |
+  "invalid_assignee" | "invalid_list"}`):
+
+  | Method and path | What |
+  |---|---|
+  | `GET /task-lists` · `POST /task-lists` {name} | My lists (with `open_count`), a new one |
+  | `PATCH /task-lists/{id}` {name?, position?} · `DELETE /task-lists/{id}` | Rename or reorder, delete |
+  | `GET /task-lists/{id}/tasks` | The tasks of one of my lists |
+  | `GET /tasks/inbox` · `GET /tasks/by-me` | "Assigned to me" (no list; 200 at most), "Assigned by me" |
+  | `GET /users/{id}/tasks` | A colleague's page: `{user, lists: [{id, name, tasks}], unfiled}`, only what the caller may see (a list with nothing visible is left out; a banned account is 404) |
+  | `POST /tasks` {title, visibility, list_id?, assignee_id?} | For me: into the list given (the first one, "My tasks" created if none, when none is given); for someone else: their inbox |
+  | `PATCH /tasks/{id}` {title?, visibility?, assignee_id?} | Creator only; a new assignee gets it in their inbox |
+  | `PUT /tasks/{id}/completion` {completed} | Tick or untick |
+  | `POST /tasks/{id}/move` {list_id: id \| null} | Assignee only, to one of their lists or their inbox |
+  | `POST /tasks/{id}/return` · `DELETE /tasks/{id}` | Give back to the creator; delete (creator) |
+
+- **Realtime.** Each change dispatches `TaskChanged` after the commit, broadcast as
+  `task.changed` with `{"task_id": id}` only, on the private `App.Models.User.{id}` channel of
+  the creator, the assignee and, on a handover, the previous assignee. The client refetches
+  its lists and the page on screen over REST (debounced), where the authorization applies;
+  the channel list's one-minute poll refreshes tasks too, for a missed event.
+- **Push.** Assigning a task to someone else (at creation, by reassignment, or by giving it
+  back) sends a push of type `task` to the new assignee, unless they are banned or online:
+  `{type: "task", title: "<sender> assigned you a task", body: "New task", url: "/tasks/inbox",
+  tag: "tasks"}`, in the device's language. Never the title.
+- **Demo reset.** `slax:demo-reset` deletes every task a demo account created (even one held
+  by a member) and every list a demo account owns (the tasks others had put in them become
+  unfiled); before deleting an account, the tasks others had given it go back to their
+  creator's inbox. Bulk and silent: no event, no push. `DemoSeeder` then puts back the
+  sample lists and tasks (public and private) of the seed people, without duplicates.
 
 ## 3. Sign-in
 

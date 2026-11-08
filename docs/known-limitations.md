@@ -366,6 +366,36 @@ receives the channel's events until it disconnects.
   that they can explain the lock; a moderator who is not a member reads a public channel but posts nowhere.
 
 
+## Task lists
+
+**Where:** `backend/app/Services/TaskService.php`, `backend/app/Policies/Task*Policy.php`,
+`backend/app/Http/Controllers/Task*Controller.php`, `UserTaskController.php`, `frontend/src/components/tasks/`,
+`frontend/src/store/tasks.ts`, `e2e/tests/tasks.spec.ts`; design in
+`docs/superpowers/specs/2026-11-08-task-lists-design.md`.
+
+- **Deliberately not built:** due dates, reminders, recurring tasks, subtasks, notes or comments on a task, labels,
+  search, several assignees, a list shared by several people, drag and drop, making a task from a message. Tasks
+  cannot be reordered (each one goes last when created or moved); lists can be reordered through the API
+  (`PATCH /task-lists/{id}` with `position`) but the app has no control for it yet.
+- **A list's name is not private.** A list is personal, but its name shows on its owner's page to anyone who can see
+  a task in it: everyone as soon as it holds one public task, and the author of a private task filed in it. Name
+  lists accordingly; a list holding only tasks the viewer cannot see does not appear at all.
+- **Administrators get no special access.** They cannot see private tasks (by decision), and there is no moderation
+  of tasks either: an offensive public task can be removed only by its author (or by banning the author, which hides
+  their page but deletes nothing; the demo reset deletes a visitor's tasks at night).
+- **Caps.** 50 lists per person, 500 tasks per list (the done ones count), 200 unfiled tasks in "Assigned to me":
+  assigning or giving back a task to someone whose inbox is full is refused (`inbox_full`), they must file some
+  first. `GET /tasks/inbox` returns 200 tasks at most; "Assigned by me" and a colleague's page are not paginated
+  (a colleague's page is bounded by their caps, "Assigned by me" by nothing but everyone's inbox and list caps). The demo reset gives tasks back to their author without checking the cap.
+- **Colleagues' pages are refreshed, not pushed.** `task.changed` goes to a task's creator and assignee only, so a
+  third person looking at someone's page sees changes at the next one-minute refresh, or when the tab comes back.
+- **Banned accounts.** A ban changes no task: their page answers 404 and they are never offered as an assignee nor
+  pushed, but the tasks they wrote or hold stay as they were (and come back if the ban is lifted). A task assigned
+  to a banned person stays with them until its author reassigns or deletes it.
+- **Hebrew strings are a proposal.** Every `tasks.*` string in `frontend/src/i18n/he.json`, the task lines of
+  `backend/lang/he/push.php` and `backend/lang/he/tasks.php`, and the Hebrew part of the family guide's "Tasks"
+  were written without a native speaker: review them before relying on them (as recette 4.6 asks for the rest).
+
 ## Deployment (Helm chart, images)
 
 **Where:** `deploy/helm/slax/`, `docker/app/`, `docker/web/`, `.github/workflows/images.yml`,

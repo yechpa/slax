@@ -26,6 +26,11 @@ address is the target, not a promise.
 - Files by drag and drop (10 MB each, 100 MB per account): image and PDF previews,
   checked by a separate scanner before anything is stored.
 - Presence (online, away, offline) and "is typing".
+- Task lists: several named lists per person, each task public or private (private by
+  default), a task assigned to a colleague arriving in their "Assigned to me" to be filed
+  into one of their lists or given back, "Assigned by me" for what one handed out, and a
+  colleague's page showing what one may see of their tasks. Live, and pushed on assignment
+  (never the title).
 - English, Hebrew and French, chosen per person; right to left done with CSS logical
   properties and per-message bidi isolation.
 - Sign-in with Google only (no password anywhere), behind Cloudflare Turnstile.
