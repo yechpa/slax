@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\PresenceService;
 use App\Services\StoredFiles;
+use App\Services\TaskService;
 use App\Services\UserSessions;
 use Database\Seeders\DefaultWorkspaceSeeder;
 use Database\Seeders\DemoSeeder;
@@ -30,7 +31,9 @@ use Throwable;
  * administrator (flag or ADMIN_EMAILS address), a `member` or a `seed` account.
  *
  *  1. Demo content goes: every message and reaction of a demo account, the channels demo
- *     accounts created, and the conversations a demo account is part of.
+ *     accounts created, the conversations a demo account is part of, the task lists demo
+ *     accounts own and the tasks they created (a `member`'s task that sat in a demo list is
+ *     unfiled; one given to a deleted account goes back to its author, TaskService).
  *  2. Demo accounts without activity (last seen, or created) for 7 days are deleted;
  *     active ones are kept, with their memberships, and so are banned ones (deleting them
  *     would undo the ban: the person could sign up again).
@@ -54,6 +57,7 @@ class DemoReset extends Command
         PresenceService $presence,
         AuditLogger $audit,
         AdminNotifier $notifier,
+        TaskService $tasks,
     ): int {
         if (! config('slax.demo.reset_enabled') && ! $this->option('force')) {
             $this->error('The demo reset is off here: it deletes visitors\' accounts and content. '
@@ -88,7 +92,7 @@ class DemoReset extends Command
         $keptCreators = Channel::whereKey($channelIds->diff($deletableChannelIds))->whereNotNull('created_by')->pluck('created_by');
         $deletableUserIds = $expiredIds->diff($failed->pluck('user_id'))->diff($keptCreators)->values();
 
-        [$counts, $deletedUsers] = DB::transaction(function () use ($demoIds, $messageIds, $deletableChannelIds, $deletableUserIds) {
+        [$counts, $deletedUsers] = DB::transaction(function () use ($tasks, $demoIds, $messageIds, $deletableChannelIds, $deletableUserIds) {
             // Belt and braces: the same guards as above, again at the last moment, under lock.
             $users = User::whereKey($deletableUserIds)
                 ->where('account_type', User::ACCOUNT_DEMO)
@@ -97,10 +101,16 @@ class DemoReset extends Command
                 ->lockForUpdate()
                 ->get();
 
+            // Tasks and lists of demo accounts first, then the tasks others gave the accounts about to go back to their author:
+            // the foreign key would delete them with the account, and this delete fires no model event.
+            $taskCounts = $tasks->wipeDemoContent($demoIds);
+            $tasks->releaseTasksOf(collect($users->modelKeys()));
+
             return [[
                 'deleted_messages' => Message::whereKey($messageIds)->delete(),
                 'deleted_reactions' => Reaction::whereIn('user_id', $demoIds)->delete(),
                 'deleted_channels' => Channel::whereKey($deletableChannelIds)->delete(),
+                ...$taskCounts,
                 'deleted_users' => User::whereKey($users->modelKeys())->delete(),
             ], $users];
         });

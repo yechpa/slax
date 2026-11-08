@@ -11,6 +11,7 @@ use App\Models\Workspace;
 use App\Services\Push\PushNotifier;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -258,6 +259,34 @@ class TaskService
 
             return $task;
         });
+    }
+
+    /**
+     * The demo reset's share of the content: the tasks demo accounts created go (even held by a `member` or a `seed` account:
+     * visitor content), then the lists they own (the foreign key unfiles the tasks others put in them: they stay with their
+     * assignee, in the inbox). Bulk and silent: no announcement, no push (the next load shows it). Call it inside the reset's transaction.
+     *
+     * @param  Collection<int, int>  $demoIds
+     * @return array{deleted_tasks: int, deleted_task_lists: int}
+     */
+    public function wipeDemoContent(Collection $demoIds): array
+    {
+        $deletedTasks = Task::whereIn('creator_id', $demoIds)->delete();
+
+        return ['deleted_tasks' => $deletedTasks, 'deleted_task_lists' => TaskList::whereIn('user_id', $demoIds)->delete()];
+    }
+
+    /**
+     * Gives back to their author the tasks others gave the accounts about to be deleted: `assignee_id = creator_id`, in the inbox.
+     * An account deleted through the query builder fires no model event, so the reset calls this itself, before the delete
+     * (the foreign key would otherwise take the tasks with the account). Bulk and silent, like wipeDemoContent.
+     *
+     * @param  Collection<int, int>  $userIds
+     */
+    public function releaseTasksOf(Collection $userIds): void
+    {
+        Task::whereIn('assignee_id', $userIds)->whereColumn('creator_id', '!=', 'assignee_id')
+            ->update(['assignee_id' => DB::raw('creator_id'), 'list_id' => null]);
     }
 
     /**
