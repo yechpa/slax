@@ -2,9 +2,11 @@
  * The tasks of one of my lists, of my inbox (given to me, not filed yet), or the ones I gave
  * to others. Fetched on opening and again whenever `tasksVersion` changes (a live event, the
  * minute's poll, our own writes); a failed refetch keeps what is shown. Open tasks first, the
- * completed ones under a "Done (n)" section that folds.
+ * completed ones under a "Done (n)" section that folds. A ticked row moves to the other
+ * section: focus goes to the next row of the section it left (else the previous one), else to
+ * the "Done" title (ticking the last open task) or to the task itself (unticking the last done).
  */
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { isApiError } from '../../api/client.ts'
 import { api } from '../../api/endpoints.ts'
 import type { Task } from '../../api/types.ts'
@@ -34,6 +36,9 @@ export function TaskListView({ view }: { view: OwnTasksView }) {
   const [failure, setFailure] = useState<null | 'error' | 'not-found'>(null)
   const [attempt, setAttempt] = useState(0)
   const shown = useRef(false)
+  const pane = useRef<HTMLDivElement>(null)
+  /** Where focus goes once a tick has re-rendered the rows. */
+  const focusNext = useRef<{ task: number } | 'done' | null>(null)
   const version = tasksVersion.value
 
   useEffect(() => {
@@ -60,8 +65,31 @@ export function TaskListView({ view }: { view: OwnTasksView }) {
   const change = (next: Task) => setTasks((list) => list && list.map((item) => (item.id === next.id ? next : item)))
   const remove = (id: number) => setTasks((list) => list && list.filter((item) => item.id !== id))
   const add = (created: Task) => {
-    if (view.kind === 'list' && created.list_id === view.id) setTasks((list) => (list ? [...list, created] : list))
+    // A refetch (a live event) may have brought it already.
+    if (view.kind === 'list' && created.list_id === view.id) {
+      setTasks((list) => (list && !list.some((item) => item.id === created.id) ? [...list, created] : list))
+    }
   }
+  const ticking = (id: number) => {
+    const ticked = tasks?.find((item) => item.id === id)
+    if (!tasks || !ticked) return
+    const section = tasks.filter((item) => item.completed === ticked.completed)
+    const at = section.indexOf(ticked)
+    const neighbour = section[at + 1] ?? section[at - 1]
+    if (neighbour) focusNext.current = { task: neighbour.id }
+    else focusNext.current = ticked.completed ? { task: id } : 'done'
+  }
+
+  useLayoutEffect(() => {
+    const target = focusNext.current
+    if (target === null) return
+    focusNext.current = null
+    const el =
+      target === 'done'
+        ? pane.current?.querySelector<HTMLElement>('.tasks__done-title')
+        : pane.current?.querySelector<HTMLElement>(`[data-task-id="${target.task}"] .task-row__check`)
+    el?.focus()
+  }, [tasks])
 
   let content
   if (failure === 'not-found') content = <EmptyState>{t('tasks.notFound')}</EmptyState>
@@ -91,7 +119,7 @@ export function TaskListView({ view }: { view: OwnTasksView }) {
   else {
     const open = tasks.filter((item) => !item.completed)
     const done = tasks.filter((item) => item.completed)
-    const row = (item: Task) => <TaskRow key={item.id} task={item} onChange={change} onRemove={remove} />
+    const row = (item: Task) => <TaskRow key={item.id} task={item} onChange={change} onRemove={remove} onTick={ticking} />
     content = (
       <>
         <ul class="tasks__list tasks__open" aria-label={t('tasks.open')}>
@@ -108,7 +136,7 @@ export function TaskListView({ view }: { view: OwnTasksView }) {
   }
 
   return (
-    <div class="tasks" id="messages" tabIndex={-1}>
+    <div class="tasks" id="messages" tabIndex={-1} ref={pane}>
       {view.kind === 'list' && failure !== 'not-found' && <NewTaskForm listId={view.id} onCreated={add} />}
       {content}
     </div>

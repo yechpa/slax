@@ -74,6 +74,52 @@ describe('task row', () => {
     expect(toasts.value.map((t) => [t.tone, t.text])).toEqual([['error', 'The task could not be updated. Try again.']])
   })
 
+  it('focus stays in the list when ticking: the next row, the previous one, then "Done"', async () => {
+    const server = fakeFetch({
+      'GET /api/v1/tasks/inbox': () => ({ body: [1, 2, 3].map((id) => task(id, { title: `t${id}`, creator: DANA, list_id: null })) }),
+      'GET /api/v1/task-lists': () => ({ body: [] }),
+      // Never answered: the optimistic rows stay as they are, and no refetch interferes.
+      'PUT /api/v1/tasks/1/completion': () => new Promise(() => undefined),
+      'PUT /api/v1/tasks/2/completion': () => new Promise(() => undefined),
+      'PUT /api/v1/tasks/3/completion': () => new Promise(() => undefined),
+    })
+    vi.stubGlobal('fetch', server.fetch)
+    render(<TaskListView view={{ kind: 'inbox' }} />, host)
+    await settle()
+
+    // The first of several: the next one.
+    box('t1').focus()
+    box('t1').click()
+    await settle(2)
+    expect(document.activeElement).toBe(box('t2'))
+    // The last of the open ones: the one before it.
+    box('t3').click()
+    await settle(2)
+    expect(document.activeElement).toBe(box('t2'))
+    // No open task left: the "Done" title.
+    box('t2').click()
+    await settle(2)
+    expect(document.activeElement).toBe(host.querySelector('.tasks__done-title'))
+  })
+
+  it('unticking the last done task keeps focus on it', async () => {
+    const done = { completed: true, completed_at: '2026-11-08T09:00:00.000Z' }
+    vi.stubGlobal(
+      'fetch',
+      fakeFetch({
+        'GET /api/v1/tasks/inbox': () => ({ body: [task(1, { title: 'open', list_id: null }), task(2, { title: 'finished', list_id: null, ...done })] }),
+        'GET /api/v1/task-lists': () => ({ body: [] }),
+        'PUT /api/v1/tasks/2/completion': () => new Promise(() => undefined),
+      }).fetch,
+    )
+    render(<TaskListView view={{ kind: 'inbox' }} />, host)
+    await settle()
+    box('finished').click()
+    await settle(2)
+    expect(box('finished').checked).toBe(false)
+    expect(document.activeElement).toBe(box('finished'))
+  })
+
   it('a Hebrew title renders with dir=auto', () => {
     row(task(1, { title: 'לקנות חלב' }))
     const title = host.querySelector('.task-row__title')!

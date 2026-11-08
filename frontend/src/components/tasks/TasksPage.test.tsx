@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { Task } from '../../api/types.ts'
 import type { Locale } from '../../i18n/index.ts'
 import { SEARCH_DELAY_MS } from '../../lib/search.ts'
+import { tasksVersion } from '../../store/tasks.ts'
 import { resetUi } from '../../store/ui.ts'
 import type { FakeHandler } from '../../test/fakes.ts'
 import { DANA, NOAM, channel, task, taskList } from '../../test/fixtures.ts'
@@ -81,6 +82,27 @@ describe('tasks page', () => {
     expect(posted).toEqual([{ title: 'buy bread', visibility: 'private', list_id: 1 }])
     expect(titles()).toEqual(['water the plants', 'buy bread'])
     expect(titleField().value).toBe('')
+  })
+
+  it('a task already brought by a refetch is not listed twice', async () => {
+    const { routes, posted } = server()
+    const create = routes['POST /api/v1/tasks']
+    routes['POST /api/v1/tasks'] = async (request) => {
+      const reply = await create(request)
+      // A live event lands before our own answer: the refetch already has the new task.
+      tasksVersion.value += 1
+      for (let i = 0; i < 50 && !titles().includes('once only'); i += 1) await settle(1)
+      expect(titles()).toEqual(['once only'])
+      return reply
+    }
+    // Our own refresh after creating never comes back: what is shown is what `add` made of it.
+    let inboxCalls = 0
+    routes['GET /api/v1/tasks/inbox'] = () => (inboxCalls++ === 0 ? { body: [] } : new Promise(() => undefined))
+    await open(routes)
+    typeInto(titleField(), 'once only')
+    await submit()
+    expect(posted).toHaveLength(1)
+    expect(titles()).toEqual(['once only'])
   })
 
   it('choosing public sends public', async () => {

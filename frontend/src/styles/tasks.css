@@ -212,14 +212,20 @@
     color: var(--color-accent);
   }
 
-  /* A finger needs 44 px: on any touch screen, and on a phone-width shell. */
+  /* A finger needs 44 px: on any touch screen, and on a phone-width shell. Every button and
+     field of the pane: the form, the inline rename and delete confirmation, Retry. */
   @media (pointer: coarse) {
     .task-row__tick,
     .task-row__more,
     .tasks__done-title,
-    .new-task .btn {
-      min-inline-size: 2.75rem;
+    .tasks .btn,
+    .tasks .input {
       min-block-size: 2.75rem;
+    }
+
+    .task-row__tick,
+    .task-row__more {
+      min-inline-size: 2.75rem;
     }
   }
 
@@ -227,8 +233,8 @@
     .shell--app .task-row__tick,
     .shell--app .task-row__more,
     .shell--app .tasks__done-title,
-    .shell--app .new-task .btn,
-    .shell--app .new-task .input {
+    .shell--app .tasks .btn,
+    .shell--app .tasks .input {
       min-block-size: 2.75rem;
     }
 

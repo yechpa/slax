@@ -20,11 +20,13 @@ type Props = {
   onChange: (task: Task) => void
   /** It leaves this view (deleted, given back). */
   onRemove: (id: number) => void
+  /** About to be ticked or unticked (its row moves to the other section): where focus goes next. */
+  onTick?: (id: number) => void
 }
 
 const TITLE_MAX = 200
 
-export function TaskRow({ task, onChange, onRemove }: Props) {
+export function TaskRow({ task, onChange, onRemove, onTick }: Props) {
   const meId = me.value?.id ?? null
   const rights = taskRights(task, meId)
   const [mode, setMode] = useState<'view' | 'rename' | 'confirm'>('view')
@@ -33,6 +35,7 @@ export function TaskRow({ task, onChange, onRemove }: Props) {
 
   const tick = async (completed: boolean) => {
     const before = task
+    onTick?.(task.id)
     onChange({ ...task, completed, completed_at: completed ? new Date().toISOString() : null })
     try {
       onChange(await api.tasks.setCompleted(task.id, completed))
@@ -79,7 +82,7 @@ export function TaskRow({ task, onChange, onRemove }: Props) {
   else if (task.assignee.id !== meId) person = t('tasks.for', { name: task.assignee.name })
 
   return (
-    <li class={task.completed ? 'task-row task-row--done' : 'task-row'}>
+    <li class={task.completed ? 'task-row task-row--done' : 'task-row'} data-task-id={task.id}>
       <label class="task-row__tick">
         <input
           type="checkbox"
