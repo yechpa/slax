@@ -65,7 +65,9 @@ flowchart LR
 | PostgreSQL, Redis | Data; sessions, cache, queue, presence | upstream, pinned by digest |
 | Backup, restore check | Daily `pg_dump` to S3, weekly restore into a throwaway server | `ghcr.io/yechpa/slax-backup` |
 | Uptime monitor | Every minute, outside Laravel: health, Reverb, PostgreSQL, Redis, the public URL, disks | `slax-backup` |
-| Outside probe | Every 5 minutes from GitHub's runners, outside both clusters: `/api/v1/health` of prod and (through the tailnet) dev, so a dead or switched-off node is reported | `.github/workflows/external-probe.yml` |
+| Heartbeat | After every fully healthy monitor run, a ping to an outside dead man's switch (healthchecks.io): its silence reports a dead or switched-off node within minutes | `slax-backup` (`MONITOR_HEARTBEAT_URL`) |
+| Outside probe | Scheduled every 5 minutes (GitHub runs it every few hours) from GitHub's runners: `/api/v1/health` of prod and (through the tailnet) dev; a slow safety net | `.github/workflows/external-probe.yml` |
+
 
 Every image is built for amd64 and arm64 by `.github/workflows/images.yml` from a commit,
 tagged with its SHA, scanned by Trivy, and deployed by that tag only.

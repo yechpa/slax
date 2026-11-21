@@ -247,6 +247,8 @@ backup:
 # the slax-backup image; templates/monitor-cronjob.yaml): the web pod's health, Reverb,
 # PostgreSQL, Redis and, optionally, the public URL; the node's disks. Telegram alerts
 # "[<envLabel>] ..." with the Secret's TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID (none: logged only).
+# The Secret's MONITOR_HEARTBEAT_URL (optional) is pinged after every fully healthy run (see
+# docs/runbook.md 4.10, "Heartbeat").
 monitor:
   enabled: true
   schedule: "* * * * *"

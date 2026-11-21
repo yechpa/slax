@@ -20,6 +20,8 @@
 # "[Prod] ..." / "[Dev] ...": DOWN after monitor.failThreshold failures in a row, RECOVERED
 # once, DISK above monitor.disk.alertPercent (reminded every realertHours, all clear below
 # recoverPercent). It needs nothing from Laravel, so it still speaks when the app cannot.
+# With the Secret's MONITOR_HEARTBEAT_URL it also pings that URL after every fully healthy run,
+# so an outside service can tell when this node (the monitor included) went silent.
 #
 # Least privilege: no Kubernetes API access at all (no token, no Role). Its state (failure
 # counts, what was alerted) lives in a file on its own small volume, which also measures the
@@ -114,6 +116,9 @@ spec:
                   value: /tmp
                 {{- include "slax.secretRef" (dict "ctx" . "key" "TELEGRAM_BOT_TOKEN" "optional" true) | nindent 16 }}
                 {{- include "slax.secretRef" (dict "ctx" . "key" "TELEGRAM_CHAT_ID" "optional" true) | nindent 16 }}
+                # Optional dead man's switch: after a fully healthy run, one GET of this URL (an
+                # outside service alerts when the pings stop: a dead node sends nothing itself).
+                {{- include "slax.secretRef" (dict "ctx" . "key" "MONITOR_HEARTBEAT_URL" "optional" true) | nindent 16 }}
               securityContext:
                 {{- include "slax.containerSecurityContext" 70 | nindent 16 }}
               resources:

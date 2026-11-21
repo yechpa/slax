@@ -17,6 +17,12 @@
 #     one "back to normal" below MONITOR_DISK_RECOVER_PERCENT (75) (hysteresis: nothing
 #     between 75 and 80).
 #
+#   - heartbeat (MONITOR_HEARTBEAT_URL, optional): when every check of the run passed, one GET
+#     of that URL (a dead man's switch: an outside service such as healthchecks.io alerts when
+#     the pings stop). It is how a dead, switched-off or unplugged node gets noticed, since
+#     nothing running here can say so. Nothing is sent when a check fails (the service then
+#     raises its alarm after its own grace period), and a failed or late ping only warns.
+#
 # Alerts ("[Prod] ..." / "[Dev] ...", lib.sh) carry only the check's name, the HTTP status or
 # a failure class, counts, percentages and a UTC time: never a URL, host, secret or user data.
 # The bot token and chat id come from the environment (the Secret's TELEGRAM_BOT_TOKEN and
@@ -40,6 +46,10 @@
 # MONITOR_BUDGET_SECONDS under the Job's activeDeadlineSeconds.
 #
 # Environment:
+#   MONITOR_HEARTBEAT_URL          https URL pinged after a fully healthy run (a secret: whoever
+#                                  has it can fake the heartbeat; never logged or put in a message)
+#   MONITOR_HEARTBEAT_TIMEOUT      5 (seconds)
+#   MONITOR_HEARTBEAT_ALLOW_HTTP   tests only: 1 accepts an http:// URL
 #   MONITOR_CHECKS                 required: "name=URL ..." (name: [a-z][a-z0-9-]*)
 #   MONITOR_DISKS                  "name=path ..." (none: no disk watch)
 #   MONITOR_STATE_FILE             /state/uptime.state
@@ -70,6 +80,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MONITOR_TIMEOUT:=10}"
 : "${MONITOR_TELEGRAM_TIMEOUT:=5}"
 : "${MONITOR_BUDGET_SECONDS:=35}"
+: "${MONITOR_HEARTBEAT_URL:=}"
+: "${MONITOR_HEARTBEAT_TIMEOUT:=5}"
+: "${MONITOR_HEARTBEAT_ALLOW_HTTP:=}"
 
 # The state file's fixed size: room for ~40 entries; a bigger state is written whole.
 STATE_SIZE=2048
@@ -84,7 +97,7 @@ config_error() {
 is_count() { [[ "$1" =~ ^[0-9]{1,12}$ ]]; }
 
 for setting in MONITOR_FAIL_THRESHOLD MONITOR_DISK_ALERT_PERCENT MONITOR_DISK_RECOVER_PERCENT MONITOR_DISK_REALERT_SECONDS \
-    MONITOR_TIMEOUT MONITOR_TELEGRAM_TIMEOUT MONITOR_BUDGET_SECONDS; do
+    MONITOR_TIMEOUT MONITOR_TELEGRAM_TIMEOUT MONITOR_BUDGET_SECONDS MONITOR_HEARTBEAT_TIMEOUT; do
     is_count "${!setting}" || config_error "$setting must be a whole number"
 done
 # Room for the probes (plus a few seconds for the disks and the state) and one alert.
@@ -96,6 +109,18 @@ TELEGRAM_TIMEOUT="$MONITOR_TELEGRAM_TIMEOUT"
 [ "$MONITOR_DISK_RECOVER_PERCENT" -lt "$MONITOR_DISK_ALERT_PERCENT" ] ||
     config_error "MONITOR_DISK_RECOVER_PERCENT must be below MONITOR_DISK_ALERT_PERCENT"
 [ -n "$MONITOR_CHECKS" ] || config_error "MONITOR_CHECKS is empty"
+# The URL goes to curl in a config on stdin (like the Telegram token), so it must be safe inside
+# that config's quotes. The value is never printed.
+if [ -n "$MONITOR_HEARTBEAT_URL" ]; then
+    heartbeat_proto='=https'
+    heartbeat_pattern='^https://[A-Za-z0-9._~:/?&=%+-]+$'
+    if [ "$MONITOR_HEARTBEAT_ALLOW_HTTP" = 1 ]; then
+        heartbeat_proto='=http,https'
+        heartbeat_pattern='^https?://[A-Za-z0-9._~:/?&=%+-]+$'
+    fi
+    [[ "$MONITOR_HEARTBEAT_URL" =~ $heartbeat_pattern ]] ||
+        config_error "MONITOR_HEARTBEAT_URL must be an https URL of plain URL characters"
+fi
 now="${MONITOR_NOW:-$(date +%s)}"
 is_count "$now" || config_error "MONITOR_NOW must be epoch seconds"
 
@@ -214,6 +239,8 @@ probe() {
 }
 
 summary=()
+# 1 until a check fails in this run: the heartbeat goes out only for a fully healthy run.
+healthy=1
 
 # probe_all: every check at once, each in the background writing "<ok> <detail>" to a file
 # of its own; a watchdog stops any that outlives MONITOR_TIMEOUT + 2 s (then: "timeout").
@@ -275,6 +302,7 @@ check() {
         if [ "$down" -eq 0 ]; then fails=0 since=0; fi
     else
         summary+=("$name=FAIL($detail)")
+        healthy=0
         fails=$((fails + 1))
         [ "$fails" -gt 1 ] && [ "$since" -ne 0 ] || since="$now"
         if [ "$fails" -ge "$MONITOR_FAIL_THRESHOLD" ] && [ "$down" -eq 0 ]; then
@@ -287,6 +315,30 @@ check() {
     next["$k.down"]="$down"
     next["$k.since"]="$since"
     [ "$sent" -eq 0 ] || persist
+}
+
+# heartbeat: the dead man's switch ping (see the header). Never fails the run.
+heartbeat() {
+    local code=0
+    [ -n "$MONITOR_HEARTBEAT_URL" ] || return 0
+    if [ "$healthy" -ne 1 ]; then
+        summary+=("heartbeat=withheld")
+        return 0
+    fi
+    if [ $((SECONDS + MONITOR_HEARTBEAT_TIMEOUT)) -gt "$MONITOR_BUDGET_SECONDS" ]; then
+        summary+=("heartbeat=skipped")
+        log "WARNING: no time left to send the heartbeat in this run: skipped."
+        return 0
+    fi
+    printf 'url = "%s"\n' "$MONITOR_HEARTBEAT_URL" |
+        curl --silent --fail --output /dev/null --config - --proto "$heartbeat_proto" \
+            --connect-timeout 5 --max-time "$MONITOR_HEARTBEAT_TIMEOUT" --user-agent slax-uptime || code=$?
+    if [ "$code" -eq 0 ]; then
+        summary+=("heartbeat=sent")
+    else
+        summary+=("heartbeat=FAILED")
+        log "WARNING: the heartbeat could not be sent (curl exit $code)."
+    fi
 }
 
 # disk NAME PATH
@@ -387,6 +439,8 @@ while IFS= read -r entry; do
     [ -n "$entry" ] || continue
     disk "${entry%%=*}" "${entry#*=}"
 done <<< "$disks"
+
+heartbeat
 
 persist
 finished=1

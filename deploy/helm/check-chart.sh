@@ -159,9 +159,9 @@ for env in dev prod; do
     expect "$env: the uptime monitor keeps one finished Job of each kind" \
         "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | (.spec.successfulJobsHistoryLimit | tostring) + "/" + (.spec.failedJobsHistoryLimit | tostring)' "$file")" \
         "1/1"
-    expect "$env: the uptime monitor gets the alert keys only" \
+    expect "$env: the uptime monitor gets the alert keys and its heartbeat URL only" \
         "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | [.spec.jobTemplate.spec.template.spec.containers[0].env[].valueFrom.secretKeyRef.key | select(. != null)] | sort | join(",")' "$file")" \
-        "TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID"
+        "MONITOR_HEARTBEAT_URL,TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID"
     expect "$env: the uptime monitor mounts its own volume and an emptyDir, nothing else" \
         "$(yq ea -N 'select(.kind == "CronJob" and .metadata.name == "slax-monitor") | [.spec.jobTemplate.spec.template.spec.volumes[] | .name + ":" + ([keys[] | select(. != "name")] | join("+")) + ":" + (.persistentVolumeClaim.claimName // "-")] | join(",")' "$file")" \
         "state:persistentVolumeClaim:slax-monitor,tmp:emptyDir:-"

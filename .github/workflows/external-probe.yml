@@ -3,7 +3,7 @@
 # Why: the uptime monitor (deploy/monitoring/uptime.sh) is a CronJob inside each cluster, so a
 # dead, switched-off or unplugged machine sends nothing, and silence looked like "all is well"
 # (slax-dev was off for two days before anyone noticed). This workflow asks the sites for
-# /api/v1/health every 5 minutes and tells the administrators' Telegram chat, with the same
+# /api/v1/health and tells the administrators' Telegram chat, with the same
 # wording as the monitor:
 #   [Prod] DOWN: external failed 2 checks in a row (timeout), since 14:02 UTC.
 #   [Prod] RECOVERED: external is answering again (HTTP 200) after about 12 min down ...
@@ -16,8 +16,9 @@
 # slax-dev on 443: no new secret, no policy change (deploy/dev/BOOTSTRAP.md §9 holds the secrets,
 # in the `dev` environment, which only jobs running from main can read).
 #
-# Limits (docs/known-limitations.md): GitHub starts a scheduled run a few minutes late, and
-# disables the schedule of a repository left without any activity for 60 days; a job that cannot
+# Limits (docs/known-limitations.md): the schedule says every 5 minutes, but GitHub runs it only
+# every 5 to 9 hours (observed in November 2026): a slow safety net. The timely alarm for a dead
+# node is the heartbeat (docs/runbook.md 4.10). GitHub also disables the schedule of a repository left without any activity for 60 days; a job that cannot
 # even start (the tailnet join fails) shows as a red run and GitHub's own failure e-mail, not as a
 # Telegram alert. Pause it while slax-dev is switched off on purpose:
 #   gh workflow disable external-probe.yml --repo yechpa/slax   (enable, afterwards)
