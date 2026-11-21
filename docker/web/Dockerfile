@@ -12,7 +12,7 @@
 # Runs as nginx's unprivileged user on a read-only root filesystem: only /tmp is written.
 
 ARG NODE_IMAGE=node:24.22.2-alpine3.24@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
-ARG NGINX_IMAGE=nginx:1.30.6-alpine3.24-slim@sha256:dede8895648b461178c3bc604f7eed4423efe5220b2c4d839f5eb3d34ac3f8f7
+ARG NGINX_IMAGE=nginx:1.30.7-alpine3.24-slim@sha256:8c950211a641ec5b23f265450517001f6bcca533666120ebe36cb4cff3d00a55
 
 # The production bundle (`npm run build`: type check, then `vite build` in production mode).
 # Never the end-to-end build: vite.config.ts refuses VITE_E2E outside `--mode e2e`. The
