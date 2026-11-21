@@ -34,6 +34,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         with open(f"{root}/status", encoding="utf-8") as ctl:
             code = int(ctl.read().strip() or "200")
+        with open(f"{root}/gets", "a", encoding="utf-8") as gets:
+            gets.write(self.path + "\n")
         body = b'{"status":"ok"}'
         self.send_response(code)
         self.send_header("Content-Length", str(len(body)))
@@ -141,6 +143,34 @@ echo 503 > "$dir/status"
 run Dev "$url"
 check "fail, pass, fail: the count restarted, still nothing" test "$(alerts)" = 0
 
+echo "== heartbeat (uptime.sh's dead man's switch): only a fully healthy run pings"
+reset
+hb_secret="hb$(openssl rand -hex 8)"
+hb_url="http://127.0.0.1:$port/ping/$hb_secret"
+pings() { grep -c -F -- "/ping/$hb_secret" "$dir/gets" 2> /dev/null || true; }
+: > "$dir/gets"
+echo 200 > "$dir/status"
+MONITOR_HEARTBEAT_URL="$hb_url" MONITOR_HEARTBEAT_ALLOW_HTTP=1 run Dev "$url"
+check "a healthy run pings once and says so" test "$status $(pings)" = "0 1"
+check "... the summary says heartbeat=sent, without the URL" has "$out" 'uptime: external=ok heartbeat=sent'
+echo 503 > "$dir/status"
+MONITOR_HEARTBEAT_URL="$hb_url" MONITOR_HEARTBEAT_ALLOW_HTTP=1 run Dev "$url"
+check "a failing check withholds the ping" test "$status $(pings)" = "0 1"
+check "... and the summary says so" has "$out" 'heartbeat=withheld'
+echo 200 > "$dir/status"
+MONITOR_HEARTBEAT_URL="$hb_url" MONITOR_HEARTBEAT_ALLOW_HTTP=1 run Dev "$url"
+check "healthy again: the pings resume" test "$(pings)" = 2
+MONITOR_HEARTBEAT_URL="http://127.0.0.1:1/ping/$hb_secret" MONITOR_HEARTBEAT_ALLOW_HTTP=1 run Dev "$url"
+check "an unreachable heartbeat URL only warns (exit 0)" test "$status" = 0
+check "... heartbeat=FAILED and curl's exit code, no URL" has "$out" 'WARNING: the heartbeat could not be sent \(curl exit [0-9]+\)\.'
+check "... in the summary" has "$out" 'heartbeat=FAILED'
+run Dev "$url"
+check "without MONITOR_HEARTBEAT_URL there is no heartbeat at all" test "$(pings) $(printf '%s' "$out" | grep -c heartbeat || true)" = "2 0"
+MONITOR_HEARTBEAT_URL="$hb_url" run Dev "$url"
+check "a plain http heartbeat URL is refused (exit 2)" test "$status" = 2
+MONITOR_HEARTBEAT_URL='https://example.test/ping/a"b' run Dev "$url"
+check "a URL with a quote is refused (exit 2)" test "$status" = 2
+
 echo "== invocation"
 out="$("$probe" Staging "$url" 2>&1)" && status=0 || status=$?
 check "an unknown label exits 2" test "$status" = 2
@@ -152,7 +182,7 @@ check "no argument exits 2" test "$status" = 2
 echo "== no secret, no URL in the output or in a message"
 reset
 check "messages were recorded for the leak check" test -s "$dir/all-texts"
-for secret in "$bot_token" "${bot_token#*:}" "$chat_id" "127.0.0.1:$port" "/api/v1/health"; do
+for secret in "$bot_token" "${bot_token#*:}" "$chat_id" "127.0.0.1:$port" "/api/v1/health" "$hb_secret"; do
     check "nothing says '${secret:0:6}...'" bash -c '! grep -qF -- "$1" "$2" "$3"' _ "$secret" "$dir/all-output" "$dir/all-texts"
 done
 

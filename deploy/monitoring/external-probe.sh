@@ -14,8 +14,8 @@
 # Environment:
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID   alerts (lib.sh); none: printed only
 #   PROBE_STATE_DIR                        where the state file lives (default: a new temp dir)
-#   PROBE_FAIL_THRESHOLD                   failures in a row before "DOWN" (2: with a run every
-#                                          5 minutes, an alert comes after 5 to 15 minutes)
+#   PROBE_FAIL_THRESHOLD                   failures in a row before "DOWN" (2; GitHub runs the
+#                                          workflow only every few hours, so an alert is slow)
 #   MONITOR_NOW, TELEGRAM_API_URL          tests only (uptime.sh, lib.sh)
 # Exits 0 whatever the check says (like uptime.sh); non-zero only for a wrong invocation.
 set -euo pipefail

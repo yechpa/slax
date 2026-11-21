@@ -489,10 +489,13 @@ receives the channel's events until it disconnects.
 `docs/load-test-results.md`, runbook §2 and §4.10.
 
 - **The in-cluster monitor cannot watch its own node.** It runs in the cluster: a dead node, k3s down, a switched-off
-  machine or an instance cut from the Internet sends nothing (slax-dev stayed off for two days unnoticed). The
-  outside probe (`.github/workflows/external-probe.yml`, runbook §4.10) covers that for both environments. Its own
-  limits: it is as shallow as `/api/v1/health`; a scheduled run starts a few minutes late (an alert comes 5 to 15
-  minutes after the node went silent), and GitHub disables the schedule of a repository left idle for 60 days;
+  machine or an instance cut from the Internet sends nothing (slax-dev stayed off for two days unnoticed). A
+  heartbeat (the monitor pings an outside dead man's switch, runbook §4.10) covers that within minutes, and the
+  outside probe (`.github/workflows/external-probe.yml`) as a slow safety net. The heartbeat's limits: it needs the
+  outside service's account and each environment's `MONITOR_HEARTBEAT_URL`; it says the monitor ran and saw
+  everything healthy, nothing deeper; nothing watches the service itself. The probe's own limits: it is as shallow as
+  `/api/v1/health`; **GitHub runs the 5-minute schedule only every 5 to 9 hours** (observed), so an alert comes hours
+  after the node went silent, and it disables the schedule of a repository left idle for 60 days;
   GitHub itself, or the run's tailnet join for dev (OAuth client), failing shows as a red run and GitHub's e-mail,
   not as a Telegram alert; it shares the Telegram chat with the other alerts; and it leaves one tiny cache entry per
   run (evicted after 7 days unused). Nothing else watches the probe.

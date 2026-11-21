@@ -685,20 +685,62 @@ Job unless its configuration is wrong (exit 2: `kubectl -n slax get jobs` shows 
   `recoverPercent` (75), `realertHours` (6) in the values; a release applies them.
 
 What it cannot see: the node itself dead, switched off or cut from the Internet (nothing
-runs to send). The outside probe below covers that.
+runs to send; slax-dev stayed off for two days unnoticed). Two things cover that, both
+outside the nodes: the heartbeat (minutes) and the outside probe (hours).
 
-#### Outside probe (a dead or switched-off node)
+#### Heartbeat (a dead or switched-off node, within minutes)
 
-`.github/workflows/external-probe.yml` runs on GitHub's runners every 5 minutes (neither
-cluster is involved) and asks `https://slax.yechpa.com/api/v1/health` (`[Prod]`) and
+A dead man's switch. After every **fully healthy** run (every check passed), the monitor
+sends one `GET` to the URL in the Secret key `MONITOR_HEARTBEAT_URL` (optional; none: no
+heartbeat). An outside service (healthchecks.io, free: 20 checks, e-mail and Telegram) expects
+a ping every minute and alerts when none came for its grace period. Prod and dev each have
+their own check, so each is watched independently of the other and of GitHub. A node that is
+off, unplugged, cut from the Internet or whose k3s is down simply stops pinging. So does a
+node whose health checks fail (the in-cluster `DOWN` alert says which).
+
+The summary line shows it: `uptime: app=ok ... heartbeat=sent`; `heartbeat=withheld` (a check
+failed this run: no ping), `heartbeat=FAILED` (the service did not answer: a warning with
+curl's exit code, never the URL), `heartbeat=skipped` (no time left in the run). The URL is a
+secret (whoever has it can fake the heartbeat): it is read from the environment, handed to
+curl on stdin, never logged or put in a message.
+
+**Set it up once per environment (YOU DO THIS):**
+
+1. healthchecks.io → sign up → Add Check, one per environment: name `slax-prod` / `slax-dev`,
+   Period **1 minute**, Grace **5 minutes** (a release restarts the web pod for a minute or
+   two: the grace covers it). Copy each check's **ping URL**.
+2. Integrations → add Telegram (the service's own bot asks you to start a chat with it) or
+   e-mail, and attach it to both checks. Test it with the check's "Send test notification".
+3. Put each URL in its cluster's Secret (hidden prompt, the value never goes through chat or
+   a command line). Dev, on slax-dev: `sudo deploy/dev/create-secrets.sh set MONITOR_HEARTBEAT_URL`.
+   Prod: the same through Tailscale SSH, with the script copied over as in §3.8
+   (`sudo bash /tmp/create-secrets.sh set MONITOR_HEARTBEAT_URL`, then delete it). No pod
+   restart is needed: the next minute's monitor Job reads the Secret.
+4. Check: `kubectl -n slax logs -l app.kubernetes.io/component=monitor --tail=2` ends with
+   `heartbeat=sent`, and the check turns green on healthchecks.io.
+5. Test, once on dev: `sudo systemctl stop k3s` on slax-dev (or unplug the machine); within the
+   grace period + 1 minute the service alerts; start it again, it recovers.
+
+**Pause it while slax-dev is off on purpose:** in healthchecks.io, Pause the `slax-dev` check
+(and resume it afterwards), otherwise you get its alert.
+
+**Limits:** it proves the monitor ran and found everything healthy, nothing more (health is
+shallow, `known-limitations.md`). If healthchecks.io itself is down you are not told. Nothing
+else watches the service. Free plans can change: keep the e-mail integration as a second route.
+
+#### Outside probe (a safety net, hours)
+
+`.github/workflows/external-probe.yml` is scheduled every 5 minutes on GitHub's runners
+(neither cluster is involved), **but GitHub runs it far less often in practice: observed
+November 2026, one run every 5 to 9 hours.** So it is a safety net, not a timely alarm: the first `DOWN`
+for the dev outage of 20 November came 8 h 40 min after the first failed run. It asks `https://slax.yechpa.com/api/v1/health` (`[Prod]`) and
 `https://dev.slax.yechpa.com/api/v1/health` (`[Dev]`; tailnet only, so the runner joins as the
 ephemeral `tag:ci` node the deployment uses, which the tailnet policy already lets reach
 slax-dev on 443). It is `uptime.sh` with one check named `external`
 (`deploy/monitoring/external-probe.sh`), so the messages read the same:
 
 - `[Dev] DOWN: external failed 2 checks in a row (timeout), since 21:05 UTC.`: two runs in a
-  row, so 5 to 15 minutes after the node went silent (GitHub starts a scheduled run a few
-  minutes late). One message, however long it lasts.
+  row, so after two of GitHub's irregular runs (hours). One message, however long it lasts.
 - `[Dev] RECOVERED: external is answering again (HTTP 200) after about 2 days down ...`
 
 Failure classes: `timeout` (a switched-off or unplugged node, or the tailnet cut: the usual
