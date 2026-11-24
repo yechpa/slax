@@ -1,4 +1,4 @@
-# Development cluster: k3s on slax-dev (amd64, i7-6500U / 16 GB), reachable on the tailnet
+# Development cluster: k3s on slax-dev (amd64, i7-6500U / 16 GB), reachable on NetBird
 # only (deploy/dev/BOOTSTRAP.md). Deployed by .github/workflows/deploy-dev.yml on every push
 # to main:
 #   helm upgrade --install slax deploy/helm/slax -n slax \
@@ -16,7 +16,7 @@ demo:
   # Dev is not the public showcase: visitors' accounts are never reset here.
   resetEnabled: false
 
-# In-cluster MinIO; browsers fetch files from its own host, also on the tailnet.
+# In-cluster MinIO; browsers fetch files from its own host, also on NetBird.
 minio:
   enabled: true
   ingress:
@@ -28,6 +28,6 @@ ingress:
     clusterIssuer: letsencrypt-dns
 
 # The uptime monitor checks the services inside the cluster only: dev.slax.yechpa.com
-# resolves to a tailnet address, and reaching it from a pod is not part of the design.
+# resolves to a NetBird address, and reaching it from a pod is not part of the design.
 monitor:
   checkPublicUrl: false

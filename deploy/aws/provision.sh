@@ -4,8 +4,8 @@
 # (docs/runbook.md, "First-time production setup"):
 #
 #   deploy/aws/provision.sh --dry-run     the plan and the monthly cost; read-only calls only
-#   TS_AUTHKEY=tskey-auth-... deploy/aws/provision.sh          asks for a typed confirmation
-#   TS_AUTHKEY=tskey-auth-... deploy/aws/provision.sh --yes    no question (automation)
+#   NB_SETUP_KEY=<setup key> deploy/aws/provision.sh          asks for a typed confirmation
+#   NB_SETUP_KEY=<setup key> deploy/aws/provision.sh --yes    no question (automation)
 #
 # Resources (every one tagged Project=slax and named slax-*):
 #   S3 buckets   slax-files-<suffix>, slax-backups-<suffix>: Block Public Access, SSE-S3,
@@ -33,9 +33,9 @@
 #   AWS_REGION          eu-central-1 (Frankfurt). Another region stops the script unless
 #                       SLAX_ALLOW_REGION_OVERRIDE=1 (or --allow-region-override): the chart's
 #                       values-prod.yaml (s3.region, hence the CSP) names eu-central-1.
-#   TS_AUTHKEY          Tailscale auth key, needed only to create the instance: single use,
-#                       pre-approved, tag:slax-prod, expiring in 1 hour (it stays readable in
-#                       the instance's user data). Never echoed.
+#   NB_SETUP_KEY        NetBird setup key, needed only to create the instance: one-off, not
+#                       ephemeral, auto-group slax, expiring after 1 day (it stays readable in
+#                       the instance's user data: revoke it once the node is up). Never echoed.
 #   SLAX_BUCKET_SUFFIX  bucket name suffix (bucket names are global); default: 10 hex
 #                       characters of sha256("slax:" + account id): stable for the account, so
 #                       a re-run finds the same buckets. It is not meant to hide the account
@@ -249,8 +249,8 @@ fi
 need_instance=0
 none "$instance_id" && need_instance=1
 if [ "$need_instance" = 1 ]; then
-    [ -n "${TS_AUTHKEY:-}" ] || die "TS_AUTHKEY is required to create the instance (single use, pre-approved, tag:slax-prod, 1 hour)"
-    [[ "$TS_AUTHKEY" =~ ^tskey-auth-[A-Za-z0-9_-]{10,}$ ]] || die "TS_AUTHKEY does not look like a Tailscale auth key (tskey-auth-...)"
+    [ -n "${NB_SETUP_KEY:-}" ] || die "NB_SETUP_KEY is required to create the instance (NetBird setup key: one-off, auto-group slax, 1 day)"
+    [[ "$NB_SETUP_KEY" =~ ^[A-Za-z0-9-]{36}$ ]] || die "NB_SETUP_KEY does not look like a NetBird setup key (36 characters, letters, digits and dashes)"
 fi
 if [ "$assume_yes" != 1 ]; then
     [ -t 0 ] || die "not a terminal: confirm interactively, or pass --yes"
@@ -365,7 +365,7 @@ require_ours_sg() {
 if none "$sg_id"; then
     say "Creating security group $NAME"
     sg_id="$(aws_write ec2 create-security-group --group-name "$NAME" --vpc-id "$vpc" \
-        --description "Slax production: HTTP and HTTPS only (SSH and the Kubernetes API via Tailscale)" \
+        --description "Slax production: HTTP and HTTPS only (SSH and the Kubernetes API via NetBird)" \
         --tag-specifications "$(tags_spec security-group "$NAME")" --query GroupId --output text)"
 fi
 require_ours_sg "$sg_id"
@@ -407,13 +407,13 @@ if [ "$need_instance" = 1 ]; then
         --query 'sort_by(Subnets, &AvailabilityZone)[0].SubnetId' --output text)"
     none "$subnet" && die "the default VPC has no default subnet"
 
-    # User data: cloud-init.yaml with the auth key and the Caddyfile, in a private file.
+    # User data: cloud-init.yaml with the setup key and the Caddyfile, in a private file.
     for file in cloud-init.yaml Caddyfile slax-edge-guard.sh; do
         [ -f "$here/$file" ] || die "$file must be next to this script"
     done
     user_data="$(cat "$here/cloud-init.yaml")"
     caddyfile_b64="$(base64 -w0 < "$here/Caddyfile")"
-    user_data="${user_data//__SLAX_TS_AUTHKEY__/$TS_AUTHKEY}"
+    user_data="${user_data//__SLAX_NB_SETUP_KEY__/$NB_SETUP_KEY}"
     user_data="${user_data//__SLAX_CADDYFILE_B64__/$caddyfile_b64}"
     guard_b64="$(base64 -w0 < "$here/slax-edge-guard.sh")"
     user_data="${user_data//__SLAX_EDGE_GUARD_B64__/$guard_b64}"
@@ -517,7 +517,9 @@ YOU DO THIS next (docs/runbook.md, "First-time production setup"):
   3. GitHub environment "production", variables:
        SLAX_FILES_BUCKET=$files_bucket
        SLAX_BACKUPS_BUCKET=$backups_bucket
-  4. In 5-10 minutes the node is on the tailnet as slax-prod (tag:slax-prod):
-       tailscale ssh ubuntu@slax-prod -- cloud-init status --wait
-       tailscale ssh ubuntu@slax-prod -- sudo tail -n 20 /var/log/slax-bootstrap.log
+  4. In 5-10 minutes the node is on NetBird as slax-prod (group slax). In the dashboard
+     (https://netbird.yechpa.com): note its NetBird IP, enable "SSH access" on the peer,
+     revoke the setup key. Then:
+       netbird ssh ubuntu@<NetBird IP> cloud-init status --wait
+       netbird ssh ubuntu@<NetBird IP> sudo tail -n 20 /var/log/slax-bootstrap.log
 EOF

@@ -7,7 +7,7 @@ Slax is a Slack-like team chat, built to show one application designed, deployed
 operated end to end: channels, threads, reactions, files, direct messages and presence, in
 English, Hebrew (right to left) and French, with two themes. It is meant to run at
 <https://slax.yechpa.com> as a public demo reset every night, on one small AWS Graviton
-instance, with a development cluster on the tailnet that deploys every merge. Until the
+instance, with a development cluster reachable over NetBird that deploys every merge. Until the
 acceptance checklist ([docs/recette.md](docs/recette.md)) has passed on production, that
 address is the target, not a promise.
 
@@ -49,7 +49,7 @@ address is the target, not a promise.
 Laravel 12 (API, Reverb WebSockets, queues) on PostgreSQL 16 and Redis 7; a Preact and
 TypeScript SPA with plain modern CSS; a Python upload scanner; S3 for files. Everything is
 containerised; dev and prod run the same images on single-node k3s through one Helm chart,
-released by GitHub Actions over Tailscale (dev on every merge, prod on a version tag after
+released by GitHub Actions over NetBird (self-hosted) (dev on every merge, prod on a version tag after
 approval). Production is designed for one EC2 t4g.small behind Caddy, about $21 a month.
 
 | Read | For |
@@ -136,7 +136,7 @@ file per environment:
   builds them locally).
 - `deploy/helm/slax`: the chart (`values-dev.yaml`, `values-prod.yaml`); `make chart-lint`
   lints it, validates both renders against the Kubernetes schemas and checks its rules.
-- Development (`dev.slax.yechpa.com`, tailnet only) deploys itself on every push to `main`
+- Development (`dev.slax.yechpa.com`, NetBird only) deploys itself on every push to `main`
   (`.github/workflows/deploy-dev.yml`). Setting the server up, the secrets and the checklist:
   [deploy/dev/BOOTSTRAP.md](deploy/dev/BOOTSTRAP.md).
 - Production (`slax.yechpa.com`, one AWS Graviton instance behind Caddy) is released from a

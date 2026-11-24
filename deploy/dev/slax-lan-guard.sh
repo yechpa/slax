@@ -1,8 +1,8 @@
 #!/bin/sh
-# Keeps the dev cluster tailnet-only: drops TCP 80, 443 (Traefik, through k3s's ServiceLB) and
+# Keeps the dev cluster NetBird-only: drops TCP 80, 443 (Traefik, through k3s's ServiceLB) and
 # 6443 (Kubernetes API) when they arrive on the physical (LAN) interfaces. Traffic on
-# tailscale0, on the loopback and between pods is untouched, and so is every other port: SSH
-# (22) keeps working from the LAN and the tailnet.
+# wt0 (NetBird), on the loopback and between pods is untouched, and so is every other port: SSH
+# (22) keeps working from the LAN and over NetBird.
 #
 # The rules live in a chain of their own, SLAX-LAN-GUARD, in the mangle table (jumped to from
 # PREROUTING, so they apply before Kubernetes' port mappings), for IPv4 and, when the host has

@@ -3,7 +3,7 @@
 How production (`https://slax.yechpa.com`, the public showcase) is built, set up, operated,
 repaired and torn down. Development has its own guide: [deploy/dev/BOOTSTRAP.md](../deploy/dev/BOOTSTRAP.md).
 
-Steps marked **YOU DO THIS** need a human with the owner's accounts (AWS, DNS, Tailscale,
+Steps marked **YOU DO THIS** need a human with the owner's accounts (AWS, DNS, NetBird,
 Google, GitHub). Nothing in this repository holds a secret, an account id or an address.
 
 Contents: [1. Architecture](#1-architecture) · [2. Sizing and cost](#2-sizing-and-cost) ·
@@ -32,7 +32,7 @@ Contents: [1. Architecture](#1-architecture) · [2. Sizing and cost](#2-sizing-a
  │   slax-queue, slax-scheduler ── slax-postgres (PVC, local-path) ── slax-redis (PVC)     │
  │   CronJobs: slax-backup 02:30 daily, slax-restore-check Sun 03:30 (Asia/Jerusalem)      │
  │   slax-monitor every minute: health, Reverb, PostgreSQL, Redis, disks → Telegram        │
- │  Tailscale (tag:slax-prod): Tailscale SSH for you, :6443 for CI (tag:ci). No sshd.      │
+ │  NetBird (group slax, wt0): NetBird SSH for you, :6443 for you and CI (group ci). No sshd│
  └───────────────┬─────────────────────────────────────────────────────────────────────────┘
                  │ instance role slax-prod-instance (IMDSv2, hop limit 2), no static keys
                  ▼
@@ -49,8 +49,8 @@ What runs where, and why:
 | Front door | **Caddy on the host.** It terminates TLS (automatic Let's Encrypt), sets HSTS (`max-age=31536000; includeSubDomains`, no `preload`), replaces any client `X-Forwarded-For`/`X-Real-IP` with the real peer address, and proxies to the web pod's Service on a fixed ClusterIP. k3s runs without Traefik and ServiceLB: nothing in the cluster listens on a public port, and ServiceLB's source-address rewriting does not exist. nginx in the web pod believes `X-Forwarded-For` only from the pod network, and the web pod's network policy admits no pod (only its node). Laravel trusts no proxy itself. Proven by `make proxy-test`. |
 | Files | **Presigned S3 URLs, straight from the bucket** (`https://<bucket>.s3.eu-central-1.amazonaws.com`): a cross-site origin of the bucket's own, so an uploaded file can never run with the app's cookies or origin. The presigned request forces the stored type (`response-content-type`, from the scanner's allowlist: PNG/JPEG/GIF/WebP/PDF/text/zip) and the disposition (`attachment` for everything but images and PDFs). `nosniff` cannot be added to S3 responses; forcing the type covers it (browsers never sniff an `image/*` into HTML). No `files.slax.yechpa.com` record, no CloudFront, no CORS (uploads go through the app; `<img>` needs no CORS). The CSP's `img-src` names exactly that host. |
 | AWS credentials | **The EC2 instance role**, through IMDSv2 with hop limit 2 so pods can reach it. The chart references no AWS key at all in production (`s3.useInstanceRole`). Only app, queue, scheduler and the backup jobs may reach the metadata service (Reverb, PostgreSQL, Redis and the migration Job are denied it; the scanner has no egress). The role can touch only the two buckets, and cannot delete backups. Flysystem sends `x-amz-acl: private` with every upload, so the role has `s3:PutObjectAcl` on the files objects; the ACL itself is inert (with *bucket owner enforced*, S3 accepts only ACLs equivalent to `bucket-owner-full-control`; `private` written by the bucket's own account grants exactly the owner full control, and is how Laravel apps write to such buckets; Block Public Access on top). Confirmed on real S3 only by checklist item 7, so the backend config is left as is. |
-| Host firewall | Besides the security group (TCP 80/443 only), `slax-edge-guard` drops TCP 22/6443/10250/10256 and UDP 8472 arriving on the public interface (k3s requires it), and 9345 (the RKE2 supervisor port, unused by k3s: closed as defence in depth); 80/443, `tailscale0` and the pod network are untouched. |
-| TLS for the cluster API | k3s's own certificate, `tls-san` = the Tailscale address and names. Port 6443 is closed to the Internet; CI and you reach it over the tailnet. |
+| Host firewall | Besides the security group (TCP 80/443 only), `slax-edge-guard` drops TCP 22/6443/10250/10256 and UDP 8472 arriving on the public interface (k3s requires it), and 9345 (the RKE2 supervisor port, unused by k3s: closed as defence in depth); 80/443, `wt0` (NetBird) and the pod network are untouched. |
+| TLS for the cluster API | k3s's own certificate, `tls-san` = the NetBird address and names. Port 6443 is closed to the Internet; CI and you reach it over NetBird (self-hosted, `https://netbird.yechpa.com`). |
 | Backups | `pg_dump -Fc` daily to S3 (SSE-S3), weekly full restore into a throwaway PostgreSQL inside the check's pod (never the production server). Telegram: failures, and the weekly "restore check OK". |
 | Monitoring | Outside the app: the CronJob `slax-monitor` (`deploy/monitoring/uptime.sh`) checks every minute the web pod's health, Reverb, PostgreSQL, Redis and the public URL through Caddy, and the disks; Telegram `[Prod] DOWN` after 3 failures in a row, `RECOVERED` once, `DISK` above 80 % (§4.10). Inside the app: errors and warnings go to Telegram through Laravel's log, and Administration → Status shows the database, Redis, Reverb, the scanner and S3. No metrics stack (Prometheus, Grafana): not worth its memory on 2 GiB. |
 | Releases | A `vX.Y.Z` tag on a commit of `main` → check → approval in GitHub → `helm upgrade --atomic` with the `<sha>` images already tested on dev → public checks → explicit `helm rollback` if they fail. |
@@ -72,7 +72,7 @@ How the number is built (the full report: [docs/load-test-results.md](load-test-
 | k3s itself: server, containerd and shims, CoreDNS, metrics-server, local-path | ≈ 655 | **measured**: a k3s v1.36.5 node (in Docker, amd64) running the production chart and images, idle: node working set 856 MiB minus the Slax pods' 202 MiB |
 | Slax pods under the load (app with nginx and PHP-FPM, Reverb, queue, scanner, PostgreSQL, Redis; the scheduler added at the queue worker's size) | ≈ 258 | **measured** on the Compose e2e stack at the load's peak: 221 MiB without MinIO, + 37 (at rest the same pods take 202 MiB on k3s and 210 on Compose: the two agree) |
 | A budget for growth | 100 | PHP-FPM may run up to 6 workers (one or two were enough at 10 requests/s), PostgreSQL's 96 MB of shared buffers fill up over days |
-| Ubuntu (systemd, journald, snapd, SSM agent), Tailscale, Caddy | ≈ 250-300 | estimate (not measurable without the instance) |
+| Ubuntu (systemd, journald, snapd, SSM agent), NetBird, Caddy | ≈ 250-300 | estimate (not measurable without the instance) |
 | **Total at the brief's load** | **≈ 1,263-1,313** | 655 + 258 + 100 + 250-300; **62-64 % of 2,048 MiB** (the brief's limit: 80 % = 1,638 MiB) |
 | Pessimistic band | **≈ 1,413-1,563** | the same, plus 150-250 MiB more if the 100 MiB budget is too small: PostgreSQL's `shared_buffers` (96 MB) filled where 31 MiB were measured, and PHP-FPM at its 6 workers where 53 MiB were measured for the whole pod; **69-76 %, still under 80 %** |
 
@@ -139,70 +139,51 @@ Do the steps in this order. Each one says what proves it worked.
   the bucket's regional host).
 - The account has its default VPC in that region (`aws ec2 describe-vpcs --filters Name=is-default,Values=true`).
   The script never creates networks.
-- `tailscale` on your machine, logged in to your tailnet; `kubectl`, `helm` 3.22.1, `gh`.
+- `netbird` on your machine, connected to `https://netbird.yechpa.com` (your peer in the group
+  `Users`); `kubectl`, `helm` 3.22.1, `gh`. Below, `$SLAX_PROD` is slax-prod's NetBird IP
+  (dashboard → Peers, or `netbird status -d`): `export SLAX_PROD=10.200.x.y`.
 
-### 3.2 Tailscale: tag, policy, auth key
+### 3.2 NetBird: groups, policies, setup keys
 
-**YOU DO THIS**
+The overlay network is the self-hosted NetBird of `https://netbird.yechpa.com` (management on
+another machine of the owner's; its "Default" All → All policy is **disabled**, so a peer reaches
+only what a policy below allows). Groups and policies are managed in the dashboard or with the
+API (`Authorization: Token <PAT>`, a personal access token of an admin).
 
-1. Tailnet policy (admin console → Access controls), merged with your rules and the dev ones
-   (deploy/dev/BOOTSTRAP.md §3):
+**YOU DO THIS** (once; dev's are in deploy/dev/BOOTSTRAP.md §3)
 
-   ```jsonc
-   {
-     "tagOwners": {
-       "tag:slax-prod": ["autogroup:admin"],
-       "tag:ci":        ["autogroup:admin"],
-     },
-     "acls": [
-       // You: everything on the production node.
-       {"action": "accept", "src": ["autogroup:admin"], "dst": ["tag:slax-prod:*"]},
-       // GitHub Actions: the Kubernetes API only (the public site is checked over the Internet).
-       {"action": "accept", "src": ["tag:ci"], "dst": ["tag:slax-prod:6443"]},
-     ],
-     "ssh": [
-       // Tailscale SSH: you, as the node's "ubuntu" user (passwordless sudo), re-authenticated every 12 h.
-       {"action": "check", "src": ["autogroup:admin"], "dst": ["tag:slax-prod"], "users": ["ubuntu"], "checkPeriod": "12h"},
-     ],
-     "tests": [
-       {"src": "tag:ci", "accept": ["tag:slax-prod:6443"], "deny": ["tag:slax-prod:22", "tag:slax-prod:443", "tag:slax-prod:80"]},
-     ],
-   }
-   ```
+1. Groups: `slax` (the production node), `ci` (GitHub Actions runners), `Users` (your own
+   devices: NetBird's default group for user peers).
+2. Policies (Access Control → Policies; TCP, one direction, nothing else):
 
-   (`grants` syntax for the CI rule: `{"src": ["tag:ci"], "dst": ["tag:slax-prod"], "ip": ["tcp:6443"]}`.)
+   | Name                   | Source  | Destination | Ports           | What                               |
+   |------------------------|---------|-------------|-----------------|------------------------------------|
+   | ci to slax (k8s API)   | `ci`    | `slax`      | 6443            | CI's `helm` and `kubectl`          |
+   | Users to slax          | `Users` | `slax`      | 22, 22022, 6443 | NetBird SSH (22 is redirected to the embedded server's 22022) and your `kubectl` |
 
-   **`autogroup:admin` is every device of a tailnet admin**, not only your own machine: a public
-   server of yours that is signed in under the same account (an EC2 "gate", say) would reach
-   `tag:slax-prod:*` too. If you have such devices, name your own machine instead (a `hosts`
-   entry or a tag as the `src` of the first rule) and add a test that the other one is denied
-   (`{"src": "<its 100.x address>", "deny": ["tag:slax-prod:22", "tag:slax-prod:443", "tag:slax-prod:6443"]}`).
-   New devices (a phone) have no rule at all until you add one: Tailscale refuses what no rule
-   allows, silently. Each `tests` entry goes between the braces of the array, one object per
-   entry: pasting one inside another entry is the usual syntax error ("invalid character '{' at
-   start of object name").
-
-2. The node's auth key. It ends up in the instance's user data, which stays readable for the
-   instance's whole life: through the EC2 API (`ec2:DescribeInstanceAttribute`), through the
+   CI never reaches 22, 80 or 443 of the node (the public site is checked over the Internet).
+   A peer added to `Users` (a phone) reaches the node at once: keep that group to your own
+   devices, and put anything else in a group of its own.
+3. Setup key for CI (Setup Keys → Create): name `github-ci`, **reusable**, **ephemeral** (the
+   runner's peer is deleted 10 minutes after it goes offline), auto-assigned group `ci`, expiry
+   one year (rotate it, §4.6). It is the GitHub secret `NB_SETUP_KEY` of both environments.
+4. Setup key for the node. It ends up in the instance's user data, which stays readable for
+   the instance's whole life: through the EC2 API (`ec2:DescribeInstanceAttribute`), through the
    instance metadata service (the node and the pods allowed to reach it) and in cloud-init's
-   root-only copy on the disk. So it must be worthless once used: **single use** (not reusable), **pre-approved**, **tagged
-   `tag:slax-prod`**, **not ephemeral** (an ephemeral node is removed from the tailnet after
-   going offline; a server must survive reboots), and as short-lived as possible. The admin
-   console's shortest expiry is one day; single use already makes it dead after the node
-   joins. For a one-hour key use the API (an API access token from Settings → Keys, typed
-   at a hidden prompt):
+   root-only copy on the disk. So it must be worthless once used: **one-off**, auto-assigned
+   group `slax`, **not ephemeral** (an ephemeral peer is deleted after going offline; a server
+   must survive reboots), expiry **1 day** (NetBird's shortest). Revoke it in the dashboard once
+   the node is up (3.5): a one-off key is spent anyway, revoking makes it visible.
 
    ```sh
-   read -r -s -p 'Tailscale API token: ' TS_API_TOKEN; echo
-   # The token reaches curl in a config on stdin, never on its command line.
-   TS_AUTHKEY="$(printf 'user = "%s:"\n' "$TS_API_TOKEN" | curl -fsS --config - \
-     -H 'Content-Type: application/json' https://api.tailscale.com/api/v2/tailnet/-/keys \
-     -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":false,"preauthorized":true,"tags":["tag:slax-prod"]}}},"expirySeconds":3600,"description":"slax-prod bootstrap"}' \
-     | sed -n 's/.*"key":"\([^"]*\)".*/\1/p')"
-   unset TS_API_TOKEN; export TS_AUTHKEY
+   read -r -s -p 'NetBird setup key: ' NB_SETUP_KEY; echo; export NB_SETUP_KEY
    ```
 
-   Use it within the hour (3.3). Tagged nodes have key expiry disabled by default.
+   Use it within the day (3.3).
+5. NetBird SSH on the node (after 3.5): Peers → slax-prod → enable **SSH access**. The node runs
+   NetBird's embedded SSH server (`netbird up --allow-server-ssh`, done by the bootstrap); you
+   sign in with your NetBird account in the browser the first time (`netbird ssh` caches the
+   token if your client runs with `--ssh-jwt-cache-ttl 43200`: 12 hours).
 
 ### 3.3 Provision AWS
 
@@ -220,7 +201,7 @@ get a suffix derived from the account id (stable; or set `SLAX_BUCKET_SUFFIX`).
 
 It ends with what to do next: the DNS record, the redirect URIs, the two GitHub variables
 (`SLAX_FILES_BUCKET`, `SLAX_BACKUPS_BUCKET`). Keep that output. Running it again prints the
-same (creating nothing). Then: `unset TS_AUTHKEY`.
+same (creating nothing). Then: `unset NB_SETUP_KEY`.
 
 ### 3.4 DNS
 
@@ -245,35 +226,35 @@ certificate by itself within a minute (`journalctl -u caddy`).
 Cloud-init installs everything in 5-10 minutes. **YOU DO THIS**:
 
 ```sh
-tailscale ssh ubuntu@slax-prod -- cloud-init status --wait          # status: done
-tailscale ssh ubuntu@slax-prod -- sudo tail -n 30 /var/log/slax-bootstrap.log
-tailscale ssh ubuntu@slax-prod -- sudo k3s kubectl get nodes        # slax-prod Ready
-tailscale ssh ubuntu@slax-prod -- systemctl is-active caddy k3s     # active active
+netbird ssh ubuntu@$SLAX_PROD cloud-init status --wait          # status: done
+netbird ssh ubuntu@$SLAX_PROD sudo tail -n 30 /var/log/slax-bootstrap.log
+netbird ssh ubuntu@$SLAX_PROD sudo k3s kubectl get nodes        # slax-prod Ready
+netbird ssh ubuntu@$SLAX_PROD systemctl is-active caddy k3s     # active active
 ```
 
-In the Tailscale admin console the machine `slax-prod` shows tag `tag:slax-prod`, and the
-auth key shows as used. Caddy gets its certificate as soon as DNS points at the node (until
+In the NetBird dashboard the peer `slax-prod` is in the group `slax`, and the setup key shows as
+used: revoke it, then enable SSH access on the peer (3.2, item 5). Caddy gets its certificate as soon as DNS points at the node (until
 then it retries; `journalctl -u caddy`).
 
 ### 3.6 Namespace, deployer, kubeconfig for CI
 
-**YOU DO THIS** (from your machine; the files go through Tailscale SSH's stdin):
+**YOU DO THIS** (from your machine; the files go through NetBird SSH's stdin):
 
 ```sh
-tailscale ssh ubuntu@slax-prod -- sudo k3s kubectl apply -f - < deploy/dev/deployer-rbac.yaml
+netbird ssh ubuntu@$SLAX_PROD sudo k3s kubectl apply -f - < deploy/dev/deployer-rbac.yaml
 ```
 
 Same file as dev: namespace `slax` (Pod Security *restricted* enforced) and the
 namespace-scoped `slax-deployer` (Deployments, StatefulSets, Jobs, CronJobs, Services,
 ConfigMaps, Secrets, NetworkPolicies in `slax` only). Then build its kubeconfig on the node
-exactly as deploy/dev/BOOTSTRAP.md §7, with two changes: `NODE` is the node's MagicDNS name
-(`tailscale status | grep slax-prod`, e.g. `slax-prod.<tailnet>.ts.net`, listed in `tls-san`)
+exactly as deploy/dev/BOOTSTRAP.md §7, with two changes: `NODE` is the node's NetBird IP
+(`$SLAX_PROD`, listed in `tls-san`: CI's runners do not use NetBird's DNS)
 and the cluster/context names are `slax-prod`. Keep `/tmp/slax-deployer.kubeconfig.b64`
 for 3.10, then shred it.
 
 For your own `kubectl` from your machine: copy `/etc/rancher/k3s/k3s.yaml` from the node
-(root only), replace `127.0.0.1` by the MagicDNS name, keep it `chmod 600`. Or simply run
-`sudo k3s kubectl` on the node through Tailscale SSH.
+(root only), replace `127.0.0.1` by `$SLAX_PROD`, keep it `chmod 600`. Or simply run
+`sudo k3s kubectl` on the node through NetBird SSH.
 
 ### 3.7 Google sign-in
 
@@ -297,14 +278,14 @@ For your own `kubectl` from your machine: copy `/etc/rancher/k3s/k3s.yaml` from 
 role replaces them):
 
 ```sh
-tailscale ssh ubuntu@slax-prod -- 'cat > /tmp/create-secrets.sh' < deploy/dev/create-secrets.sh
-tailscale ssh ubuntu@slax-prod            # an interactive session: the hidden prompts need its terminal
+netbird ssh ubuntu@$SLAX_PROD 'cat > /tmp/create-secrets.sh' < deploy/dev/create-secrets.sh
+netbird ssh -t ubuntu@$SLAX_PROD         # an interactive session: the hidden prompts need its terminal
 sudo S3_KEYS=none bash /tmp/create-secrets.sh
 rm /tmp/create-secrets.sh; exit
 ```
 
-(`tailscale ssh` takes no `-t` or other `ssh` option: everything after the host is the remote
-command, so `tailscale ssh -t …` fails with "flag provided but not defined".)
+(`netbird ssh` takes its options, such as `-t`, before the host: everything after the host is
+the remote command.)
 
 Hidden prompts: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TURNSTILE_SITE_KEY`,
 `TURNSTILE_SECRET`, then optional `ADMIN_EMAILS` (administrators: personal data, so here and
@@ -343,8 +324,7 @@ all four images anonymously and refuses to deploy while one is private. Check, l
 3. Secrets (`gh` prompts without echo):
 
    ```sh
-   gh secret set TS_OAUTH_CLIENT_ID --env production --repo yechpa/slax   # the tag:ci OAuth client (dev's works)
-   gh secret set TS_OAUTH_SECRET    --env production --repo yechpa/slax
+   gh secret set NB_SETUP_KEY       --env production --repo yechpa/slax   # the github-ci setup key (3.2; dev's is the same)
    gh secret set TELEGRAM_BOT_TOKEN --env production --repo yechpa/slax
    gh secret set TELEGRAM_CHAT_ID   --env production --repo yechpa/slax
    gh secret set PROD_KUBECONFIG    --env production --repo yechpa/slax < /tmp/slax-deployer.kubeconfig.b64
@@ -382,9 +362,9 @@ all four images anonymously and refuses to deploy while one is private. Check, l
 
 ## 4. Routine operations
 
-Commands below run on the node (`tailscale ssh ubuntu@slax-prod`), as `sudo k3s kubectl …`,
+Commands below run on the node (`netbird ssh -t ubuntu@$SLAX_PROD`), as `sudo k3s kubectl …`,
 abbreviated `kubectl`; `helm` likewise with `KUBECONFIG=/etc/rancher/k3s/k3s.yaml`, or from
-your machine with your kubeconfig over the tailnet.
+your machine with your kubeconfig over NetBird.
 
 ### 4.1 Deploy a release
 
@@ -501,8 +481,9 @@ Data written since that backup is lost: say so on the site first if anyone uses 
   then delete the old one in Google Cloud.
 - The CI deployer token: `kubectl -n slax delete secret slax-deployer-token`, re-apply
   `deployer-rbac.yaml` (3.6), rebuild the kubeconfig, `gh secret set PROD_KUBECONFIG …`.
-- Tailscale OAuth client (CI): generate a new one, update `TS_OAUTH_*` in both environments,
-  revoke the old one. The node's own key never expires (tagged node).
+- NetBird setup key of CI (`github-ci`): create a new one (3.2, item 3), update `NB_SETUP_KEY`
+  in both environments, revoke the old one. The node's own peer does not expire (setup-key
+  peers have no login expiry).
 - Telegram bot token: BotFather `/revoke`, then `set TELEGRAM_BOT_TOKEN` (prod and dev) and
   the GitHub secrets of both environments.
 - AWS: there is no static key to rotate; the instance role's credentials rotate by themselves.
@@ -713,7 +694,7 @@ curl on stdin, never logged or put in a message.
    e-mail, and attach it to both checks. Test it with the check's "Send test notification".
 3. Put each URL in its cluster's Secret (hidden prompt, the value never goes through chat or
    a command line). Dev, on slax-dev: `sudo deploy/dev/create-secrets.sh set MONITOR_HEARTBEAT_URL`.
-   Prod: the same through Tailscale SSH, with the script copied over as in §3.8
+   Prod: the same through NetBird SSH, with the script copied over as in §3.8
    (`sudo bash /tmp/create-secrets.sh set MONITOR_HEARTBEAT_URL`, then delete it). No pod
    restart is needed: the next minute's monitor Job reads the Secret.
 4. Check: `kubectl -n slax logs -l app.kubernetes.io/component=monitor --tail=2` ends with
@@ -734,8 +715,8 @@ else watches the service. Free plans can change: keep the e-mail integration as 
 (neither cluster is involved), **but GitHub runs it far less often in practice: observed
 November 2026, one run every 5 to 9 hours.** So it is a safety net, not a timely alarm: the first `DOWN`
 for the dev outage of 20 November came 8 h 40 min after the first failed run. It asks `https://slax.yechpa.com/api/v1/health` (`[Prod]`) and
-`https://dev.slax.yechpa.com/api/v1/health` (`[Dev]`; tailnet only, so the runner joins as the
-ephemeral `tag:ci` node the deployment uses, which the tailnet policy already lets reach
+`https://dev.slax.yechpa.com/api/v1/health` (`[Dev]`; NetBird only, so the runner joins as the
+ephemeral `ci` peer the deployment uses, which the NetBird policy already lets reach
 slax-dev on 443). It is `uptime.sh` with one check named `external`
 (`deploy/monitoring/external-probe.sh`), so the messages read the same:
 
@@ -743,10 +724,10 @@ slax-dev on 443). It is `uptime.sh` with one check named `external`
   row, so after two of GitHub's irregular runs (hours). One message, however long it lasts.
 - `[Dev] RECOVERED: external is answering again (HTTP 200) after about 2 days down ...`
 
-Failure classes: `timeout` (a switched-off or unplugged node, or the tailnet cut: the usual
+Failure classes: `timeout` (a switched-off or unplugged node, or NetBird cut: the usual
 case), `connection refused`, `TLS error`, `DNS failure`, `HTTP 502`...
 
-- **Secrets:** none to add. It reads `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`,
+- **Secrets:** none to add. It reads `NB_SETUP_KEY`,
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from the `dev` GitHub environment (BOOTSTRAP §9);
   the production probe uses the same Telegram chat. Without the Telegram keys it only logs.
 - **Look at it:** Actions → External probe; each run's log ends with
@@ -755,8 +736,8 @@ case), `connection refused`, `TLS error`, `DNS failure`, `HTTP 502`...
   `RECOVERED`): `gh workflow disable external-probe.yml --repo yechpa/slax`, and `enable`
   afterwards. The failure count lives in the Actions cache (`probe-state-dev-*`,
   `probe-state-prod-*`, a few bytes each, evicted after 7 days unused).
-- **If the probe itself breaks:** a run that cannot start its job (the tailnet join fails,
-  an expired OAuth client) is a red run and GitHub's own failure e-mail, not a Telegram
+- **If the probe itself breaks:** a run that cannot start its job (the NetBird join fails,
+  an expired or revoked setup key) is a red run and GitHub's own failure e-mail, not a Telegram
   alert. GitHub also disables a schedule in a repository with no activity for 60 days:
   re-enable it in the Actions tab.
 - **Test it:** `make external-probe-test` (no container); the real path, once, is recette 10.9.
@@ -826,17 +807,17 @@ notifications", for the checklist the family runs on real devices).
    (ClusterIP must be 10.43.0.80); describe the failing pod.
 3. A bad release: roll back (4.2). Memory: `free -m`, `journalctl -k | grep -i oom` → §4.9.
    A failed first boot (`/var/log/slax-bootstrap.log` ends without "bootstrap done"): fix the
-   cause, then `tailscale ssh ubuntu@slax-prod -- sudo bash /usr/local/sbin/slax-bootstrap.sh`
-   (every step is safe to repeat). If Tailscale itself never came up, use the break-glass
-   shell below and run the same command there. If `tailscale up` failed *after* reaching
-   Tailscale (the log shows it, or the key is marked used in the admin console), the
-   single-use key is spent: create a new one (§3.2), and in the break-glass shell run
+   cause, then `netbird ssh ubuntu@$SLAX_PROD sudo bash /usr/local/sbin/slax-bootstrap.sh`
+   (every step is safe to repeat). If NetBird itself never came up, use the break-glass
+   shell below and run the same command there. If `netbird up` failed *after* reaching
+   the management server (the log shows it, or the key is marked used in the dashboard), the
+   one-off key is spent: create a new one (§3.2), and in the break-glass shell run
    `sudo install -d -m 700 /run/slax-bootstrap`, write the key to
-   `/run/slax-bootstrap/ts-authkey` (`sudo sh -c 'umask 077; cat > /run/slax-bootstrap/ts-authkey'`,
+   `/run/slax-bootstrap/nb-setup-key` (`sudo sh -c 'umask 077; cat > /run/slax-bootstrap/nb-setup-key'`,
    paste, Ctrl-D), then
-   `sudo tailscale up --auth-key=file:/run/slax-bootstrap/ts-authkey --hostname=slax-prod --advertise-tags=tag:slax-prod --ssh`
+   `sudo netbird up --management-url https://netbird.yechpa.com --hostname slax-prod --setup-key-file /run/slax-bootstrap/nb-setup-key --allow-server-ssh`
    and `sudo bash /usr/local/sbin/slax-bootstrap.sh` (it shreds the file).
-4. Node unreachable on the tailnet too: AWS console → the instance → *Reboot*. Still nothing:
+4. Node unreachable over NetBird too: AWS console → the instance → *Reboot*. Still nothing:
    *Get system log* / *Get instance screenshot*. Break-glass shell without opening a port:
    attach the managed policy `AmazonSSMManagedInstanceCore` to the role `slax-prod-instance`
    (`aws iam attach-role-policy --role-name slax-prod-instance --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore`),
@@ -976,7 +957,7 @@ echo "Torn down."
 TEARDOWN
 ```
 
-Then: remove the `slax-prod` machine in the Tailscale admin console, the A record, the
+Then: remove the `slax-prod` peer in the NetBird dashboard, the A record, the
 GitHub environment `production`, and the production redirect URI in Google Cloud.
 
 ## 7. Verification checklist
@@ -997,8 +978,8 @@ no AWS access). Tick each item.
 5. [ ] Client address: as an administrator, Administration → Audit shows your own public IP
    for your actions (not 10.42.x.x, not the Elastic IP). `curl -H 'X-Forwarded-For: 6.6.6.6' https://slax.yechpa.com/api/v1/health`
    followed by an audited action from that client never records 6.6.6.6.
-6. [ ] From outside the tailnet: `nc -vz -w 5 <Elastic IP> 22` and `… 6443` time out; on the
-   tailnet `kubectl get nodes` works through the MagicDNS name.
+6. [ ] From outside NetBird: `nc -vz -w 5 <Elastic IP> 22` and `… 6443` time out; over
+   NetBird `kubectl get nodes` works through `$SLAX_PROD`, and `netbird ssh ubuntu@$SLAX_PROD` opens a shell.
 7. [ ] **Before tagging v0.1.0** (moto and MinIO enforce no IAM, so nothing local proves the
    role's policy). No Slax pod exists yet, so use a one-off pod of the very image you are about
    to release (a `main` sha whose Images run is green; it contains `slax:s3-probe`). It runs in
@@ -1006,7 +987,7 @@ no AWS access). Tick each item.
    instance role is reachable as from the app (IMDSv2, hop limit 2); `--rm` deletes it:
 
    ```sh
-   tailscale ssh ubuntu@slax-prod -- sudo k3s kubectl run slax-s3-probe -n default --rm -i --restart=Never \
+   netbird ssh ubuntu@$SLAX_PROD sudo k3s kubectl run slax-s3-probe -n default --rm -i --restart=Never \
      --image=ghcr.io/yechpa/slax-app:<sha> \
      --env=AWS_DEFAULT_REGION=eu-central-1 --env=AWS_BUCKET=slax-files-<suffix> --env=LOG_CHANNEL=stderr \
      -- php artisan slax:s3-probe

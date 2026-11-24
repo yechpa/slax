@@ -4,7 +4,7 @@
 # mistake. TCP 22 (SSH; sshd is off anyway), 6443 (Kubernetes API, also k3s's supervisor),
 # 9345 (an extra supervisor port: RKE2's, unused by k3s, closed as defence in depth), 10250
 # (kubelet), 10256 (kube-proxy health) and UDP 8472 (flannel VXLAN) arriving on the public
-# interface are dropped. Nothing else is touched: Caddy's 80/443, tailscale0 (kubectl and CI come that way),
+# interface are dropped. Nothing else is touched: Caddy's 80/443, wt0 (NetBird: kubectl, CI and SSH come that way),
 # the loopback, the pod network (cni0, flannel.1) and everything the node sends.
 #
 # The rules live in a chain of their own, SLAX-EDGE-GUARD, in the mangle table (jumped to from
@@ -43,7 +43,7 @@ if [ -z "$PUBLIC_INTERFACES" ] && [ "${1:-}" != stop ]; then
 fi
 for interface in $PUBLIC_INTERFACES; do
     case "$interface" in
-        lo | tailscale* | cni* | flannel* | veth* | docker* | br-*)
+        lo | wt* | tailscale* | cni* | flannel* | veth* | docker* | br-*)
             echo "slax-edge-guard: $interface is not a public interface: refusing" >&2
             exit 1
             ;;

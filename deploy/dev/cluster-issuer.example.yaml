@@ -1,6 +1,6 @@
 # cert-manager ClusterIssuers for Let's Encrypt with the ACME DNS-01 challenge: the
 # certificate is proven by a TXT record in yechpa.com's DNS, so no inbound port has to be
-# open (dev is reachable on the tailnet only). Copy, fill the placeholders, apply by hand:
+# open (dev is reachable on the NetBird only). Copy, fill the placeholders, apply by hand:
 #   cp deploy/dev/cluster-issuer.example.yaml /tmp/cluster-issuer.yaml && $EDITOR /tmp/cluster-issuer.yaml
 #   sudo k3s kubectl apply -f /tmp/cluster-issuer.yaml
 #

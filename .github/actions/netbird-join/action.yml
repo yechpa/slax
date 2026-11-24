@@ -1,0 +1,81 @@
+# Joins the self-hosted NetBird network (https://netbird.yechpa.com) as an ephemeral peer of
+# the `ci` group, then waits until the target answers. Used by deploy-dev.yml, release-prod.yml
+# and external-probe.yml; replaces tailscale/github-action (NetBird publishes no action of its
+# own).
+#
+# - The client is the pinned release tarball, checksum verified (bump NETBIRD_VERSION and
+#   NETBIRD_SHA256 together, from netbird_<version>_checksums.txt of the release).
+# - The setup key (NB_SETUP_KEY: reusable, ephemeral, auto-group `ci`) reaches the client
+#   through the environment only: never a command line or the log. An ephemeral peer is
+#   deleted by the management server after 10 minutes offline; the caller also runs
+#   `sudo netbird down` in an `always()` step.
+# - The NetBird policies let `ci` reach slax-prod (group slax) on TCP 6443 and slax-dev
+#   (group slax-dev) on TCP 443 and 6443, nothing else (docs/runbook.md §3.2).
+# - --block-inbound: nothing may connect to the runner; --disable-dns: the runner's resolver
+#   is left alone (the targets are IP addresses or public names).
+name: Join NetBird (ephemeral, ci)
+description: Join the self-hosted NetBird network as an ephemeral ci peer and wait for a target.
+
+inputs:
+  setup-key:
+    description: The NetBird setup key (secret NB_SETUP_KEY).
+    required: true
+  target-host:
+    description: Address the job needs (a NetBird IP, or a public name resolving to one); the step waits until it answers.
+    required: true
+  target-port:
+    description: TCP port to wait for on target-host.
+    required: false
+    default: "6443"
+
+runs:
+  using: composite
+  steps:
+    - name: Install the NetBird client (checksum verified)
+      shell: bash
+      env:
+        NETBIRD_VERSION: 0.83.2
+        NETBIRD_SHA256: 28b8e908e6b51b761ccbfc4fbb1f876a4fdb157ddb61bd38da87d895be507165 # netbird_0.83.2_linux_amd64.tar.gz
+      run: |
+        set -euo pipefail
+        cd "$RUNNER_TEMP"
+        curl -fsSL -o netbird.tgz \
+          "https://github.com/netbirdio/netbird/releases/download/v${NETBIRD_VERSION}/netbird_${NETBIRD_VERSION}_linux_amd64.tar.gz"
+        echo "$NETBIRD_SHA256  netbird.tgz" | sha256sum -c -
+        tar -xzf netbird.tgz netbird
+        sudo install -m 0755 netbird /usr/local/bin/netbird
+        sudo netbird service install
+        sudo netbird service start
+        netbird version
+
+    - name: Join (ephemeral peer, group ci)
+      shell: bash
+      env:
+        NB_SETUP_KEY: ${{ inputs.setup-key }}
+        TARGET_HOST: ${{ inputs.target-host }}
+        TARGET_PORT: ${{ inputs.target-port }}
+      run: |
+        set +x -euo pipefail
+        if [ -z "$NB_SETUP_KEY" ]; then
+          echo "::error::NB_SETUP_KEY is empty: set it in this job's environment (docs/runbook.md §3.2)."
+          exit 1
+        fi
+        echo "::add-mask::$NB_SETUP_KEY"
+        # The daemon may take a moment to open its socket after `service start`.
+        for _ in $(seq 1 15); do netbird status >/dev/null 2>&1 && break; sleep 1; done
+        sudo --preserve-env=NB_SETUP_KEY netbird up \
+          --management-url https://netbird.yechpa.com \
+          --hostname "gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+          --block-inbound --disable-dns
+        netbird status | grep -E '^(Management|Signal|Relays|NetBird IP|Peers count):' || true
+        # The policy and the WireGuard path to the target come a few seconds after `up`.
+        for i in $(seq 1 30); do
+          if timeout 3 bash -c "exec 3<>/dev/tcp/$TARGET_HOST/$TARGET_PORT" 2>/dev/null; then
+            echo "$TARGET_HOST:$TARGET_PORT reachable over NetBird after ${i} attempt(s)."
+            exit 0
+          fi
+          sleep 2
+        done
+        netbird status --detail || true
+        echo "::error::$TARGET_HOST:$TARGET_PORT is not reachable over NetBird: peer offline, or the ci policy (docs/runbook.md §3.2)."
+        exit 1

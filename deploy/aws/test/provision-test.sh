@@ -33,8 +33,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# A fake key in the Tailscale format (moto never sees a real one).
-ts_key="tskey-auth-kTESTnotreal0-0123456789abcdef"
+# A fake key in the NetBird setup key format (moto never sees a real one).
+nb_key="A1B2C3D4-0000-4000-8000-0123456789AB"
 account=123456789012 # moto's
 suffix="$(printf 'slax:%s' "$account" | sha256sum | cut -c1-10)"
 files="slax-files-$suffix"
@@ -143,17 +143,17 @@ check "without --yes and without a terminal, it refuses" test "$status" != 0
 check "... before any change" test "$(slax_ids | tr '\n' ' ')" = "instances= sgs= eips= buckets= roles= "
 
 out="$(provision -i -- --yes 2>&1)" && status=0 || status=$?
-check "--yes without TS_AUTHKEY refuses to create the instance" test "$status" != 0
+check "--yes without NB_SETUP_KEY refuses to create the instance" test "$status" != 0
 check "... before any change" test "$(slax_ids | tr '\n' ' ')" = "instances= sgs= eips= buckets= roles= "
 
-out="$(provision -e AWS_REGION=eu-west-1 -e TS_AUTHKEY="$ts_key" -- --yes 2>&1)" && status=0 || status=$?
+out="$(provision -e AWS_REGION=eu-west-1 -e NB_SETUP_KEY="$nb_key" -- --yes 2>&1)" && status=0 || status=$?
 check "another region than eu-central-1 stops (the chart names eu-central-1)" sh -c "test $status != 0 && printf '%s' \"\$1\" | grep -q 'allow-region-override'" _ "$out"
 check "... before any change" test -z "$(writes)"
 
 echo "== first run"
-out="$(provision -e TS_AUTHKEY="$ts_key" -- --yes 2>&1)" && status=0 || status=$?
+out="$(provision -e NB_SETUP_KEY="$nb_key" -- --yes 2>&1)" && status=0 || status=$?
 check "provision.sh --yes succeeds" test "$status" = 0 || printf '%s\n' "$out" | tail -20
-check "... never prints the Tailscale key" hasnt "$out" "$ts_key"
+check "... never prints the NetBird key" hasnt "$out" "$nb_key"
 check "... prints the DNS record (A slax.yechpa.com -> the Elastic IP)" has "$out" 'A  slax\.yechpa\.com  ->  [0-9.]+'
 check "... says no files.slax.yechpa.com record is needed" has "$out" 'No record for files\.slax\.yechpa\.com'
 check "... prints both Google redirect URIs" has "$(printf '%s\n' "$out" | grep -c 'auth/google/callback')" '^2$'
@@ -178,7 +178,7 @@ aws ec2 describe-instance-attribute --instance-id "$instance" --attribute userDa
 check "user data: within EC2's 16 KB limit" test "$(stat -c %s "$dir/user-data.raw")" -le 16384
 gunzip -c "$dir/user-data.raw" > "$dir/user-data" 2>/dev/null || cp "$dir/user-data.raw" "$dir/user-data"
 check "user data: cloud-config with the key and the Caddyfile filled in, no placeholder left" \
-    sh -c "head -1 '$dir/user-data' | grep -qx '#cloud-config' && grep -qF '$ts_key' '$dir/user-data' && ! grep -q '__SLAX_' '$dir/user-data'"
+    sh -c "head -1 '$dir/user-data' | grep -qx '#cloud-config' && grep -qF '$nb_key' '$dir/user-data' && ! grep -q '__SLAX_' '$dir/user-data'"
 caddy_b64="$(base64 -w0 < "$repo/deploy/aws/Caddyfile")"
 check "user data: the Caddyfile is the repository's" grep -qF "$caddy_b64" "$dir/user-data"
 check "user data: the edge guard is the repository's" grep -qF "$(base64 -w0 < "$repo/deploy/aws/slax-edge-guard.sh")" "$dir/user-data"
@@ -219,7 +219,7 @@ check "$files: not versioned" test "$(aws s3api get-bucket-versioning --bucket "
 check "wa-bot's instance, security group, Elastic IP, bucket and role are unchanged" test "$(wa_snapshot)" = "$before"
 
 echo "== second run"
-out="$(provision -e TS_AUTHKEY="$ts_key" -- --yes 2>&1)" && status=0 || status=$?
+out="$(provision -e NB_SETUP_KEY="$nb_key" -- --yes 2>&1)" && status=0 || status=$?
 check "provision.sh --yes succeeds again" test "$status" = 0
 check "... creates nothing" hasnt "$out" '\+ aws (ec2 run-instances|ec2 allocate-address|ec2 create-security-group|ec2 associate-address|ec2 authorize|iam create-|s3api create-bucket)'
 check "... the same resources" test "$(slax_ids)" = "$first"
@@ -233,7 +233,7 @@ reset_moto
 world
 vpc="$(aws ec2 describe-vpcs --filters Name=is-default,Values=true --query 'Vpcs[0].VpcId' --output text)"
 aws ec2 create-security-group --group-name slax-prod --description impostor --vpc-id "$vpc" >/dev/null
-out="$(provision -e TS_AUTHKEY="$ts_key" -- --yes 2>&1)" && status=0 || status=$?
+out="$(provision -e NB_SETUP_KEY="$nb_key" -- --yes 2>&1)" && status=0 || status=$?
 check "an untagged security group named slax-prod: refused" sh -c "test $status != 0 && printf '%s' \"\$1\" | grep -q 'security group slax-prod .* WITHOUT tag Project=slax'" _ "$out"
 check "... before any change" test "$(slax_ids | tr '\n' ' ')" = "instances= sgs= eips= buckets= roles= "
 check "... not a single write call" test -z "$(writes)"
@@ -242,7 +242,7 @@ reset_moto
 world
 aws ec2 run-instances --image-id "$(aws ssm get-parameter --name /slax-test/ubuntu-arm64 --query Parameter.Value --output text)" \
     --instance-type t4g.small --count 1 --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=slax-prod}]' >/dev/null
-out="$(provision -e TS_AUTHKEY="$ts_key" -- --yes 2>&1)" && status=0 || status=$?
+out="$(provision -e NB_SETUP_KEY="$nb_key" -- --yes 2>&1)" && status=0 || status=$?
 check "an untagged instance named slax-prod: refused" sh -c "test $status != 0 && printf '%s' \"\$1\" | grep -q 'instance named slax-prod exists WITHOUT tag'" _ "$out"
 check "... not a single write call" test -z "$(writes)"
 check "... before any change" test "$(slax_ids | sed 's/^instances=.*/instances=/' | tr '\n' ' ')" = "instances= sgs= eips= buckets= roles= "
@@ -250,7 +250,7 @@ check "... before any change" test "$(slax_ids | sed 's/^instances=.*/instances=
 reset_moto
 world
 aws s3api create-bucket --bucket "$files" --create-bucket-configuration LocationConstraint=eu-central-1 >/dev/null
-out="$(provision -e TS_AUTHKEY="$ts_key" -- --yes 2>&1)" && status=0 || status=$?
+out="$(provision -e NB_SETUP_KEY="$nb_key" -- --yes 2>&1)" && status=0 || status=$?
 check "an untagged bucket with the slax name: refused, with the command to adopt it" sh -c "test $status != 0 && printf '%s' \"\$1\" | grep -q 'put-bucket-tagging --bucket $files'" _ "$out"
 check "... not a single write call" test -z "$(writes)"
 check "... and the bucket is left as it was (no tag added)" sh -c "! docker run --rm --network $name ${env_args[*]} $cli_image s3api get-bucket-tagging --bucket $files >/dev/null 2>&1"
@@ -259,7 +259,7 @@ reset_moto
 world
 aws iam create-role --role-name slax-prod-instance --assume-role-policy-document \
     '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null
-out="$(provision -e TS_AUTHKEY="$ts_key" -- --yes 2>&1)" && status=0 || status=$?
+out="$(provision -e NB_SETUP_KEY="$nb_key" -- --yes 2>&1)" && status=0 || status=$?
 check "an untagged role named slax-prod-instance: refused" sh -c "test $status != 0 && printf '%s' \"\$1\" | grep -q 'IAM role slax-prod-instance exists WITHOUT tag'" _ "$out"
 check "... not a single write call" test -z "$(writes)"
 check "... and its policies are left alone" test "$(aws iam list-role-policies --role-name slax-prod-instance --query 'length(PolicyNames)' --output text)" = 0

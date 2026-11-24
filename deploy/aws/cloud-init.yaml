@@ -2,31 +2,32 @@
 # Slax production node: Ubuntu 24.04 LTS arm64 on EC2. The user data of the instance that
 # deploy/aws/provision.sh creates; that script replaces the placeholders below (names in
 # double underscores) at run time, in memory, never in this file:
-#   SLAX_TS_AUTHKEY        the Tailscale auth key (TS_AUTHKEY)
+#   SLAX_NB_SETUP_KEY      the NetBird setup key (NB_SETUP_KEY)
 #   SLAX_CADDYFILE_B64     deploy/aws/Caddyfile, base64
 #   SLAX_EDGE_GUARD_B64    deploy/aws/slax-edge-guard.sh, base64
 #
-# The auth key stays readable for the instance's whole life: through the EC2 API (anyone
+# The setup key stays readable for the instance's whole life: through the EC2 API (anyone
 # allowed ec2:DescribeInstanceAttribute), through the instance metadata service (the node, and
 # the pods allowed to reach it), and on disk in cloud-init's copy of the user data
 # (/var/lib/cloud/instance/user-data.txt, root only). So it must be worthless after boot:
-# single use (spent once the node has joined), pre-approved, tagged tag:slax-prod, expiring
-# within the hour (docs/runbook.md §3.2). A spent key grants nothing. It is not "ephemeral"
-# in Tailscale's sense: an ephemeral node is removed from the tailnet after being offline,
-# and a server must survive a reboot. The bootstrap's own copy in /run is shredded once used.
+# one-off (spent once the node has joined), auto-group slax, expiring after a day, the
+# shortest NetBird allows (docs/runbook.md §3.2); revoke it in the dashboard once the node is
+# up. A spent key grants nothing. It is NOT ephemeral: an ephemeral peer is deleted after
+# being offline, and a server must survive a reboot. The bootstrap's own copy in /run is
+# shredded once used.
 #
 # A failed first boot is re-run, once the cause is fixed, with
-#   tailscale ssh ubuntu@slax-prod -- sudo bash /usr/local/sbin/slax-bootstrap.sh
-# (every step is safe to repeat; `tailscale up` is skipped once the node is on the tailnet).
-# If `tailscale up` failed after reaching the coordination server, the single-use key may be
+#   netbird ssh ubuntu@<slax-prod NetBird IP> sudo bash /usr/local/sbin/slax-bootstrap.sh
+# (every step is safe to repeat; `netbird up` is skipped once the node is connected).
+# If `netbird up` failed after reaching the management server, the one-off key may be
 # spent: create a NEW key (docs/runbook.md §3.2), open the break-glass shell (SSM Session
 # Manager, docs/runbook.md §5), run
-#   printf '%s' '<new key>' > /run/slax-bootstrap/ts-authkey   (mkdir -p it first, chmod 600)
-#   tailscale up --auth-key=file:/run/slax-bootstrap/ts-authkey --hostname=slax-prod \
-#     --advertise-tags=tag:slax-prod --ssh
+#   printf '%s' '<new key>' > /run/slax-bootstrap/nb-setup-key   (mkdir -p it first, chmod 600)
+#   netbird up --management-url https://netbird.yechpa.com --hostname slax-prod \
+#     --setup-key-file /run/slax-bootstrap/nb-setup-key --allow-server-ssh
 # then re-run the bootstrap as above.
 #
-# Result: Tailscale (SSH through the tailnet only; sshd disabled, port 22 closed anyway), k3s
+# Result: NetBird (NetBird SSH only; sshd disabled, port 22 closed anyway), k3s
 # without Traefik and ServiceLB, behind a host firewall rule for its ports on the public
 # interface (slax-edge-guard), Caddy in front (TLS, HSTS, client address), a 2 GiB swap
 # file, unattended security upgrades with a night reboot when needed, kernel and network
@@ -46,6 +47,8 @@ packages:
   - ca-certificates
   - curl
   - jq
+  # gpg: the NetBird package repository's key is dearmored at bootstrap.
+  - gnupg
   - unattended-upgrades
   # slax-edge-guard's tools (in Ubuntu's server image already; listed so they never go missing).
   - iptables
@@ -58,11 +61,11 @@ swap:
   maxsize: 2147483648
 
 write_files:
-  # Used once by `tailscale up`, then shredded. /run is memory: gone at reboot anyway.
-  - path: /run/slax-bootstrap/ts-authkey
+  # Used once by `netbird up`, then shredded. /run is memory: gone at reboot anyway.
+  - path: /run/slax-bootstrap/nb-setup-key
     permissions: "0600"
     owner: root:root
-    content: "__SLAX_TS_AUTHKEY__"
+    content: "__SLAX_NB_SETUP_KEY__"
 
   - path: /etc/slax/Caddyfile
     permissions: "0644"
@@ -173,8 +176,8 @@ write_files:
       Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
       Unattended-Upgrade::Remove-Unused-Dependencies "true";
 
-  # k3s server, single node. tls-san (the Tailscale address and names, for kubectl and CI
-  # over the tailnet) is appended by the bootstrap once the node is on the tailnet. The
+  # k3s server, single node. tls-san (the NetBird address and names, for kubectl and CI
+  # over NetBird) is appended by the bootstrap once the node is on NetBird. The
   # chart relies on these networks (values-prod.yaml: trustedProxies, app.service.clusterIP).
   - path: /etc/rancher/k3s/config.yaml
     permissions: "0600"
@@ -250,25 +253,25 @@ write_files:
       sysctl --system >/dev/null
       systemctl restart systemd-journald
 
-      echo "== Tailscale"
-      fetch -o /usr/share/keyrings/tailscale-archive-keyring.gpg https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
-      echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main" \
-        > /etc/apt/sources.list.d/tailscale.list
+      echo "== NetBird (self-hosted, https://netbird.yechpa.com)"
+      fetch https://pkgs.netbird.io/debian/public.key | gpg --dearmor --yes -o /usr/share/keyrings/netbird-archive-keyring.gpg
+      echo "deb [signed-by=/usr/share/keyrings/netbird-archive-keyring.gpg] https://pkgs.netbird.io/debian stable main" \
+        > /etc/apt/sources.list.d/netbird.list
       apt_get update
-      apt_get install -y tailscale
-      if tailscale status >/dev/null 2>&1; then
-        echo "already on the tailnet: tailscale up skipped"
+      apt_get install -y netbird
+      if netbird status 2>/dev/null | grep -q '^Management: Connected'; then
+        echo "already connected to NetBird: netbird up skipped"
       else
-        tailscale up --auth-key=file:/run/slax-bootstrap/ts-authkey --hostname=slax-prod \
-          --advertise-tags=tag:slax-prod --ssh
+        netbird up --management-url https://netbird.yechpa.com --hostname slax-prod \
+          --setup-key-file /run/slax-bootstrap/nb-setup-key --allow-server-ssh
       fi
-      [ ! -e /run/slax-bootstrap/ts-authkey ] || shred -u /run/slax-bootstrap/ts-authkey
-      tailscale set --auto-update=true
-      ts_ip="$(tailscale ip -4)"
-      ts_name="$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')"
-      echo "on the tailnet as $ts_name ($ts_ip)"
+      [ ! -e /run/slax-bootstrap/nb-setup-key ] || shred -u /run/slax-bootstrap/nb-setup-key
+      nb_status="$(netbird status --json)"
+      nb_ip="$(jq -r '.netbirdIp' <<< "$nb_status" | cut -d/ -f1)"
+      nb_name="$(jq -r '.fqdn' <<< "$nb_status")"
+      echo "on NetBird as $nb_name ($nb_ip)"
 
-      echo "== SSH server off (Tailscale SSH instead; the security group never opened 22)"
+      echo "== SSH server off (NetBird SSH instead; the security group never opened 22)"
       systemctl disable --now ssh.socket ssh.service || true
       systemctl mask ssh.socket ssh.service
 
@@ -282,8 +285,8 @@ write_files:
         {
           echo "tls-san:"
           echo "  - slax-prod"
-          echo "  - $ts_ip"
-          [ -z "$ts_name" ] || [ "$ts_name" = null ] || echo "  - $ts_name"
+          echo "  - $nb_ip"
+          [ -z "$nb_name" ] || [ "$nb_name" = null ] || echo "  - $nb_name"
         } >> /etc/rancher/k3s/config.yaml
       fi
       fetch -o "$work/k3s-install.sh" "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION/+/%2B}/install.sh"

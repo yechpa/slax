@@ -330,7 +330,7 @@ receives the channel's events until it disconnects.
   the trusted proxies of `config.trustedProxies` (the k3s pod network). Production: Caddy on the host replaces any
   client `X-Forwarded-For` with the TCP peer and only the node reaches the web pod, so the address is the visitor's
   (`make proxy-test`). Dev: with k3s's ServiceLB in front of Traefik, the address Traefik sees may already be
-  rewritten to a node address (dev is tailnet-only, so this only lumps the developers together).
+  rewritten to a node address (dev is NetBird-only, so this only lumps the developers together).
 - **Sessions from before the session index.** A ban destroys the sessions indexed per user at sign-in. A session
   opened before that index existed is not destroyed, but it is useless: `EnsureNotBanned` refuses every request of a
   banned user and logs that session out on its next request.
@@ -423,7 +423,7 @@ receives the channel's events until it disconnects.
   PostgreSQL and Redis restart only when their own settings change, not on an app deployment.
 - **A deployment does not wait for the CI tests.** Deploy dev follows the Images workflow on `main`; the tests ran
   on the pull request before the merge (require them with branch protection).
-- **Dev is tailnet-only by a host firewall rule, not by k3s.** k3s's ServiceLB and API server listen on every node
+- **Dev is NetBird-only by a host firewall rule, not by k3s.** k3s's ServiceLB and API server listen on every node
   address; the mandatory LAN guard (`deploy/dev/slax-lan-guard.sh`, BOOTSTRAP.md step 4.1, required by k3s) drops
   80/443/6443 on the interfaces listed in `/etc/default/slax-lan-guard`. A new physical interface (USB adapter,
   Wi-Fi switched on) is exposed to its LAN until it is added there (`systemctl reload slax-lan-guard`). Because
@@ -459,20 +459,27 @@ receives the channel's events until it disconnects.
   a compromised app pod could still read or delete uploaded files, and a compromised app, queue or scheduler pod
   could read the database dumps in the backups bucket (the role may read `pg/`, for the backup jobs and the
   freshness check). Pods allowed to reach the metadata service can
-  also read the instance's user data, with its spent single-use Tailscale key.
+  also read the instance's user data, with its spent one-off NetBird setup key.
 - **Uploads carry an ACL header.** Flysystem always sends `x-amz-acl: private`, so the role has `s3:PutObjectAcl`
   on the files objects. The bucket enforces the owner (ACLs disabled) and blocks public access, so the ACL changes
   nothing; that S3 accepts it is to be confirmed on the real bucket before the first release (runbook §7 item 7).
 - **The web pod admits only its node**, relying on k3s's network policy engine (kube-router) always admitting
   node-local traffic (the same rule that lets kubelet probes in). Proven for probes in the dev k3s test; the Caddy
   path through the fixed ClusterIP is to be confirmed on the real node (runbook §7).
-- **The node's Tailscale auth key stays in the instance's user data** (readable with `ec2:DescribeInstanceAttribute`,
-  through the metadata service, and in cloud-init's root-only copy on disk). It is single use and short-lived, so it
-  is worthless once the node has joined.
+- **The node's NetBird setup key stays in the instance's user data** (readable with `ec2:DescribeInstanceAttribute`,
+  through the metadata service, and in cloud-init's root-only copy on disk). It is one-off and expires after a day
+  (revoked by hand once the node is up), so it is worthless once the node has joined.
+- **CI's NetBird setup key is reusable** (GitHub secret `NB_SETUP_KEY`, valid a year): whoever holds it can join
+  the network as a `ci` peer, which the policies let reach only TCP 6443 of slax-prod and TCP 443/6443 of slax-dev,
+  and the Kubernetes API still needs the namespace-scoped kubeconfig. Runners' peers are ephemeral (deleted
+  10 minutes after going offline). The network itself depends on the owner's self-hosted NetBird management
+  server: if it is down, peers already connected keep their tunnels, but CI cannot join.
 - **Two firewalls, both static**: the security group (TCP 80/443 only) and `slax-edge-guard` on the host (drops k3s's
   and SSH's ports on the public interface; k3s requires it, so stopping the guard stops k3s).
 - **Caddy and k3s are pinned** (the `.deb` and the install script are checked against checksums at first boot) and
-  are not updated by unattended-upgrades: updating them is a manual step. Tailscale updates itself.
+  are not updated by unattended-upgrades: updating them is a manual step. NetBird comes from its apt repository, so unattended-upgrades does not update it
+  either (it updates the Ubuntu archive only): `sudo apt-get install --only-upgrade netbird` on the node, matching
+  the management server's version.
 - **No HTTP/3**: the security group opens TCP 80/443 only, so Caddy serves HTTP/1.1 and HTTP/2.
 - **Backups are logical dumps, daily**: up to a day of data can be lost; there is no point-in-time recovery. The
   restore check restores only the newest dump. Besides the backup jobs' own alerts (failures, SIGTERM), the app
@@ -496,7 +503,7 @@ receives the channel's events until it disconnects.
   everything healthy, nothing deeper; nothing watches the service itself. The probe's own limits: it is as shallow as
   `/api/v1/health`; **GitHub runs the 5-minute schedule only every 5 to 9 hours** (observed), so an alert comes hours
   after the node went silent, and it disables the schedule of a repository left idle for 60 days;
-  GitHub itself, or the run's tailnet join for dev (OAuth client), failing shows as a red run and GitHub's e-mail,
+  GitHub itself, or the run's NetBird join for dev (setup key), failing shows as a red run and GitHub's e-mail,
   not as a Telegram alert; it shares the Telegram chat with the other alerts; and it leaves one tiny cache entry per
   run (evicted after 7 days unused). Nothing else watches the probe.
 - **`/api/v1/health` is shallow** (nginx, PHP-FPM and Laravel's boot). The monitor checks PostgreSQL and Redis on
