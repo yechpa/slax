@@ -1,7 +1,7 @@
 # Bootstrapping the development cluster (`slax-dev`)
 
 The development environment is a single-node k3s cluster on `slax-dev` (Ubuntu 24.04,
-amd64), reachable **only on the tailnet** at `https://dev.slax.yechpa.com`. Once this guide
+amd64), reachable **only over NetBird** (self-hosted, `https://netbird.yechpa.com`) at `https://dev.slax.yechpa.com`. Once this guide
 is done, every push to `main` deploys itself:
 
 ```
@@ -9,7 +9,7 @@ push to main ──> Images (.github/workflows/images.yml)
                    builds slax-app / slax-web / slax-scanner for amd64 and arm64,
                    scans them, pushes ghcr.io/yechpa/slax-*:<sha>
              ──> Deploy dev (.github/workflows/deploy-dev.yml)
-                   joins the tailnet (ephemeral tag:ci node), helm upgrade --install,
+                   joins NetBird (ephemeral peer, group ci), helm upgrade --install,
                    GET /api/v1/health until 200, Telegram "[Dev] Deploy OK/FAILED <sha>"
 ```
 
@@ -22,7 +22,7 @@ commands below read secrets at hidden prompts.
 Contents:
 1. [Second disk](#1-second-disk-mntssd)
 2. [k3s on the second disk](#2-k3s-on-the-second-disk)
-3. [Tailscale](#3-tailscale)
+3. [NetBird](#3-netbird)
 4. [DNS and what is exposed](#4-dns-and-what-is-exposed)
 5. [Helm and cert-manager](#5-helm-and-cert-manager)
 6. [Certificates: ClusterIssuer with DNS-01](#6-certificates-clusterissuer-with-dns-01)
@@ -71,15 +71,14 @@ install time).
 
 **YOU DO THIS**
 
-1. Find the node's Tailscale address and name (step 3 installs Tailscale if it is not
-   there yet; come back here after it):
+1. Find the node's NetBird address (step 3 installs NetBird if it is not there yet; come
+   back here after it):
 
    ```sh
-   tailscale ip -4          # 100.x.y.z
-   tailscale status --self  # the MagicDNS name, e.g. slax-dev
+   sudo netbird status | grep 'NetBird IP'   # 10.200.x.y/16
    ```
 
-2. Write the configuration (replace `100.x.y.z`):
+2. Write the configuration (replace `10.200.x.y`):
 
    ```sh
    sudo install -d -m 0755 /etc/rancher/k3s /mnt/ssd/k3s-storage
@@ -89,9 +88,9 @@ install time).
    # Volumes (PostgreSQL, Redis, MinIO) of the local-path provisioner: also on the second
    # disk, outside the data directory, so reinstalling k3s never touches them.
    default-local-storage-path: /mnt/ssd/k3s-storage
-   # The API server's certificate must name the address CI connects to over the tailnet.
+   # The API server's certificate must name the address CI connects to over NetBird.
    tls-san:
-     - 100.x.y.z
+     - 10.200.x.y
      - slax-dev
    write-kubeconfig-mode: "0600"
    EOF
@@ -138,86 +137,87 @@ install time).
 
    The commands below write `sudo k3s kubectl`; with this file, plain `kubectl` does the same.
 
-## 3. Tailscale
+## 3. NetBird
 
-**YOU DO THIS**
+The overlay network is the owner's self-hosted NetBird (`https://netbird.yechpa.com`). Its
+"Default" All → All policy is **disabled**: a peer reaches only what a policy allows.
 
-1. In the tailnet policy file (Tailscale admin console → Access controls), declare the two
-   tags and allow CI to reach the dev node on the Kubernetes API (6443) and HTTPS (443)
-   **only**. Merge this into your policy; keep your own rules for your devices. If your
-   policy is still the default "allow everything" rule, replace it with explicit rules,
-   otherwise `tag:ci` can reach every device you own.
+**YOU DO THIS** (dashboard, or the API with an admin's personal access token)
 
-   ```jsonc
-   {
-     "tagOwners": {
-       "tag:slax-dev": ["autogroup:admin"],
-       "tag:ci":       ["autogroup:admin"],
-     },
-     "acls": [
-       // Your own devices (adapt): everything on the dev server.
-       {"action": "accept", "src": ["autogroup:member"], "dst": ["tag:slax-dev:*"]},
-       // GitHub Actions: the Kubernetes API and the site, nothing else, nowhere else.
-       {"action": "accept", "src": ["tag:ci"], "dst": ["tag:slax-dev:443,6443"]},
-     ],
-     "tests": [
-       {"src": "tag:ci", "accept": ["tag:slax-dev:443", "tag:slax-dev:6443"], "deny": ["tag:slax-dev:22", "tag:slax-dev:80"]},
-     ],
-   }
-   ```
+1. Groups `slax-dev` (the dev server) and `ci` (GitHub Actions runners; shared with
+   production, runbook §3.2). Your own devices are in `Users`.
+2. Policies (Access Control → Policies; TCP, one direction):
 
-   (With the newer `grants` syntax the CI rule is
-   `{"src": ["tag:ci"], "dst": ["tag:slax-dev"], "ip": ["tcp:443", "tcp:6443"]}`.)
+   | Name              | Source  | Destination | Ports    | What                                 |
+   |-------------------|---------|-------------|----------|--------------------------------------|
+   | ci to slax-dev    | `ci`    | `slax-dev`  | 443, 6443 | CI: the site's health and the Kubernetes API, nothing else |
+   | Users to slax-dev | `Users` | `slax-dev`  | 443, 6443 | you: the site and `kubectl` (SSH stays on the LAN) |
 
-2. Install Tailscale on `slax-dev` (official package repository for Ubuntu 24.04, see
-   <https://tailscale.com/kb/1031/install-linux>), then join with the server's tag:
+   Put only your own devices in `Users`: a phone added there reaches the dev site at once.
+3. Install NetBird on `slax-dev` (its package repository for Debian/Ubuntu) and join with a
+   **one-off** setup key whose auto-assigned group is `slax-dev` (Setup Keys → Create; not
+   ephemeral, a server must survive reboots). The key is read from a file, never typed on a
+   command line:
 
    ```sh
-   sudo tailscale up --advertise-tags=tag:slax-dev
-   tailscale ip -4
+   curl -fsSL https://pkgs.netbird.io/debian/public.key | sudo gpg --dearmor -o /usr/share/keyrings/netbird-archive-keyring.gpg
+   echo 'deb [signed-by=/usr/share/keyrings/netbird-archive-keyring.gpg] https://pkgs.netbird.io/debian stable main' \
+     | sudo tee /etc/apt/sources.list.d/netbird.list
+   sudo apt-get update && sudo apt-get install -y netbird
+   (umask 077; read -r -s -p 'Setup key: ' k; echo; printf '%s' "$k" > ~/.netbird-setup-key)
+   sudo netbird up --management-url https://netbird.yechpa.com --hostname slax-dev \
+     --setup-key-file ~/.netbird-setup-key --disable-firewall
+   shred -u ~/.netbird-setup-key
+   sudo netbird status | grep 'NetBird IP'
    ```
 
-   In the admin console → Machines → `slax-dev`: **Disable key expiry** (a server must not
-   drop off the tailnet when its key expires).
+   A peer joined with a setup key has no login expiry: nothing to disable.
 
-3. Create the OAuth client CI joins with: admin console → Settings → OAuth clients →
-   Generate. Scope: **Auth Keys: Write**, tag **`tag:ci`** only. Keep the client ID and the
-   secret for step 9 (`TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`). Each workflow run then
-   registers an *ephemeral* node tagged `tag:ci`, removed automatically when the run ends.
+   **`--disable-firewall` is required on this node.** NetBird's own firewall marks the
+   traffic it allows and drops forwarded traffic whose mark changed, and k3s's network policy
+   engine (kube-router) adds bits to the mark of every packet bound for a pod: whatever
+   ServiceLB redirects to Traefik (443) is dropped, while 6443 (local) works. Changing the
+   mark range (`NB_FWMARK_BASE`) does not help. The LAN guard (4.1) filters `wt0` instead:
+   only TCP 443 and 6443 (the two policies above) and ICMP pass. Keep its
+   `OVERLAY_TCP_PORTS` in line with the policies towards `slax-dev`.
+4. The setup key CI joins with: Setup Keys → Create, name `github-ci`, **reusable**,
+   **ephemeral** (each run's peer is deleted 10 minutes after it goes offline), auto-assigned
+   group `ci`, expiry one year. Keep it for step 9 (`NB_SETUP_KEY`). The workflows join with
+   `.github/actions/netbird-join` (the NetBird client, pinned and checksum verified).
 
 ## 4. DNS and what is exposed
 
-The dev site has a public name that resolves to a private (tailnet) address: only devices
-on your tailnet can connect, and the certificate is obtained by DNS-01, so **no port is
+The dev site has a public name that resolves to a private (NetBird) address: only your peers
+on NetBird can connect, and the certificate is obtained by DNS-01, so **no port is
 open to the Internet**.
 
-**YOU DO THIS**: in yechpa.com's DNS, two `A` records pointing to the Tailscale IPv4 of
-`slax-dev` (`tailscale ip -4`):
+**YOU DO THIS**: in yechpa.com's DNS, two `A` records pointing to the NetBird IPv4 of
+`slax-dev` (`sudo netbird status | grep 'NetBird IP'`):
 
 | Name                         | Type | Value        | What                                   |
 |------------------------------|------|--------------|----------------------------------------|
-| `dev.slax.yechpa.com`        | A    | `100.x.y.z`  | the app                                |
-| `files.dev.slax.yechpa.com`  | A    | `100.x.y.z`  | file downloads (MinIO, its own origin) |
+| `dev.slax.yechpa.com`        | A    | `10.200.x.y` | the app                                |
+| `files.dev.slax.yechpa.com`  | A    | `10.200.x.y` | file downloads (MinIO, its own origin) |
 
-Check from any machine: `dig +short dev.slax.yechpa.com` → `100.x.y.z`.
+Check from any machine: `dig +short dev.slax.yechpa.com` → `10.200.x.y`.
 
-### 4.1 Tailnet only: the LAN guard (mandatory)
+### 4.1 NetBird only: the LAN guard (mandatory)
 
 k3s runs Traefik behind its built-in ServiceLB, which listens on ports 80 and 443 of
 **every** address of the node, and the Kubernetes API listens on 6443 everywhere too: the
-Tailscale address, but also the LAN address. The DNS records alone do not stop a machine on
+NetBird address, but also the LAN address. The DNS records alone do not stop a machine on
 your LAN from connecting. The LAN guard does: it drops TCP 80, 443 and 6443 arriving on the
 physical interfaces (a chain of its own, `SLAX-LAN-GUARD`, in the `mangle` table, before
-Kubernetes' port mappings; IPv4, and IPv6 when the host has it). Traffic on `tailscale0`, on the loopback and between pods is untouched, **and so is
-every other port: SSH (22) keeps working from the LAN and from the tailnet**, so the guard
+Kubernetes' port mappings; IPv4, and IPv6 when the host has it). Traffic on `wt0` (NetBird), on the loopback and between pods is untouched, **and so is
+every other port: SSH (22) keeps working from the LAN**, so the guard
 cannot lock you out. k3s is made to require it, so the cluster never starts unguarded.
 
 Until this step is done, the Kubernetes API (6443, authenticated) and Traefik listen on the
-LAN as well: do 4.1 right after step 2 (Tailscale, step 3, is not needed for it).
+LAN as well: do 4.1 right after step 2 (NetBird, step 3, is not needed for it).
 
 **YOU DO THIS**
 
-1. Your physical interfaces: every one that is not `lo`, `tailscale0`, `cni0`, `flannel.*`,
+1. Your physical interfaces: every one that is not `lo`, `wt0`, `cni0`, `flannel.*`,
    `veth*`, nor a bridge of Docker or libvirt (`docker0`, `br-*`, `virbr*`), which must stay
    out of the list; e.g. `enp0s31f6`, and `wlp2s0` if Wi-Fi is up:
 
@@ -229,7 +229,7 @@ LAN as well: do 4.1 right after step 2 (Tailscale, step 3, is not needed for it)
 
    ```sh
    sudo install -m 0755 deploy/dev/slax-lan-guard.sh /usr/local/sbin/slax-lan-guard
-   echo 'LAN_INTERFACES="enp0s31f6"' | sudo tee /etc/default/slax-lan-guard   # your interface(s), space separated
+   printf '%s\n' 'LAN_INTERFACES="enp0s31f6"' 'OVERLAY_INTERFACES="wt0"' | sudo tee /etc/default/slax-lan-guard   # your LAN interface(s), space separated; wt0 = NetBird
    sudo install -m 0644 deploy/dev/slax-lan-guard.service /etc/systemd/system/slax-lan-guard.service
    sudo tee /etc/systemd/system/k3s.service.d/lan-guard.conf >/dev/null <<'EOF'
    [Unit]
@@ -238,10 +238,10 @@ LAN as well: do 4.1 right after step 2 (Tailscale, step 3, is not needed for it)
    EOF
    sudo systemctl daemon-reload
    sudo systemctl enable --now slax-lan-guard
-   sudo slax-lan-guard status          # every interface "guarded" (iptables, and ip6tables with IPv6)
+   sudo slax-lan-guard status          # every interface "guarded", wt0 "(overlay) guarded" (iptables, and ip6tables with IPv6)
    ```
 
-3. Prove it, from **another machine on the LAN** (Tailscale off on it, or another device),
+3. Prove it, from **another machine on the LAN** (NetBird off on it, or another device),
    with `LAN_IP` the server's LAN address (`ip -br addr`):
 
    ```sh
@@ -258,7 +258,7 @@ LAN as well: do 4.1 right after step 2 (Tailscale, step 3, is not needed for it)
    curl -6 -k --max-time 5 "https://[LAN_IP6]:6443/version" # must time out
    ```
 
-   and from a device on the tailnet: `curl https://dev.slax.yechpa.com/api/v1/health`
+   and from a device on NetBird: `curl https://dev.slax.yechpa.com/api/v1/health`
    answers (after step 10).
 
 Changing the interface list (a USB adapter, Wi-Fi turned on, an interface gone): edit
@@ -280,7 +280,7 @@ rules; k3s then refuses to start until the guard is back, or until you delete
 
 Also **YOU DO THIS**: check that your router forwards no port to `slax-dev`. Nothing is
 then reachable from the Internet, and the ingress serves HTTPS only (port 80 answers 404
-even on the tailnet).
+even over NetBird).
 
 ## 5. Helm and cert-manager
 
@@ -301,7 +301,7 @@ even on the tailnet).
    `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml`.
 
 2. cert-manager, pinned (v1.21.3), with its CRDs. Its DNS-01 self-check asks public
-   resolvers directly, so the node's own DNS settings (Tailscale's MagicDNS) never get in
+   resolvers directly, so the node's own DNS settings (NetBird's DNS) never get in
    the way:
 
    ```sh
@@ -374,7 +374,7 @@ Build its kubeconfig (the token stays in shell variables and a private file, nev
 command line):
 
 ```sh
-NODE=100.x.y.z    # the Tailscale IPv4 of slax-dev (listed in tls-san, step 2)
+NODE=10.200.x.y   # the NetBird IPv4 of slax-dev (listed in tls-san, step 2)
 TOKEN="$(kubectl -n slax get secret slax-deployer-token -o jsonpath='{.data.token}' | base64 -d)"
 CA="$(kubectl -n slax get secret slax-deployer-token -o jsonpath='{.data.ca\.crt}')"
 umask 077
@@ -461,14 +461,13 @@ web UI).
 2. Its secrets (`gh` prompts for each value without echo):
 
    ```sh
-   gh secret set TS_OAUTH_CLIENT_ID --env dev --repo yechpa/slax
-   gh secret set TS_OAUTH_SECRET    --env dev --repo yechpa/slax
+   gh secret set NB_SETUP_KEY       --env dev --repo yechpa/slax   # the github-ci setup key (step 3.4)
    gh secret set TELEGRAM_BOT_TOKEN --env dev --repo yechpa/slax
    gh secret set TELEGRAM_CHAT_ID   --env dev --repo yechpa/slax
    ```
 
    And the deployer kubeconfig, from the server (copy the `.b64` file over SSH on the
-   tailnet, or run `gh` there), then delete it everywhere:
+   LAN, or run `gh` there), then delete it everywhere:
 
    ```sh
    gh secret set DEV_KUBECONFIG --env dev --repo yechpa/slax < /tmp/slax-deployer.kubeconfig.b64
@@ -477,12 +476,12 @@ web UI).
 
    | Secret | What |
    |---|---|
-   | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` | Tailscale OAuth client (Auth Keys: Write, `tag:ci`) |
+   | `NB_SETUP_KEY` | NetBird setup key `github-ci` (reusable, ephemeral, group `ci`) |
    | `DEV_KUBECONFIG` | base64 of the deployer kubeconfig (step 7) |
    | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | deploy alerts (optional: without them, no alert) |
 
    The outside probe (`.github/workflows/external-probe.yml`, a slow safety net: see runbook §4.10) reuses the
-   `TS_OAUTH_*` and `TELEGRAM_*` secrets and the existing `tag:ci` rule: nothing to add.
+   `NB_SETUP_KEY` and `TELEGRAM_*` secrets and the existing `ci to slax-dev` policy: nothing to add.
 
    The image workflow needs no secret: it pushes with the run's own `GITHUB_TOKEN`.
 
@@ -518,7 +517,7 @@ The release is created on first install; the migration Job runs after it (Postgr
 part of the release) and then before every upgrade. `--atomic` rolls an upgrade back if
 anything fails to become ready.
 
-From a device on the tailnet: `curl https://dev.slax.yechpa.com/api/v1/health` →
+From a device on NetBird: `curl https://dev.slax.yechpa.com/api/v1/health` →
 `{"status":"ok"}`.
 
 ## 11. Verification checklist (end to end)
@@ -530,16 +529,16 @@ Once steps 1-10 are done, check the whole chain (Task 12, step 5). Tick each lin
 3. [ ] Actions → **Images**: six builds (app, web, scanner × amd64, arm64) and three
        `manifest` jobs green; `docker buildx imagetools inspect ghcr.io/yechpa/slax-app:<sha>`
        lists `linux/amd64` and `linux/arm64`.
-4. [ ] Actions → **Deploy dev** starts by itself after Images, joins the tailnet, `helm
+4. [ ] Actions → **Deploy dev** starts by itself after Images, joins NetBird, `helm
        upgrade` succeeds, the health check gets 200.
 5. [ ] Telegram: `[Dev] Deploy OK: <short sha> is live on dev.` with a link to the run. In
        the run's log, the token appears nowhere (search the log for a few characters of
        it: no match; `***` at most).
-6. [ ] Tailscale admin console: during the run an ephemeral `tag:ci` machine appears, and it
-       is gone after.
+6. [ ] NetBird dashboard → Peers: during the run an ephemeral `gha-<run id>-<attempt>` peer in
+       the group `ci` appears; it is deleted about 10 minutes after the run.
 7. [ ] `helm -n slax history slax` shows the new revision with the commit's SHA as image
        tag (`kubectl -n slax get deploy slax-app -o jsonpath='{..image}'`).
-8. [ ] In a browser on the tailnet, `https://dev.slax.yechpa.com`: valid certificate, sign in
+8. [ ] In a browser on NetBird, `https://dev.slax.yechpa.com`: valid certificate, sign in
        with Google, post in `#general`, open a thread, react, upload an image (its preview
        loads from `files.dev.slax.yechpa.com`), see another session's presence. DevTools →
        Console: no `Content-Security-Policy` violation; Network → WS: `/app/...` connected.
@@ -550,15 +549,15 @@ Once steps 1-10 are done, check the whole chain (Task 12, step 5). Tick each lin
 11. [ ] The scanner is reachable from the app only:
         `kubectl -n slax exec deploy/slax-scheduler -- php -r 'var_dump((bool) @fsockopen("slax-scanner", 8000, $e, $m, 3));'` → `bool(false)`;
         the same from `deploy/slax-app -c php` → `bool(true)`.
-12. [ ] Not reachable outside the tailnet: from a phone on mobile data with Tailscale off,
+12. [ ] Not reachable outside NetBird: from a phone on mobile data with NetBird off,
         `https://dev.slax.yechpa.com` does not load.
 12a. [ ] Not reachable from the LAN: from another LAN machine, `curl -k --max-time 5 https://<LAN IP>/`
         and `curl -k --max-time 5 https://<LAN IP>:6443/version` both time out, while
         `ssh <LAN IP>` still works; on the server `sudo slax-lan-guard status` says "guarded"
         for every interface, and after a reboot too.
-13. [ ] Failure alert, once: in the Tailscale policy, temporarily remove the `tag:ci` rule;
+13. [ ] Failure alert, once: in the NetBird dashboard, temporarily disable the `ci to slax-dev` policy;
         re-run the last *Deploy dev* run (Actions → Re-run jobs); it fails reaching the API
-        and Telegram gets `[Dev] Deploy FAILED (failure): <sha>`. Put the rule back.
+        and Telegram gets `[Dev] Deploy FAILED (failure): <sha>`. Enable it again.
 14. [ ] An error reaches Telegram: `kubectl -n slax exec deploy/slax-app -c php -- php artisan tinker --execute 'logger()->error("bootstrap check");'`
         → a `[Dev]` alert (needs the Telegram keys in `slax-secrets`).
 15. [ ] The uptime monitor runs every minute and sees everything:
@@ -613,7 +612,7 @@ keeps them (StatefulSet volume claims are never deleted by Helm); delete the cla
   it in the database first with `ALTER ROLE`).
 - The CI deployer token: `kubectl -n slax delete secret slax-deployer-token && kubectl apply -f deploy/dev/deployer-rbac.yaml`,
   then redo the kubeconfig (step 7) and `DEV_KUBECONFIG` (step 9).
-- Tailscale OAuth client: generate a new one, update the two GitHub secrets, revoke the old one.
+- NetBird setup key `github-ci`: create a new one (step 3.4), update `NB_SETUP_KEY` in both environments, revoke the old one.
 
 ## 15. Troubleshooting
 
@@ -626,11 +625,11 @@ keeps them (StatefulSet volume claims are never deleted by Helm); delete the cla
 | `helm upgrade` fails in `pre-upgrade hooks` | `kubectl -n slax logs job/slax-migrate` | a migration failed; the release is rolled back, the old pods keep running |
 | Queue or scheduler restarted once on a fresh pod (`Operation timed out` to Redis) | `kubectl -n slax logs <pod> --previous` | the network policy for a brand-new pod is applied a few seconds after it starts; harmless |
 | Certificate not `READY` | `kubectl -n slax describe certificate slax-tls`, `kubectl get challenges -A`, `kubectl -n cert-manager logs deploy/cert-manager` | DNS token rights, wrong zone in the issuer's `dnsZones`, or TXT propagation (wait) |
-| Browser cannot resolve or reach `dev.slax.yechpa.com` | `dig +short dev.slax.yechpa.com`, `tailscale status` | device not on the tailnet; or a router/resolver with "DNS rebinding protection" drops answers in 100.64.0.0/10 (use another resolver, or Tailscale's MagicDNS with a split-DNS entry) |
-| A new device (a phone) on the tailnet reaches nothing on dev | `tailscale status` shows it; the policy's `acls` | the policy names its sources explicitly: add a rule for the device, e.g. `{"action": "accept", "src": ["phone"], "dst": ["tag:slax-dev:443"]}` (HTTPS only), and a test for it |
+| Browser cannot resolve or reach `dev.slax.yechpa.com` | `dig +short dev.slax.yechpa.com`, `netbird status` | device not on NetBird, or not in `Users`; or a router/resolver with "DNS rebinding protection" drops private answers such as 10.200.0.0/16 (use another resolver, or a NetBird nameserver/DNS entry) |
+| A new device (a phone) on NetBird reaches nothing on dev | `netbird status -d` shows it; its groups in the dashboard | the policies name their source groups: put the device in `Users`, or a group of its own with a policy to `slax-dev` on 443 only |
 | WebSocket drops every minute | browser DevTools → WS | Traefik's entry point timeouts: set `ports.websecure.transport.respondingTimeouts.readTimeout=0` in a `HelmChartConfig` for Traefik |
 | `Origin not allowed` on the WebSocket | Reverb log | the page's host is not `publicHost` (`REVERB_ALLOWED_ORIGINS`) |
-| CI cannot reach the API (`i/o timeout` to `100.x.y.z:6443`) | the run's Tailscale step, tailnet policy | ACL rule for `tag:ci`, or `tls-san` missing (x509 error) |
+| CI cannot reach the API (`10.200.x.y:6443 is not reachable over NetBird`) | the run's *Join NetBird* step (`netbird status --detail`), the policies | `ci to slax-dev` disabled, slax-dev offline, `DEV_KUBECONFIG` pointing elsewhere, or `tls-san` missing (x509 error) |
 | Sign-in says "anti-bot check did not pass" | `kubectl -n slax logs deploy/slax-app -c php` | `TURNSTILE_SECRET` and `TURNSTILE_SITE_KEY` not from the same widget, or the widget does not list `dev.slax.yechpa.com` |
 
 Useful commands:
@@ -648,7 +647,7 @@ kubectl -n slax port-forward slax-minio-0 9001:9001   # MinIO console on http://
 
 Every night at 03:30 `slax-dev` installs the Ubuntu updates and sends one Telegram message
 (`[Dev] Server care done, everything works.`, or the list of what failed). It checks k3s,
-Tailscale and the LAN guard, the node, the Slax pods, `https://dev.slax.yechpa.com/healthz`
+NetBird and the LAN guard, the node, the Slax pods, `https://dev.slax.yechpa.com/healthz`
 (200), the certificate (at least 14 days left) and the disks (`/` and `/mnt/ssd`, alert at
 80 %). It never reboots by itself: if an update needs one, the message says `reboot needed`;
 reboot when you are at the machine, then check that k3s, `slax-lan-guard` and `/mnt/ssd`

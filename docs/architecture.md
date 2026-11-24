@@ -66,7 +66,7 @@ flowchart LR
 | Backup, restore check | Daily `pg_dump` to S3, weekly restore into a throwaway server | `ghcr.io/yechpa/slax-backup` |
 | Uptime monitor | Every minute, outside Laravel: health, Reverb, PostgreSQL, Redis, the public URL, disks | `slax-backup` |
 | Heartbeat | After every fully healthy monitor run, a ping to an outside dead man's switch (healthchecks.io): its silence reports a dead or switched-off node within minutes | `slax-backup` (`MONITOR_HEARTBEAT_URL`) |
-| Outside probe | Scheduled every 5 minutes (GitHub runs it every few hours) from GitHub's runners: `/api/v1/health` of prod and (through the tailnet) dev; a slow safety net | `.github/workflows/external-probe.yml` |
+| Outside probe | Scheduled every 5 minutes (GitHub runs it every few hours) from GitHub's runners: `/api/v1/health` of prod and (through NetBird) dev; a slow safety net | `.github/workflows/external-probe.yml` |
 
 
 Every image is built for amd64 and arm64 by `.github/workflows/images.yml` from a commit,
@@ -250,7 +250,7 @@ sequenceDiagram
 | | Workstation | End-to-end | Dev | Prod |
 |---|---|---|---|---|
 | Where | Docker Compose, `make up` | Compose project `slax-e2e`, `make e2e` | `slax-dev`, a home server (amd64), k3s | AWS EC2 t4g.small (arm64), eu-central-1, k3s |
-| Reached at | `http://localhost:8080` | inside Docker only | `https://dev.slax.yechpa.com`, tailnet only | `https://slax.yechpa.com` |
+| Reached at | `http://localhost:8080` | inside Docker only | `https://dev.slax.yechpa.com`, NetBird only | `https://slax.yechpa.com` |
 | Front | nginx + Vite dev server | nginx + built SPA | Traefik, cert-manager (DNS-01) | Caddy on the host (Let's Encrypt), no ingress controller |
 | Images | development PHP image, sources mounted | same | the release images (`<sha>`) | the same `<sha>` images dev ran |
 | Files | MinIO | MinIO | MinIO | S3, through the instance role |
@@ -264,7 +264,7 @@ flowchart LR
     ci --> merge["Merge to main"]
     img --> merge
     merge --> push["Images pushed<br/>ghcr.io/yechpa/slax-*:sha"]
-    push --> devdeploy["Deploy dev: Tailscale (ephemeral, tag:ci)<br/>helm upgrade --atomic, health check"]
+    push --> devdeploy["Deploy dev: NetBird (ephemeral, group ci)<br/>helm upgrade --atomic, health check"]
     devdeploy --> tgdev["Telegram [Dev]"]
     merge --> tag["Tag vX.Y.Z (by hand)"]
     tag --> check["Release prod: tag on main,<br/>images public, CI green"]
@@ -296,7 +296,7 @@ redeploy of the previous image without undoing the schema.
 | Push notifications leaking messages, or the queue aimed at an internal host | Payloads carry names and a generic line, never text, addresses or file names, end-to-end encrypted to the browser; subscription endpoints must be a known push service (https, port 443); banned, non-member and connected people are never notified | Real delivery checked by hand only; names are visible on a lock screen |
 | Admin actions without trace | Audit log of sensitive actions with the visitor's real IP (Caddy replaces any client `X-Forwarded-For`; nginx believes the pod network only), kept 180 days | – |
 | A compromised pod | Pod Security *restricted* (non-root, read-only root, no capability, seccomp), default-deny network policies (the scanner reaches nothing; PostgreSQL and Redis admit named pods only), no Kubernetes API token in any pod, the instance metadata service denied to pods without AWS needs | App, queue and scheduler can use the instance role (the two buckets only; it cannot delete backups) |
-| Infrastructure exposure | Only TCP 80/443 public (security group and a host firewall); SSH and the Kubernetes API over Tailscale only; dev not reachable outside the tailnet; no SSH daemon in prod | – |
+| Infrastructure exposure | Only TCP 80/443 public (security group and a host firewall); SSH and the Kubernetes API over NetBird (self-hosted) only; dev not reachable outside NetBird; no SSH daemon in prod (NetBird SSH) | – |
 | Secrets in a public repository | Secrets only in Kubernetes Secrets and GitHub environments; gitleaks in CI and pre-commit; GitHub secret scanning and push protection; alerts never carry a secret or a user's message | – |
 | Supply chain | Base images and third-party actions pinned by digest or commit; Trivy fails a build on a fixable critical vulnerability; locked dependencies | Alpine packages are upgraded at build time (two builds of one commit may differ) |
 
@@ -326,7 +326,7 @@ Short records: the choice, why, and what it costs.
 6. **Helm over raw manifests.** One chart, two values files, revision history and
    `helm rollback`, `--atomic` upgrades; the rendered output is checked by schema and by
    project rules in CI. No GitOps controller (Argo CD) for one cluster each: push-based
-   deploys over Tailscale are enough.
+   deploys over NetBird are enough.
 7. **Caddy on the host in production.** Automatic certificates and HSTS in a few lines, the
    visitor's real address preserved, and k3s without Traefik and ServiceLB: nothing in the
    cluster listens on a public port, and less memory on a 2 GiB node.
@@ -373,7 +373,7 @@ Short records: the choice, why, and what it costs.
 Production: about **$20.9 a month** (t4g.small on demand $14.02, 30 GB gp3 $2.86, the
 public IPv4 address $3.65, S3 about $0.40), slightly above the $15-20 target; a one-year
 savings plan would bring it under. t4g.medium, if needed, would be about $34.9. Dev runs on
-the owner's hardware; GitHub Actions (public repository), GHCR, Tailscale (personal), Let's
+the owner's hardware; GitHub Actions (public repository), GHCR, NetBird (self-hosted on the owner's existing EC2 instance), Let's
 Encrypt, Turnstile and Telegram cost nothing. Details: [runbook.md §2](runbook.md#2-sizing-and-cost).
 
 ## 8. Next (v2)

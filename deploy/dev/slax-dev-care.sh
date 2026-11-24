@@ -81,7 +81,7 @@ else
 fi
 
 # --- 2. Services ---------------------------------------------------------------------------
-for unit in k3s tailscaled slax-lan-guard; do
+for unit in k3s netbird slax-lan-guard; do
     if systemctl is-active --quiet "$unit"; then ok "$unit running"; else bad "$unit is NOT running"; fi
 done
 
@@ -104,12 +104,12 @@ else
     bad "no slax pods found"
 fi
 
-# The app, as a person on the tailnet reaches it. 200 only: a redirect or an error is a failure.
+# The app, as a person on NetBird reaches it. 200 only: a redirect or an error is a failure.
 status=$(curl --silent --max-time 15 --output /dev/null --write-out '%{http_code}' "https://${DEV_HOST}/healthz" || true)
 if [ "$status" = 200 ]; then ok "slax answers (200)"; else bad "slax answers ${status:-nothing} instead of 200"; fi
 
-# --- 4. Tailscale and the certificate ------------------------------------------------------
-if tailscale status >/dev/null 2>&1; then ok "Tailscale connected"; else bad "Tailscale not connected"; fi
+# --- 4. NetBird and the certificate --------------------------------------------------------
+if netbird status 2>/dev/null | grep -q '^Management: Connected'; then ok "NetBird connected"; else bad "NetBird not connected"; fi
 
 expiry=$(printf '' | timeout 10 openssl s_client -connect "${DEV_HOST}:443" -servername "$DEV_HOST" 2>/dev/null |
     openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)

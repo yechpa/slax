@@ -5,7 +5,7 @@
 # Checks: start is idempotent (one jump, the expected rules, nothing about 80/443); from
 # another container, 6443/9345/10250/22 time out while 80 and 443 still answer; traffic on another
 # interface (the loopback) is untouched; status reports; stop removes everything and is
-# harmless twice; tailscale0/cni0 named as public interfaces are refused.
+# harmless twice; wt0/tailscale0/cni0 named as public interfaces are refused.
 set -euo pipefail
 
 alpine_image="alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
@@ -84,7 +84,7 @@ check "no default route at all: start fails after the wait (systemd retries it)"
 check "... and stop still works without a route" docker exec "$name-node" sh /usr/local/sbin/slax-edge-guard stop
 docker exec "$name-node" ip route add default via "$gateway"
 
-for bad in tailscale0 cni0 lo; do
+for bad in wt0 tailscale0 cni0 lo; do
     check "refuses $bad as a public interface" sh -c "! docker exec -e PUBLIC_INTERFACES=$bad $name-node sh -c 'mkdir -p /etc/default && echo PUBLIC_INTERFACES=$bad > /etc/default/slax-edge-guard && sh /usr/local/sbin/slax-edge-guard start' 2>/dev/null"
 done
 docker exec "$name-node" rm -f /etc/default/slax-edge-guard

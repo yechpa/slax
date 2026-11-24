@@ -2,7 +2,7 @@
 
 The acceptance criteria of the design (docs/superpowers/specs/2026-10-30-slax-design.md, §10
 "Comment on saura que c'est fini") turned into steps to run by hand, first on **dev**
-(`https://dev.slax.yechpa.com`, on the tailnet), then on **prod** (`https://slax.yechpa.com`).
+(`https://dev.slax.yechpa.com`, on NetBird), then on **prod** (`https://slax.yechpa.com`).
 Run them in order: each part assumes the previous ones passed.
 
 **Status: nothing in this document has been run yet** on dev or prod (it was written before
@@ -151,7 +151,7 @@ permissions-policy: …
 (Reverb's API is not public).
 6.4 [ ] The certificate: `echo | openssl s_client -connect slax.yechpa.com:443 -servername slax.yechpa.com 2>/dev/null | openssl x509 -noout -issuer -dates`
 → Let's Encrypt, about 90 days.
-6.5 [ ] Ports: from outside the tailnet, `nc -vz -w 5 slax.yechpa.com 22` and `… 6443` time
+6.5 [ ] Ports: from outside NetBird, `nc -vz -w 5 slax.yechpa.com 22` and `… 6443` time
 out (runbook §7 item 6).
 6.6 [ ] Optional, external views: securityheaders.com and SSL Labs on `slax.yechpa.com`
 (A or better expected; note anything they flag).

@@ -11,15 +11,15 @@
 # the failure count travels between runs in the Actions cache (a key per run, the newest one is
 # restored), parsed and never executed.
 #
-# prod: the public URL, no secret but Telegram's. dev: tailnet only, so the runner joins it as
-# the same ephemeral tag:ci node the deployment uses, which the tailnet policy already lets reach
-# slax-dev on 443: no new secret, no policy change (deploy/dev/BOOTSTRAP.md §9 holds the secrets,
+# prod: the public URL, no secret but Telegram's. dev: NetBird only, so the runner joins it as
+# the same ephemeral ci peer the deployment uses (.github/actions/netbird-join), which the
+# NetBird policy already lets reach slax-dev on 443: no new secret, no policy change (deploy/dev/BOOTSTRAP.md §9 holds the secrets,
 # in the `dev` environment, which only jobs running from main can read).
 #
 # Limits (docs/known-limitations.md): the schedule says every 5 minutes, but GitHub runs it only
 # every 5 to 9 hours (observed in November 2026): a slow safety net. The timely alarm for a dead
 # node is the heartbeat (docs/runbook.md 4.10). GitHub also disables the schedule of a repository left without any activity for 60 days; a job that cannot
-# even start (the tailnet join fails) shows as a red run and GitHub's own failure e-mail, not as a
+# even start (the NetBird join fails) shows as a red run and GitHub's own failure e-mail, not as a
 # Telegram alert. Pause it while slax-dev is switched off on purpose:
 #   gh workflow disable external-probe.yml --repo yechpa/slax   (enable, afterwards)
 name: External probe
@@ -104,14 +104,16 @@ jobs:
             deploy/monitoring/uptime.sh
             deploy/monitoring/external-probe.sh
             deploy/backup/lib.sh
+            .github/actions/netbird-join
           sparse-checkout-cone-mode: false
 
-      - name: Join the tailnet (ephemeral, tag:ci)
-        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+      # dev.slax.yechpa.com resolves (public DNS) to slax-dev's NetBird address.
+      - name: Join NetBird (ephemeral, group ci)
+        uses: ./.github/actions/netbird-join
         with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
+          setup-key: ${{ secrets.NB_SETUP_KEY }}
+          target-host: dev.slax.yechpa.com
+          target-port: "443"
 
       - name: Restore the failure count
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -137,3 +139,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/probe-state
           key: probe-state-dev-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Leave NetBird
+        if: always()
+        run: if command -v netbird >/dev/null; then sudo netbird down || true; fi

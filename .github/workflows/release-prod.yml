@@ -7,8 +7,8 @@
 #           the cluster pulls them (main's Images run built and scanned them; the tag run of
 #           Images only adds the vX.Y.Z alias; a new GHCR package is private until made
 #           public). Anything else fails here, before anyone is asked to approve.
-#   deploy  environment `production`: waits for a required reviewer's approval, joins the
-#           tailnet as an ephemeral tag:ci node, then `helm upgrade --install --atomic` with
+#   deploy  environment `production`: waits for a required reviewer's approval, joins
+#           NetBird as an ephemeral peer of the group ci (.github/actions/netbird-join), then `helm upgrade --install --atomic` with
 #           the immutable <sha> images (a failing upgrade rolls itself back). Then it checks
 #           the public site: health, CSP, HSTS, the new image actually running. If those
 #           checks fail, it rolls back explicitly (`helm rollback slax <previous revision>`).
@@ -16,8 +16,9 @@
 #           a Telegram problem never turns a deployment red.
 #
 # Environment `production` (Settings > Environments; docs/runbook.md): required reviewers,
-# deployment tags v* only. Secrets: TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET, PROD_KUBECONFIG
-# (base64, the namespace-scoped deployer of deploy/dev/deployer-rbac.yaml), TELEGRAM_BOT_TOKEN,
+# deployment tags v* only. Secrets: NB_SETUP_KEY, PROD_KUBECONFIG
+# (base64, the namespace-scoped deployer of deploy/dev/deployer-rbac.yaml, server
+# https://<slax-prod NetBird IP>:6443), TELEGRAM_BOT_TOKEN,
 # TELEGRAM_CHAT_ID. Variables: SLAX_FILES_BUCKET, SLAX_BACKUPS_BUCKET (printed by
 # deploy/aws/provision.sh).
 name: Release prod
@@ -151,14 +152,8 @@ jobs:
           sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
           helm version --short
 
-      - name: Join the tailnet (ephemeral, tag:ci)
-        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-
       - name: Kubeconfig (namespace-scoped deployer)
+        id: kubeconfig
         env:
           PROD_KUBECONFIG: ${{ secrets.PROD_KUBECONFIG }}
         run: |
@@ -166,13 +161,26 @@ jobs:
           umask 077
           printf '%s' "$PROD_KUBECONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
           echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+          # The API's NetBird address, from the kubeconfig itself (https://10.200.x.y:6443).
+          server="$(KUBECONFIG="$RUNNER_TEMP/kubeconfig" kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+          hostport="${server#https://}"; hostport="${hostport%%/*}"
+          [[ "$hostport" =~ ^[0-9.]+:[0-9]+$ ]] || { echo "::error::PROD_KUBECONFIG: server is '$server', expected https://<NetBird IPv4>:6443"; exit 1; }
+          echo "host=${hostport%:*}" >> "$GITHUB_OUTPUT"
+          echo "port=${hostport##*:}" >> "$GITHUB_OUTPUT"
+
+      - name: Join NetBird (ephemeral, group ci)
+        uses: ./.github/actions/netbird-join
+        with:
+          setup-key: ${{ secrets.NB_SETUP_KEY }}
+          target-host: ${{ steps.kubeconfig.outputs.host }}
+          target-port: ${{ steps.kubeconfig.outputs.port }}
 
       # The revision to go back to if the site is unhealthy after a successful upgrade.
       - name: Current release
         id: before
         run: |
           set -euo pipefail
-          # Only "release: not found" means a first install; any other error (tailnet, RBAC,
+          # Only "release: not found" means a first install; any other error (NetBird, RBAC,
           # API) stops here, so the rollback below can never be silently disabled.
           if status="$(helm status slax --namespace slax --output json 2> "$RUNNER_TEMP/helm-status.err")"; then
             revision="$(jq -r '.version' <<< "$status")"
@@ -243,9 +251,11 @@ jobs:
           fi
           echo "Rolled back to revision $PREVIOUS."
 
-      - name: Remove the kubeconfig
+      - name: Remove the kubeconfig, leave NetBird
         if: always()
-        run: rm -f "$RUNNER_TEMP/kubeconfig"
+        run: |
+          rm -f "$RUNNER_TEMP/kubeconfig"
+          if command -v netbird >/dev/null; then sudo netbird down || true; fi
 
       # The version, the short SHA and a link to this run: never a secret or any user data.
       # Same technique as deploy-dev.yml: the token is masked, passed through the environment

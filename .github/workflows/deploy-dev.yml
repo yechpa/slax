@@ -1,4 +1,4 @@
-# Continuous deployment to the development cluster (k3s on slax-dev, tailnet only).
+# Continuous deployment to the development cluster (k3s on slax-dev, NetBird only).
 #
 # Runs when the Images workflow has succeeded for a push to main: by then the
 # multi-architecture images ghcr.io/yechpa/slax-*:<sha> exist, so Helm never deploys a tag
@@ -7,15 +7,17 @@
 # so the `if` below accepts only runs of a push to main in this repository: never a pull
 # request (a fork's branch may be called main too).
 #
-# The runner joins the tailnet with an ephemeral node tagged tag:ci (Tailscale OAuth client),
-# which the tailnet policy lets reach slax-dev on 6443 (Kubernetes API) and 443 only, and
-# deploys with a kubeconfig limited to the slax namespace (deploy/dev/deployer-rbac.yaml).
+# The runner joins the self-hosted NetBird network as an ephemeral peer of the group ci
+# (.github/actions/netbird-join, setup key NB_SETUP_KEY), which the NetBird policy lets reach
+# slax-dev (group slax-dev) on 6443 (Kubernetes API) and 443 only, and deploys with a
+# kubeconfig limited to the slax namespace (deploy/dev/deployer-rbac.yaml) whose server is
+# slax-dev's NetBird address.
 # Whatever happens, the result goes to the administrators' Telegram chat; when Images did not
 # succeed (failed or timed out) for a push to main, the `skipped` job says that nothing was
 # deployed. A Telegram failure only warns: it never turns a deployment red.
 #
-# Secrets (repository or `dev` environment; deploy/dev/BOOTSTRAP.md): TS_OAUTH_CLIENT_ID,
-# TS_OAUTH_SECRET, DEV_KUBECONFIG (base64), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+# Secrets (repository or `dev` environment; deploy/dev/BOOTSTRAP.md): NB_SETUP_KEY,
+# DEV_KUBECONFIG (base64), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
 name: Deploy dev
 
 on:
@@ -65,14 +67,8 @@ jobs:
           sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
           helm version --short
 
-      - name: Join the tailnet (ephemeral, tag:ci)
-        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-
       - name: Kubeconfig (namespace-scoped deployer)
+        id: kubeconfig
         env:
           DEV_KUBECONFIG: ${{ secrets.DEV_KUBECONFIG }}
         run: |
@@ -80,6 +76,19 @@ jobs:
           umask 077
           printf '%s' "$DEV_KUBECONFIG" | base64 -d > "$RUNNER_TEMP/kubeconfig"
           echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+          # The API's NetBird address, from the kubeconfig itself (https://10.200.x.y:6443).
+          server="$(KUBECONFIG="$RUNNER_TEMP/kubeconfig" kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+          hostport="${server#https://}"; hostport="${hostport%%/*}"
+          [[ "$hostport" =~ ^[0-9.]+:[0-9]+$ ]] || { echo "::error::DEV_KUBECONFIG: server is '$server', expected https://<NetBird IPv4>:6443"; exit 1; }
+          echo "host=${hostport%:*}" >> "$GITHUB_OUTPUT"
+          echo "port=${hostport##*:}" >> "$GITHUB_OUTPUT"
+
+      - name: Join NetBird (ephemeral, group ci)
+        uses: ./.github/actions/netbird-join
+        with:
+          setup-key: ${{ secrets.NB_SETUP_KEY }}
+          target-host: ${{ steps.kubeconfig.outputs.host }}
+          target-port: ${{ steps.kubeconfig.outputs.port }}
 
       - name: helm upgrade --install (image tag ${{ github.event.workflow_run.head_sha }})
         run: |
@@ -94,9 +103,11 @@ jobs:
           curl --fail --silent --show-error --retry 30 --retry-delay 5 --retry-all-errors \
             --max-time 10 "$DEV_URL/api/v1/health"
 
-      - name: Remove the kubeconfig
+      - name: Remove the kubeconfig, leave NetBird
         if: always()
-        run: rm -f "$RUNNER_TEMP/kubeconfig"
+        run: |
+          rm -f "$RUNNER_TEMP/kubeconfig"
+          if command -v netbird >/dev/null; then sudo netbird down || true; fi
 
       # Success or failure, with the short SHA and a link to this run: never a secret or any
       # user data. The token never reaches a command line or the log: masked, passed through
