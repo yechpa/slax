@@ -5,7 +5,7 @@
 # touching k3s: systemctl reload slax-lan-guard (rebuilds the rules; a reload is not
 # propagated to k3s).
 [Unit]
-Description=Drop 80/443/6443 arriving on the LAN interfaces (dev is NetBird-only)
+Description=Drop 80/443/6443 arriving on the LAN interfaces, all but 443/6443 on NetBird (dev is NetBird-only)
 Wants=network-pre.target
 After=network-pre.target
 Before=network.target k3s.service

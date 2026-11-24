@@ -62,12 +62,12 @@ runs:
         fi
         echo "::add-mask::$NB_SETUP_KEY"
         # The daemon may take a moment to open its socket after `service start`.
-        for _ in $(seq 1 15); do netbird status >/dev/null 2>&1 && break; sleep 1; done
+        for _ in $(seq 1 15); do sudo netbird status >/dev/null 2>&1 && break; sleep 1; done
         sudo --preserve-env=NB_SETUP_KEY netbird up \
           --management-url https://netbird.yechpa.com \
           --hostname "gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
           --block-inbound --disable-dns
-        netbird status | grep -E '^(Management|Signal|Relays|NetBird IP|Peers count):' || true
+        sudo netbird status | grep -E '^(Management|Signal|Relays|NetBird IP|Peers count):' || true
         # The policy and the WireGuard path to the target come a few seconds after `up`.
         for i in $(seq 1 30); do
           if timeout 3 bash -c "exec 3<>/dev/tcp/$TARGET_HOST/$TARGET_PORT" 2>/dev/null; then
@@ -76,6 +76,6 @@ runs:
           fi
           sleep 2
         done
-        netbird status --detail || true
+        sudo netbird status --detail || true
         echo "::error::$TARGET_HOST:$TARGET_PORT is not reachable over NetBird: peer offline, or the ci policy (docs/runbook.md §3.2)."
         exit 1

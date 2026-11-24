@@ -12,7 +12,7 @@ RUN := $(DC) run --rm -T
 PYRUN := $(RUN) --build --quiet-build python-tools
 
 .DEFAULT_GOAL := help
-.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots icons e2e load load-smoke chart-lint images web-check backup-test monitor-test external-probe-test proxy-test aws-test edge-guard-test
+.PHONY: help env deps up down logs ps migrate shell test test-reverb lint fmt screenshots icons e2e load load-smoke chart-lint images web-check backup-test monitor-test external-probe-test proxy-test aws-test edge-guard-test lan-guard-test
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-11s %s\n", $$1, $$2}'
@@ -212,3 +212,6 @@ aws-test: ## Run deploy/aws/provision.sh against a local AWS emulator (moto): id
 
 edge-guard-test: ## Test deploy/aws/slax-edge-guard.sh (k3s ports dropped on the public interface, 80/443 kept)
 	deploy/aws/test/edge-guard-test.sh
+
+lan-guard-test: ## Test deploy/dev/slax-lan-guard.sh (80/443/6443 dropped on the LAN; only 443/6443 on the NetBird overlay)
+	deploy/dev/test/lan-guard-test.sh

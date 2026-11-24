@@ -75,7 +75,7 @@ install time).
    back here after it):
 
    ```sh
-   netbird status | grep 'NetBird IP'   # 10.200.x.y/16
+   sudo netbird status | grep 'NetBird IP'   # 10.200.x.y/16
    ```
 
 2. Write the configuration (replace `10.200.x.y`):
@@ -166,12 +166,20 @@ The overlay network is the owner's self-hosted NetBird (`https://netbird.yechpa.
    sudo apt-get update && sudo apt-get install -y netbird
    (umask 077; read -r -s -p 'Setup key: ' k; echo; printf '%s' "$k" > ~/.netbird-setup-key)
    sudo netbird up --management-url https://netbird.yechpa.com --hostname slax-dev \
-     --setup-key-file ~/.netbird-setup-key
+     --setup-key-file ~/.netbird-setup-key --disable-firewall
    shred -u ~/.netbird-setup-key
-   netbird status | grep 'NetBird IP'
+   sudo netbird status | grep 'NetBird IP'
    ```
 
    A peer joined with a setup key has no login expiry: nothing to disable.
+
+   **`--disable-firewall` is required on this node.** NetBird's own firewall marks the
+   traffic it allows and drops forwarded traffic whose mark changed, and k3s's network policy
+   engine (kube-router) adds bits to the mark of every packet bound for a pod: whatever
+   ServiceLB redirects to Traefik (443) is dropped, while 6443 (local) works. Changing the
+   mark range (`NB_FWMARK_BASE`) does not help. The LAN guard (4.1) filters `wt0` instead:
+   only TCP 443 and 6443 (the two policies above) and ICMP pass. Keep its
+   `OVERLAY_TCP_PORTS` in line with the policies towards `slax-dev`.
 4. The setup key CI joins with: Setup Keys → Create, name `github-ci`, **reusable**,
    **ephemeral** (each run's peer is deleted 10 minutes after it goes offline), auto-assigned
    group `ci`, expiry one year. Keep it for step 9 (`NB_SETUP_KEY`). The workflows join with
@@ -184,7 +192,7 @@ on NetBird can connect, and the certificate is obtained by DNS-01, so **no port 
 open to the Internet**.
 
 **YOU DO THIS**: in yechpa.com's DNS, two `A` records pointing to the NetBird IPv4 of
-`slax-dev` (`netbird status | grep 'NetBird IP'`):
+`slax-dev` (`sudo netbird status | grep 'NetBird IP'`):
 
 | Name                         | Type | Value        | What                                   |
 |------------------------------|------|--------------|----------------------------------------|
@@ -221,7 +229,7 @@ LAN as well: do 4.1 right after step 2 (NetBird, step 3, is not needed for it).
 
    ```sh
    sudo install -m 0755 deploy/dev/slax-lan-guard.sh /usr/local/sbin/slax-lan-guard
-   echo 'LAN_INTERFACES="enp0s31f6"' | sudo tee /etc/default/slax-lan-guard   # your interface(s), space separated
+   printf '%s\n' 'LAN_INTERFACES="enp0s31f6"' 'OVERLAY_INTERFACES="wt0"' | sudo tee /etc/default/slax-lan-guard   # your LAN interface(s), space separated; wt0 = NetBird
    sudo install -m 0644 deploy/dev/slax-lan-guard.service /etc/systemd/system/slax-lan-guard.service
    sudo tee /etc/systemd/system/k3s.service.d/lan-guard.conf >/dev/null <<'EOF'
    [Unit]
@@ -230,7 +238,7 @@ LAN as well: do 4.1 right after step 2 (NetBird, step 3, is not needed for it).
    EOF
    sudo systemctl daemon-reload
    sudo systemctl enable --now slax-lan-guard
-   sudo slax-lan-guard status          # every interface "guarded" (iptables, and ip6tables with IPv6)
+   sudo slax-lan-guard status          # every interface "guarded", wt0 "(overlay) guarded" (iptables, and ip6tables with IPv6)
    ```
 
 3. Prove it, from **another machine on the LAN** (NetBird off on it, or another device),

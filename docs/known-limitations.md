@@ -423,6 +423,11 @@ receives the channel's events until it disconnects.
   PostgreSQL and Redis restart only when their own settings change, not on an app deployment.
 - **A deployment does not wait for the CI tests.** Deploy dev follows the Images workflow on `main`; the tests ran
   on the pull request before the merge (require them with branch protection).
+- **On slax-dev, NetBird's own firewall is off** (`--disable-firewall`): it drops traffic that ServiceLB redirects to
+  Traefik, because k3s's kube-router rewrites the packet mark NetBird checks. The LAN guard filters `wt0` instead
+  (only TCP 443/6443 and ICMP), the same ports for every peer: the per-group detail of the NetBird policies is not
+  enforced on that node, only which peers can reach it at all. A port opened to `slax-dev` in a NetBird policy
+  also needs `OVERLAY_TCP_PORTS` in `/etc/default/slax-lan-guard`. Production is not affected (nothing forwarded from `wt0`).
 - **Dev is NetBird-only by a host firewall rule, not by k3s.** k3s's ServiceLB and API server listen on every node
   address; the mandatory LAN guard (`deploy/dev/slax-lan-guard.sh`, BOOTSTRAP.md step 4.1, required by k3s) drops
   80/443/6443 on the interfaces listed in `/etc/default/slax-lan-guard`. A new physical interface (USB adapter,
