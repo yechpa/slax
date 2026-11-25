@@ -29,6 +29,8 @@ spec:
         {{- include "slax.podSecurityContext" 10001 | nindent 8 }}
       # A job in progress may finish (Laravel's default job timeout is 60 s).
       terminationGracePeriodSeconds: 75
+      initContainers:
+        {{- include "slax.waitForRedis" . | nindent 8 }}
       containers:
         {{- include "slax.phpContainer" (dict "ctx" . "name" "queue" "resources" .Values.queue.resources "args" (list "php" "artisan" "queue:work" "--queue=default,push" "--tries=3" "--max-time=3600" "--sleep=1" "--no-interaction")) | nindent 8 }}
       volumes:

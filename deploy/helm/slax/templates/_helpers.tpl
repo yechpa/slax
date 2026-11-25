@@ -295,6 +295,33 @@ imagePullSecrets:
 {{- end -}}
 
 {{/*
+initContainers: entry that holds a Laravel pod until Redis answers PONG. After a node reboot
+every pod starts at once and Redis needs some seconds to load its append-only file; without
+it the first connections fail with "Connection refused" and each one sends a Telegram alert.
+*/}}
+{{- define "slax.waitForRedis" -}}
+- name: wait-for-redis
+  image: {{ .Values.redis.image }}
+  imagePullPolicy: IfNotPresent
+  command:
+    - sh
+    - -c
+    - until redis-cli -h {{ include "slax.name" (dict "ctx" . "component" "redis") }} -p 6379 ping 2>/dev/null | grep -q PONG; do sleep 2; done
+  env:
+    # redis-cli reads the password from here.
+    - name: REDISCLI_AUTH
+      valueFrom:
+        secretKeyRef:
+          name: {{ .Values.secretName }}
+          key: REDIS_PASSWORD
+  securityContext:
+    {{- include "slax.containerSecurityContext" 999 | nindent 4 }}
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { cpu: 100m, memory: 64Mi }
+{{- end -}}
+
+{{/*
 A Laravel process of the slax-app image: (dict "ctx" $ "name" "queue" "args" (list ...)
 "resources" {...}). The configuration from the ConfigMap, the secrets by key (all of them, or
 only "secretKeys" and "optionalSecretKeys" when given), writable storage/ and /tmp as emptyDir
