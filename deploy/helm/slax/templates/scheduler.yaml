@@ -27,6 +27,8 @@ spec:
       securityContext:
         {{- include "slax.podSecurityContext" 10001 | nindent 8 }}
       terminationGracePeriodSeconds: 60
+      initContainers:
+        {{- include "slax.waitForRedis" . | nindent 8 }}
       containers:
         {{- include "slax.phpContainer" (dict "ctx" . "name" "scheduler" "resources" .Values.scheduler.resources "args" (list "php" "artisan" "schedule:work" "--no-interaction")) | nindent 8 }}
       volumes:
